@@ -89,7 +89,7 @@ export default function AdminDashboard() {
                   className={cn(
                     "flex items-center space-x-3 px-4 py-3 rounded-lg text-sm font-medium transition-all",
                     isActive 
-                      ? "bg-venuea-brown text-white shadow-lg shadow-venuea-brown/20" 
+                      ? "bg-venuea-dark text-white shadow-lg shadow-venuea-dark/20" 
                       : "text-gray-500 hover:bg-gray-100 hover:text-gray-900"
                   )}
                 >
