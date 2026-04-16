@@ -9,6 +9,8 @@ import cookieParser from "cookie-parser";
 import dotenv from "dotenv";
 import multer from "multer";
 import fs from "fs";
+import speakeasy from "speakeasy";
+import QRCode from "qrcode";
 
 dotenv.config();
 
@@ -78,6 +80,13 @@ db.exec(`
     status TEXT DEFAULT 'pending',
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
+
+  CREATE TABLE IF NOT EXISTS admin_keys (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    key_value TEXT UNIQUE NOT NULL,
+    totp_secret TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
 `);
 
 // Add columns to existing products table if they don't exist (SQLite ALTER TABLE limitation workaround)
@@ -87,7 +96,13 @@ try { db.exec(`ALTER TABLE products ADD COLUMN dimensions TEXT`); } catch(e) {}
 try { db.exec(`ALTER TABLE products ADD COLUMN origin TEXT`); } catch(e) {}
 
 const JWT_SECRET = process.env.JWT_SECRET || "benua-secret-key-2024";
-const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD; // Plain text password from .env
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "benua-admin-123";
+
+// Seed initial admin key
+const adminKeyCount = db.prepare("SELECT COUNT(*) as count FROM admin_keys").get() as any;
+if (adminKeyCount.count === 0) {
+  db.prepare("INSERT INTO admin_keys (key_value) VALUES (?)").run(ADMIN_PASSWORD);
+}
 
 // Helper to hash password with SHA512
 function hashPassword(password: string) {
@@ -169,31 +184,214 @@ async function startServer() {
     res.json({ success: true });
   });
 
+  // --- OAuth APIs ---
+  const getRedirectUri = (req: express.Request, provider: string) => {
+    const protocol = req.headers['x-forwarded-proto'] || req.protocol;
+    const host = req.headers['x-forwarded-host'] || req.get('host');
+    return `${protocol}://${host}/api/auth/${provider}/callback`;
+  };
+
+  app.get("/api/auth/google/url", (req, res) => {
+    const redirectUri = getRedirectUri(req, 'google');
+    const params = new URLSearchParams({
+      client_id: process.env.GOOGLE_CLIENT_ID || '',
+      redirect_uri: redirectUri,
+      response_type: 'code',
+      scope: 'email profile',
+      access_type: 'offline',
+      prompt: 'consent'
+    });
+    res.json({ url: `https://accounts.google.com/o/oauth2/v2/auth?${params}` });
+  });
+
+  app.get("/api/auth/google/callback", async (req, res) => {
+    const { code } = req.query;
+    const redirectUri = getRedirectUri(req, 'google');
+    
+    try {
+      const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
+          code: code as string,
+          client_id: process.env.GOOGLE_CLIENT_ID || '',
+          client_secret: process.env.GOOGLE_CLIENT_SECRET || '',
+          redirect_uri: redirectUri,
+          grant_type: 'authorization_code'
+        })
+      });
+      const tokenData = await tokenRes.json();
+      
+      if (!tokenData.access_token) throw new Error('No access token');
+
+      const userRes = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', {
+        headers: { Authorization: `Bearer ${tokenData.access_token}` }
+      });
+      const userData = await userRes.json();
+      
+      const user = db.prepare("SELECT * FROM users WHERE email = ?").get(userData.email) as any;
+      
+      if (!user) {
+        res.send(`
+          <html><body><script>
+            if (window.opener) {
+              window.opener.postMessage({ type: 'OAUTH_ERROR', error: 'not_registered' }, '*');
+              window.close();
+            }
+          </script></body></html>
+        `);
+        return;
+      }
+
+      const token = jwt.sign({ id: user.id, role: "user" }, JWT_SECRET, { expiresIn: "24h" });
+      res.cookie("user_token", token, {
+        httpOnly: true,
+        secure: true,
+        sameSite: "none",
+        maxAge: 24 * 60 * 60 * 1000
+      });
+
+      res.send(`
+        <html><body><script>
+          if (window.opener) {
+            window.opener.postMessage({ type: 'OAUTH_SUCCESS' }, '*');
+            window.close();
+          }
+        </script></body></html>
+      `);
+    } catch (error) {
+      res.send(`
+        <html><body><script>
+          if (window.opener) {
+            window.opener.postMessage({ type: 'OAUTH_ERROR', error: 'server_error' }, '*');
+            window.close();
+          }
+        </script></body></html>
+      `);
+    }
+  });
+
+  app.get("/api/auth/naver/url", (req, res) => {
+    const redirectUri = getRedirectUri(req, 'naver');
+    const state = Math.random().toString(36).substring(7);
+    const params = new URLSearchParams({
+      client_id: process.env.NAVER_CLIENT_ID || '',
+      redirect_uri: redirectUri,
+      response_type: 'code',
+      state: state
+    });
+    res.json({ url: `https://nid.naver.com/oauth2.0/authorize?${params}` });
+  });
+
+  app.get("/api/auth/naver/callback", async (req, res) => {
+    const { code, state } = req.query;
+    
+    try {
+      const tokenRes = await fetch(`https://nid.naver.com/oauth2.0/token?grant_type=authorization_code&client_id=${process.env.NAVER_CLIENT_ID}&client_secret=${process.env.NAVER_CLIENT_SECRET}&code=${code as string}&state=${state as string}`);
+      const tokenData = await tokenRes.json();
+      
+      if (!tokenData.access_token) throw new Error('No access token');
+
+      const userRes = await fetch('https://openapi.naver.com/v1/nid/me', {
+        headers: { Authorization: `Bearer ${tokenData.access_token}` }
+      });
+      const userData = await userRes.json();
+      
+      if (userData.resultcode !== '00') throw new Error('Failed to get user profile');
+
+      const email = userData.response.email;
+      const user = db.prepare("SELECT * FROM users WHERE email = ?").get(email) as any;
+      
+      if (!user) {
+        res.send(`
+          <html><body><script>
+            if (window.opener) {
+              window.opener.postMessage({ type: 'OAUTH_ERROR', error: 'not_registered' }, '*');
+              window.close();
+            }
+          </script></body></html>
+        `);
+        return;
+      }
+
+      const token = jwt.sign({ id: user.id, role: "user" }, JWT_SECRET, { expiresIn: "24h" });
+      res.cookie("user_token", token, {
+        httpOnly: true,
+        secure: true,
+        sameSite: "none",
+        maxAge: 24 * 60 * 60 * 1000
+      });
+
+      res.send(`
+        <html><body><script>
+          if (window.opener) {
+            window.opener.postMessage({ type: 'OAUTH_SUCCESS' }, '*');
+            window.close();
+          }
+        </script></body></html>
+      `);
+    } catch (error) {
+      res.send(`
+        <html><body><script>
+          if (window.opener) {
+            window.opener.postMessage({ type: 'OAUTH_ERROR', error: 'server_error' }, '*');
+            window.close();
+          }
+        </script></body></html>
+      `);
+    }
+  });
+
   // --- API Routes ---
 
   // Auth
-  app.post("/api/admin/login", (req, res) => {
-    const { password } = req.body;
+  app.post("/api/admin/verify-key", async (req, res) => {
+    const { adminKey } = req.body;
+    const keyRecord = db.prepare("SELECT * FROM admin_keys WHERE key_value = ?").get(adminKey) as any;
     
-    if (!ADMIN_PASSWORD) {
-      return res.status(500).json({ error: "Admin password not configured in .env" });
+    if (!keyRecord) {
+      return res.status(401).json({ error: "유효하지 않은 관리자 Key입니다." });
     }
 
-    // Compare input hash with stored plain password's hash
-    const inputHash = hashPassword(password);
-    const targetHash = hashPassword(ADMIN_PASSWORD);
-    
-    if (inputHash === targetHash) {
-      const token = jwt.sign({ role: "admin" }, JWT_SECRET, { expiresIn: "24h" });
-      res.cookie("admin_token", token, {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === "production",
-        maxAge: 24 * 60 * 60 * 1000, // 24 hours
-      });
-      return res.json({ success: true });
+    if (!keyRecord.totp_secret) {
+      const secret = speakeasy.generateSecret({ name: 'Benua Admin' });
+      const qrCodeUrl = await QRCode.toDataURL(secret.otpauth_url!);
+      return res.json({ requiresSetup: true, secret: secret.base32, qrCodeUrl });
     } else {
-      return res.status(401).json({ error: "Invalid password" });
+      return res.json({ requiresSetup: false });
     }
+  });
+
+  app.post("/api/admin/verify-totp", (req, res) => {
+    const { adminKey, token, secret } = req.body;
+    const keyRecord = db.prepare("SELECT * FROM admin_keys WHERE key_value = ?").get(adminKey) as any;
+    
+    if (!keyRecord) return res.status(401).json({ error: "유효하지 않은 관리자 Key입니다." });
+
+    const totpSecret = keyRecord.totp_secret || secret;
+    if (!totpSecret) return res.status(400).json({ error: "TOTP 시크릿이 없습니다." });
+
+    const isValid = speakeasy.totp.verify({
+      secret: totpSecret,
+      encoding: 'base32',
+      token: token,
+      window: 1
+    });
+    
+    if (!isValid) return res.status(401).json({ error: "잘못된 인증 코드입니다." });
+
+    if (!keyRecord.totp_secret) {
+      db.prepare("UPDATE admin_keys SET totp_secret = ? WHERE id = ?").run(totpSecret, keyRecord.id);
+    }
+
+    const jwtToken = jwt.sign({ role: "admin", keyId: keyRecord.id }, JWT_SECRET, { expiresIn: "24h" });
+    res.cookie("admin_token", jwtToken, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "none",
+      maxAge: 24 * 60 * 60 * 1000,
+    });
+    res.json({ success: true });
   });
 
   app.post("/api/admin/logout", (req, res) => {
@@ -203,6 +401,35 @@ async function startServer() {
 
   app.get("/api/admin/check", authenticateAdmin, (req, res) => {
     res.json({ authenticated: true });
+  });
+
+  // Admin Keys Management
+  app.get("/api/admin/keys", authenticateAdmin, (req, res) => {
+    const keys = db.prepare("SELECT id, key_value, CASE WHEN totp_secret IS NULL THEN 0 ELSE 1 END as has_2fa, created_at FROM admin_keys ORDER BY created_at DESC").all();
+    res.json(keys);
+  });
+
+  app.post("/api/admin/keys", authenticateAdmin, (req, res) => {
+    const { keyValue } = req.body;
+    if (!keyValue) return res.status(400).json({ error: "Key 값을 입력해주세요." });
+    try {
+      db.prepare("INSERT INTO admin_keys (key_value) VALUES (?)").run(keyValue);
+      res.json({ success: true });
+    } catch (err: any) {
+      if (err.code === "SQLITE_CONSTRAINT_UNIQUE") {
+        return res.status(400).json({ error: "이미 존재하는 Key입니다." });
+      }
+      res.status(500).json({ error: "Key 추가 실패" });
+    }
+  });
+
+  app.delete("/api/admin/keys/:id", authenticateAdmin, (req, res) => {
+    const count = db.prepare("SELECT COUNT(*) as count FROM admin_keys").get() as any;
+    if (count.count <= 1) {
+      return res.status(400).json({ error: "최소 1개의 관리자 Key가 필요합니다." });
+    }
+    db.prepare("DELETE FROM admin_keys WHERE id = ?").run(req.params.id);
+    res.json({ success: true });
   });
 
   // Products
@@ -267,6 +494,18 @@ async function startServer() {
       res.json({ success: true, order_number });
     } catch (err) {
       res.status(500).json({ error: "주문 생성 실패" });
+    }
+  });
+
+  app.get("/api/orders/me", (req, res) => {
+    const token = req.cookies.user_token;
+    if (!token) return res.status(401).json({ error: "Unauthorized" });
+    try {
+      const decoded: any = jwt.verify(token, JWT_SECRET);
+      const orders = db.prepare("SELECT * FROM orders WHERE user_id = ? ORDER BY created_at DESC").all(decoded.id);
+      res.json(orders);
+    } catch (err) {
+      res.status(500).json({ error: "Failed to fetch orders" });
     }
   });
 

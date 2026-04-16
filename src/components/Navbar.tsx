@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Link, useLocation } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { ShoppingCart, User, Menu, X } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { cn } from "../lib/utils";
@@ -7,6 +7,7 @@ import { cn } from "../lib/utils";
 export default function Navbar() {
   const [isScrolled, setIsScrolled] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [user, setUser] = useState<any>(null);
   const location = useLocation();
 
   useEffect(() => {
@@ -16,6 +17,12 @@ export default function Navbar() {
     window.addEventListener("scroll", handleScroll);
     return () => window.removeEventListener("scroll", handleScroll);
   }, []);
+
+  useEffect(() => {
+    fetch("/api/auth/me")
+      .then(res => res.json())
+      .then(data => setUser(data.user));
+  }, [location.pathname]);
 
   const navLinks = [
     { name: "컬렉션", path: "/" },
@@ -58,9 +65,15 @@ export default function Navbar() {
               0
             </span>
           </Link>
-          <Link to="/login" className="text-venuea-dark hover:text-venuea-gold transition-colors">
-            <User size={20} />
-          </Link>
+          {user ? (
+            <Link to="/profile" className="text-[11px] font-bold uppercase tracking-widest text-venuea-dark hover:text-venuea-gold transition-colors">
+              마이페이지
+            </Link>
+          ) : (
+            <Link to="/login" className="text-venuea-dark hover:text-venuea-gold transition-colors">
+              <User size={20} />
+            </Link>
+          )}
           <button
             className="md:hidden text-venuea-dark"
             onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
@@ -90,6 +103,23 @@ export default function Navbar() {
                   {link.name}
                 </Link>
               ))}
+              {user ? (
+                <Link
+                  to="/profile"
+                  onClick={() => setIsMobileMenuOpen(false)}
+                  className="text-lg font-medium text-venuea-brown"
+                >
+                  마이페이지
+                </Link>
+              ) : (
+                <Link
+                  to="/login"
+                  onClick={() => setIsMobileMenuOpen(false)}
+                  className="text-lg font-medium text-venuea-brown"
+                >
+                  로그인
+                </Link>
+              )}
             </div>
           </motion.div>
         )}

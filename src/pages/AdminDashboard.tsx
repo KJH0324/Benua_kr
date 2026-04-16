@@ -15,7 +15,8 @@ import {
   Truck,
   Trash2,
   Loader2,
-  X
+  X,
+  AlertCircle
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { cn, formatPrice } from "../lib/utils";
@@ -64,7 +65,7 @@ export default function AdminDashboard() {
     { name: "상품 관리", path: "/admin/products", icon: Package },
     { name: "주문 내역", path: "/admin/orders", icon: ShoppingBag },
     { name: "고객 관리", path: "/admin/customers", icon: Users },
-    { name: "설정", path: "/admin/settings", icon: Settings },
+    { name: "관리자 키", path: "/admin/keys", icon: Settings },
   ];
 
   const handleLogout = async () => {
@@ -116,6 +117,7 @@ export default function AdminDashboard() {
           <Route path="/" element={<AdminOverview />} />
           <Route path="/products" element={<AdminProducts />} />
           <Route path="/orders" element={<AdminOrders />} />
+          <Route path="/keys" element={<AdminKeys />} />
         </Routes>
       </main>
     </div>
@@ -475,6 +477,128 @@ function AdminOrders() {
       </header>
       <div className="bg-white p-20 text-center rounded-xl border border-gray-200">
         <p className="text-gray-400">주문 내역이 없습니다.</p>
+      </div>
+    </div>
+  );
+}
+
+function AdminKeys() {
+  const [keys, setKeys] = useState<any[]>([]);
+  const [newKey, setNewKey] = useState("");
+
+  const fetchKeys = async () => {
+    const res = await fetch("/api/admin/keys");
+    if (res.ok) {
+      setKeys(await res.json());
+    }
+  };
+
+  useEffect(() => {
+    fetchKeys();
+  }, []);
+
+  const handleAddKey = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newKey.trim()) return;
+    
+    try {
+      const res = await fetch("/api/admin/keys", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ keyValue: newKey })
+      });
+      if (res.ok) {
+        toast.success("관리자 Key가 추가되었습니다.");
+        setNewKey("");
+        fetchKeys();
+      } else {
+        const data = await res.json();
+        toast.error(data.error || "추가 실패");
+      }
+    } catch {
+      toast.error("서버 오류");
+    }
+  };
+
+  const handleDeleteKey = async (id: number) => {
+    if (!confirm("이 관리자 Key를 삭제하시겠습니까?")) return;
+    try {
+      const res = await fetch(`/api/admin/keys/${id}`, { method: "DELETE" });
+      if (res.ok) {
+        toast.success("관리자 Key가 삭제되었습니다.");
+        fetchKeys();
+      } else {
+        const data = await res.json();
+        toast.error(data.error || "삭제 실패");
+      }
+    } catch {
+      toast.error("서버 오류");
+    }
+  };
+
+  return (
+    <div className="space-y-6 max-w-4xl">
+      <header>
+        <h1 className="text-2xl font-serif font-bold text-gray-900">관리자 Key 관리</h1>
+        <p className="text-sm text-gray-500 mt-1">시스템에 접근할 수 있는 관리자 Key와 2FA 상태를 관리합니다.</p>
+      </header>
+
+      <div className="bg-white p-6 rounded-xl border border-gray-200">
+        <h2 className="text-sm font-bold uppercase tracking-widest text-gray-400 mb-4">새 Key 추가</h2>
+        <form onSubmit={handleAddKey} className="flex gap-4">
+          <input 
+            type="text" 
+            value={newKey}
+            onChange={e => setNewKey(e.target.value)}
+            placeholder="새로운 관리자 Key 입력"
+            className="flex-1 border border-gray-200 rounded-lg px-4 py-2 focus:outline-none focus:border-venuea-gold transition-colors"
+          />
+          <button type="submit" className="bg-venuea-dark text-white px-6 py-2 rounded-lg font-medium hover:bg-venuea-gold transition-colors">
+            추가
+          </button>
+        </form>
+      </div>
+
+      <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+        <table className="w-full text-left text-sm">
+          <thead className="bg-gray-50 text-gray-500">
+            <tr>
+              <th className="px-6 py-4 font-medium">관리자 Key</th>
+              <th className="px-6 py-4 font-medium">2FA 상태</th>
+              <th className="px-6 py-4 font-medium">생성일</th>
+              <th className="px-6 py-4 font-medium text-right">관리</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-100">
+            {keys.map((key) => (
+              <tr key={key.id} className="hover:bg-gray-50/50">
+                <td className="px-6 py-4 font-mono text-venuea-dark">{key.key_value}</td>
+                <td className="px-6 py-4">
+                  {key.has_2fa ? (
+                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-green-50 text-green-700">
+                      <CheckCircle2 size={12} /> 등록됨
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-yellow-50 text-yellow-700">
+                      <AlertCircle size={12} /> 미등록
+                    </span>
+                  )}
+                </td>
+                <td className="px-6 py-4 text-gray-500">
+                  {new Date(key.created_at).toLocaleDateString()}
+                </td>
+                <td className="px-6 py-4 text-right">
+                  <button 
+                    onClick={() => handleDeleteKey(key.id)}
+                    className="text-red-500 hover:text-red-700 p-2 hover:bg-red-50 rounded-lg transition-colors"
+                  >
+                    <Trash2 size={16} />
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </div>
     </div>
   );

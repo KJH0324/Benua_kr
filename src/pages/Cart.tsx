@@ -23,8 +23,9 @@ export default function Cart() {
   const subtotal = items.reduce((acc, item) => acc + item.price * item.quantity, 0);
   
   // Shipping logic
+  const baseShipping = subtotal >= 50000 ? 0 : 3000;
   const isJejuOrIsland = user?.address?.includes("제주") || user?.address?.includes("도서");
-  const shipping = isJejuOrIsland ? 5000 : 0;
+  const shipping = baseShipping + (isJejuOrIsland ? 5000 : 0);
   const total = subtotal + shipping;
 
   const updateQuantity = (id: string, delta: number) => {
@@ -37,38 +38,13 @@ export default function Cart() {
     setItems(items.filter(item => item.id !== id));
   };
 
-  const handleCheckout = async () => {
+  const handleCheckout = () => {
     if (!user) {
       toast.error("주문을 진행하려면 로그인이 필요합니다.");
       navigate("/login");
       return;
     }
-
-    try {
-      const response = await fetch("/api/orders", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          user_id: user.id,
-          customer_name: user.name,
-          customer_email: user.email,
-          shipping_address: `${user.zipcode} ${user.address} ${user.detail_address}`,
-          total_amount: total,
-          shipping_fee: shipping
-        })
-      });
-
-      if (response.ok) {
-        toast.success("주문이 완료되었습니다.");
-        setItems([]);
-        // In a real app, redirect to an order success page
-        navigate("/shop");
-      } else {
-        toast.error("주문 처리 중 오류가 발생했습니다.");
-      }
-    } catch (error) {
-      toast.error("서버와 통신할 수 없습니다.");
-    }
+    navigate("/checkout", { state: { items, subtotal, shipping, total } });
   };
 
   if (items.length === 0) {
@@ -174,7 +150,7 @@ export default function Cart() {
                           exit={{ opacity: 0, y: 5 }}
                           className="absolute left-0 top-6 w-48 bg-venuea-dark text-white text-[10px] p-3 rounded shadow-xl z-10"
                         >
-                          기본 배송비는 무료입니다.<br/>
+                          기본 배송비는 3,000원이며, 5만원 이상 구매 시 무료입니다.<br/>
                           제주 및 도서산간 지역은 5,000원의 추가 배송비가 부과됩니다.
                         </motion.div>
                       )}
