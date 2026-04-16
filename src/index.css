@@ -1,0 +1,30 @@
+@import url('https://fonts.googleapis.com/css2?family=Nanum+Myeongjo:wght@400;700;800&family=Noto+Sans+KR:wght@100;300;400;500;700;900&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-serif: "Nanum Myeongjo", serif;
+  --font-sans: "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans KR", sans-serif;
+
+  --color-venuea-gold: #C5A059;
+  --color-venuea-dark: #1A1A1B;
+  --color-venuea-muted: #888888;
+  --color-venuea-bg: #FFFFFF;
+  
+  --color-primary: var(--color-venuea-dark);
+  --color-secondary: var(--color-venuea-gold);
+}
+
+@layer base {
+  body {
+    @apply bg-white text-venuea-dark font-sans antialiased;
+  }
+  
+  h1, h2, h3, h4, h5, h6 {
+    @apply font-sans font-bold;
+  }
+}
+
+.motion-impact {
+  @apply overflow-hidden relative;
+}
+
