@@ -18,6 +18,7 @@ export default function Profile() {
         const userData = await userRes.json();
         
         if (!userData.user) {
+          console.log("No user found, redirecting to login");
           navigate("/login");
           return;
         }
@@ -26,8 +27,15 @@ export default function Profile() {
 
         const ordersRes = await fetch("/api/orders/me");
         const ordersData = await ordersRes.json();
-        setOrders(ordersData);
+        
+        if (Array.isArray(ordersData)) {
+          setOrders(ordersData);
+        } else {
+          console.error("Orders data is not an array:", ordersData);
+          setOrders([]);
+        }
       } catch (error) {
+        console.error("Failed to fetch profile data:", error);
         toast.error("데이터를 불러오는데 실패했습니다.");
       } finally {
         setIsLoading(false);
@@ -49,7 +57,7 @@ export default function Profile() {
   };
 
   if (isLoading) return <div className="pt-32 min-h-screen flex justify-center text-venuea-dark uppercase tracking-widest text-xs">Loading Profile...</div>;
-  if (!user) return null;
+  if (!user) return <div className="pt-32 min-h-screen flex justify-center text-venuea-dark uppercase tracking-widest text-xs">Redirecting to login...</div>;
 
   const googleLogo = (
     <svg width="20" height="20" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">

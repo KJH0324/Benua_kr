@@ -17,43 +17,46 @@ import Terms from "./pages/Terms";
 import Privacy from "./pages/Privacy";
 import Checkout from "./pages/Checkout";
 import { motion, AnimatePresence } from "motion/react";
+import ErrorBoundary from "./components/ErrorBoundary";
 
 export default function App() {
   return (
-    <Router>
-      <div className="flex flex-col min-h-screen bg-white">
-        <Navbar />
-        <main className="flex-grow">
-          <AnimatePresence mode="wait">
-            <Routes>
-              <Route path="/" element={<Home />} />
-              <Route path="/shop" element={<Shop />} />
-              <Route path="/product/:id" element={<ProductDetail />} />
-              <Route path="/about" element={<About />} />
-              <Route path="/contact" element={<Contact />} />
-              <Route path="/terms" element={<Terms />} />
-              <Route path="/privacy" element={<Privacy />} />
-              <Route path="/cart" element={<Cart />} />
-              <Route path="/checkout" element={<Checkout />} />
-              <Route path="/track" element={<TrackOrder />} />
-              <Route path="/profile" element={<Profile />} />
-              <Route path="/login" element={<Login />} />
-              <Route path="/admin/login" element={<AdminLogin />} />
-              <Route path="/admin/*" element={<AdminDashboard />} />
-            </Routes>
-          </AnimatePresence>
-        </main>
-        <Footer />
-        <Toaster 
-          position="top-center" 
-          toastOptions={{
-            classNames: {
-              error: 'bg-[#FF4000] text-white border-[#FF4000]',
-              warning: 'bg-[#FF4000] text-white border-[#FF4000]',
-            }
-          }} 
-        />
-      </div>
-    </Router>
+    <ErrorBoundary>
+      <Router>
+        <div className="flex flex-col min-h-screen bg-white">
+          <Navbar />
+          <main className="flex-grow">
+            <AnimatePresence mode="wait">
+              <Routes>
+                <Route path="/" element={<Home />} />
+                <Route path="/shop" element={<Shop />} />
+                <Route path="/product/:id" element={<ProductDetail />} />
+                <Route path="/about" element={<About />} />
+                <Route path="/contact" element={<Contact />} />
+                <Route path="/terms" element={<Terms />} />
+                <Route path="/privacy" element={<Privacy />} />
+                <Route path="/cart" element={<Cart />} />
+                <Route path="/checkout" element={<Checkout />} />
+                <Route path="/track" element={<TrackOrder />} />
+                <Route path="/profile" element={<Profile />} />
+                <Route path="/login" element={<Login />} />
+                <Route path="/admin/login" element={<AdminLogin />} />
+                <Route path="/admin/*" element={<AdminDashboard />} />
+              </Routes>
+            </AnimatePresence>
+          </main>
+          <Footer />
+          <Toaster 
+            position="top-center" 
+            toastOptions={{
+              classNames: {
+                error: 'bg-[#FF4000] text-white border-[#FF4000]',
+                warning: 'bg-[#FF4000] text-white border-[#FF4000]',
+              }
+            }} 
+          />
+        </div>
+      </Router>
+    </ErrorBoundary>
   );
 }

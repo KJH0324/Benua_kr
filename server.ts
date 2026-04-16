@@ -465,7 +465,7 @@ async function startServer() {
     try {
       const info = db.prepare(
         "INSERT INTO products (name, price, description, image_url, description_image_url, category, stock, material, dimensions, origin) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
-      ).run(name, price, parseInt(price), description, image_url, description_image_url, category, parseInt(stock) || 0, material, dimensions, origin);
+      ).run(name, parseInt(price), description, image_url, description_image_url, category, parseInt(stock) || 0, material, dimensions, origin);
       res.json({ id: info.lastInsertRowid, success: true });
     } catch (err) {
       res.status(500).json({ error: "Failed to create product" });
