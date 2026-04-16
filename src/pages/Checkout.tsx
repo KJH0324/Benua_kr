@@ -78,7 +78,8 @@ export default function Checkout() {
           customer_email: user.email,
           shipping_address: `[${formData.zipcode}] ${formData.address} ${formData.detail_address}`,
           total_amount: total,
-          shipping_fee: shipping
+          shipping_fee: shipping,
+          items: items
         })
       });
 

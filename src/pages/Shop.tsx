@@ -13,6 +13,7 @@ interface Product {
   price: number;
   discount_rate?: number;
   image_url: string;
+  stock?: number;
 }
 
 export default function Shop() {
@@ -106,6 +107,13 @@ export default function Shop() {
                     {product.discount_rate && product.discount_rate > 0 && (
                       <div className="absolute top-4 left-4 bg-red-600 text-white px-2 py-1 text-[10px] font-bold uppercase tracking-widest">
                         {product.discount_rate}% OFF
+                      </div>
+                    )}
+                    {product.stock !== undefined && product.stock <= 0 && (
+                      <div className="absolute inset-0 bg-white/60 backdrop-blur-[2px] flex items-center justify-center z-10">
+                        <span className="bg-venuea-dark text-white px-4 py-2 text-xs font-bold uppercase tracking-widest shadow-xl">
+                          품절
+                        </span>
                       </div>
                     )}
                     <div className="absolute inset-0 bg-venuea-dark/0 group-hover:bg-venuea-dark/5 transition-colors duration-500" />

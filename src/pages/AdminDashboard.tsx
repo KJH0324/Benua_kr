@@ -213,16 +213,35 @@ export default function AdminDashboard() {
 
 function AdminOverview() {
   const [products, setProducts] = useState<Product[]>([]);
+  const [orders, setOrders] = useState<any[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    fetch("/api/products").then(res => res.json()).then(setProducts);
+    const fetchData = async () => {
+      try {
+        const [prodRes, orderRes] = await Promise.all([
+          fetch("/api/products"),
+          fetch("/api/admin/orders")
+        ]);
+        if (prodRes.ok) setProducts(await prodRes.json());
+        if (orderRes.ok) setOrders(await orderRes.json());
+      } catch (err) {
+        console.error(err);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+    fetchData();
   }, []);
 
+  const totalRevenue = orders.reduce((acc, order) => acc + (order.status === 'completed' ? order.total_amount : 0), 0);
+  const activeOrders = orders.filter(o => o.status !== 'completed' && o.status !== 'refunded').length;
+
   const stats = [
-    { name: "총 매출", value: "₩0", change: "0%", icon: ShoppingBag },
-    { name: "활성 주문", value: "0", change: "0", icon: Clock },
-    { name: "전체 상품", value: products.length.toString(), change: "+0", icon: Package },
-    { name: "신규 고객", value: "0", change: "0%", icon: Users },
+    { name: "누적 매출 (확정)", value: formatPrice(totalRevenue), change: "Status: Completed", icon: ShoppingBag },
+    { name: "활성 주문", value: activeOrders.toString(), change: "Pending/Paid/Shipping", icon: Clock },
+    { name: "전체 상품", value: products.length.toString(), change: `In Stock: ${products.filter(p => (p.stock || 0) > 0).length}`, icon: Package },
+    { name: "전체 주문", value: orders.length.toString(), change: "Total count", icon: Users },
   ];
 
   return (
@@ -626,12 +645,51 @@ function AdminProducts() {
 }
 
 function AdminOrders() {
+  const [orders, setOrders] = useState<any[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+
+  const fetchOrders = async () => {
+    try {
+      const res = await fetch("/api/admin/orders");
+      if (res.ok) {
+        setOrders(await res.json());
+      }
+    } catch {
+      toast.error("주문 목록을 가져오지 못했습니다.");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchOrders();
+  }, []);
+
+  const updateStatus = async (id: number, status: string) => {
+    try {
+      const res = await fetch(`/api/admin/orders/${id}/status`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status })
+      });
+      if (res.ok) {
+        toast.success("주문 상태가 변경되었습니다.");
+        fetchOrders();
+      } else {
+        toast.error("변경 실패");
+      }
+    } catch {
+      toast.error("서버 오류");
+    }
+  };
+
   const handleClearTestOrders = async () => {
     if (!confirm("테스트 과정에서 생성된 모든 주문을 삭제하시겠습니까? 이 작업은 되돌릴 수 없습니다.")) return;
     try {
       const response = await fetch("/api/admin/orders/test", { method: "DELETE" });
       if (response.ok) {
         toast.success("모든 테스트 주문이 삭제되었습니다.");
+        fetchOrders();
       } else {
         toast.error("삭제 실패");
       }
@@ -652,8 +710,248 @@ function AdminOrders() {
           <span>테스트 주문 전체 삭제</span>
         </button>
       </header>
-      <div className="bg-white p-20 text-center rounded-xl border border-gray-200">
-        <p className="text-gray-400">주문 내역이 없습니다.</p>
+
+      <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+        <table className="w-full text-left text-sm">
+          <thead className="bg-gray-50 text-gray-500">
+            <tr>
+              <th className="px-6 py-4 font-medium">주문정보</th>
+              <th className="px-6 py-4 font-medium">고객명/연락처</th>
+              <th className="px-6 py-4 font-medium">결제금액</th>
+              <th className="px-6 py-4 font-medium">상태</th>
+              <th className="px-6 py-4 font-medium text-right">관리</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-100">
+            {orders.map((order) => (
+              <tr key={order.id} className="hover:bg-gray-50 transition-colors">
+                <td className="px-6 py-4">
+                  <p className="font-bold text-gray-900">{order.order_number}</p>
+                  <p className="text-[10px] text-gray-400 mt-1">{new Date(order.created_at).toLocaleString()}</p>
+                  <div className="mt-2 text-xs text-gray-500">
+                    {order.items?.map((item: any) => (
+                      <div key={item.id}>{item.name} x {item.quantity}</div>
+                    ))}
+                  </div>
+                </td>
+                <td className="px-6 py-4">
+                  <p className="font-medium text-gray-900">{order.customer_name}</p>
+                  <p className="text-xs text-gray-500">{order.customer_email}</p>
+                </td>
+                <td className="px-6 py-4">
+                  <p className="font-bold text-venuea-dark">{formatPrice(order.total_amount)}</p>
+                  {order.used_points > 0 && <p className="text-[10px] text-red-500 font-medium">-{formatPrice(order.used_points)} (Point)</p>}
+                </td>
+                <td className="px-6 py-4">
+                  <span className={cn(
+                    "px-2 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider",
+                    order.status === 'pending' && "bg-yellow-50 text-yellow-600",
+                    order.status === 'paid' && "bg-blue-50 text-blue-600",
+                    order.status === 'shipping' && "bg-purple-50 text-purple-600",
+                    order.status === 'completed' && "bg-green-50 text-green-600",
+                    order.status === 'refunded' && "bg-red-50 text-red-600"
+                  )}>
+                    {order.status}
+                  </span>
+                </td>
+                <td className="px-6 py-4 text-right">
+                  <select 
+                    value={order.status}
+                    onChange={(e) => updateStatus(order.id, e.target.value)}
+                    className="border border-gray-200 rounded p-1 text-xs focus:outline-none focus:border-venuea-gold"
+                  >
+                    <option value="pending">Pending</option>
+                    <option value="paid">Paid</option>
+                    <option value="shipping">Shipping</option>
+                    <option value="completed">Completed</option>
+                    <option value="refunded">Refunded</option>
+                  </select>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {orders.length === 0 && !isLoading && (
+          <div className="p-20 text-center text-gray-400">주문 내역이 없습니다.</div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function AdminCoupons() {
+  const [coupons, setCoupons] = useState<any[]>([]);
+  const [newCoupon, setNewCoupon] = useState({
+    name: "",
+    code: "",
+    type: "FIXED",
+    value: 0,
+    min_order_amount: 0,
+    max_discount_amount: 0
+  });
+
+  const fetchCoupons = async () => {
+    const res = await fetch("/api/admin/coupons");
+    if (res.ok) setCoupons(await res.json());
+  };
+
+  useEffect(() => { fetchCoupons(); }, []);
+
+  const handleAddCoupon = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      const res = await fetch("/api/admin/coupons", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(newCoupon)
+      });
+      if (res.ok) {
+        toast.success("쿠폰이 생성되었습니다.");
+        setNewCoupon({ name: "", code: "", type: "FIXED", value: 0, min_order_amount: 0, max_discount_amount: 0 });
+        fetchCoupons();
+      } else {
+        toast.error("생성 실패");
+      }
+    } catch { toast.error("서버 오류"); }
+  };
+
+  return (
+    <div className="space-y-12">
+      <h1 className="text-2xl font-serif font-bold text-gray-900">쿠폰 관리</h1>
+      
+      <div className="bg-white p-8 rounded-xl border border-gray-200 shadow-sm max-w-2xl">
+        <h2 className="text-sm font-bold uppercase tracking-widest text-gray-400 mb-6">신규 쿠폰 생성</h2>
+        <form onSubmit={handleAddCoupon} className="space-y-4">
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-1">
+              <label className="text-[10px] font-bold text-gray-400 uppercase">쿠폰 이름</label>
+              <input type="text" value={newCoupon.name} onChange={e => setNewCoupon({...newCoupon, name: e.target.value})} className="w-full border p-2 rounded focus:outline-none" required />
+            </div>
+            <div className="space-y-1">
+              <label className="text-[10px] font-bold text-gray-400 uppercase">쿠폰 코드</label>
+              <input type="text" value={newCoupon.code} onChange={e => setNewCoupon({...newCoupon, code: e.target.value})} className="w-full border p-2 rounded focus:outline-none" required />
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-1">
+              <label className="text-[10px] font-bold text-gray-400 uppercase">유형</label>
+              <select value={newCoupon.type} onChange={e => setNewCoupon({...newCoupon, type: e.target.value})} className="w-full border p-2 rounded focus:outline-none">
+                <option value="FIXED">금액 할인</option>
+                <option value="PERCENT">퍼센트 할인</option>
+                <option value="SHIPPING">무료 배송</option>
+              </select>
+            </div>
+            <div className="space-y-1">
+              <label className="text-[10px] font-bold text-gray-400 uppercase">할인 수치 (원/%)</label>
+              <input type="number" value={newCoupon.value} onChange={e => setNewCoupon({...newCoupon, value: parseInt(e.target.value)})} className="w-full border p-2 rounded focus:outline-none" />
+            </div>
+          </div>
+          <button className="w-full bg-venuea-dark text-white py-3 rounded-lg font-bold hover:bg-venuea-gold transition-all mt-4">쿠폰 발행</button>
+        </form>
+      </div>
+
+      <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+        <table className="w-full text-left text-sm">
+          <thead className="bg-gray-50 text-gray-500">
+            <tr>
+              <th className="px-6 py-4 font-medium uppercase tracking-widest text-[10px]">쿠폰명/코드</th>
+              <th className="px-6 py-4 font-medium uppercase tracking-widest text-[10px]">유형/가격</th>
+              <th className="px-6 py-4 font-medium uppercase tracking-widest text-[10px]">상태</th>
+              <th className="px-6 py-4 font-medium uppercase tracking-widest text-[10px] text-right">생성일</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-100">
+            {coupons.map((coupon) => (
+              <tr key={coupon.id}>
+                <td className="px-6 py-4">
+                  <p className="font-bold text-gray-900">{coupon.name}</p>
+                  <p className="text-[10px] font-mono text-gray-400 uppercase">{coupon.code}</p>
+                </td>
+                <td className="px-6 py-4">
+                  <p className="font-medium">{coupon.type === 'PERCENT' ? `${coupon.value}%` : formatPrice(coupon.value)}</p>
+                  <p className="text-[10px] text-gray-400">{coupon.type}</p>
+                </td>
+                <td className="px-6 py-4">
+                  <span className="px-2 py-0.5 rounded-full bg-green-50 text-green-600 text-[10px] font-bold uppercase tracking-wider">Active</span>
+                </td>
+                <td className="px-6 py-4 text-right text-gray-400 text-[10px]">
+                  {new Date(coupon.created_at).toLocaleDateString()}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function AdminUserPoints() {
+  const [pointData, setPointData] = useState({ email: "", amount: 0 });
+
+  const handleGrantPoints = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      const res = await fetch("/api/admin/users/points", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(pointData)
+      });
+      if (res.ok) {
+        toast.success(`${pointData.email}님께 ${pointData.amount} 포인트가 지급되었습니다.`);
+        setPointData({ email: "", amount: 0 });
+      } else {
+        const d = await res.json();
+        toast.error(d.error || "지급 실패");
+      }
+    } catch { toast.error("서버 오류"); }
+  };
+
+  return (
+    <div className="space-y-12">
+      <h1 className="text-2xl font-serif font-bold text-gray-900">회원/포인트 관리</h1>
+      
+      <div className="bg-white p-8 rounded-xl border border-gray-200 shadow-sm max-w-xl">
+        <h2 className="text-sm font-bold uppercase tracking-widest text-gray-400 mb-6">임의 포인트 지급</h2>
+        <form onSubmit={handleGrantPoints} className="space-y-6">
+          <div className="space-y-1">
+            <label className="text-[10px] font-bold text-gray-400 uppercase">사용자 이메일</label>
+            <input 
+              type="email" 
+              value={pointData.email}
+              onChange={e => setPointData({...pointData, email: e.target.value})}
+              className="w-full border-b border-gray-200 py-3 text-lg font-bold focus:outline-none focus:border-venuea-gold transition-colors"
+              placeholder="example@venuea.com"
+              required
+            />
+          </div>
+          <div className="space-y-1">
+            <label className="text-[10px] font-bold text-gray-400 uppercase">지급 포인트 (차감 시 마이너스 입력)</label>
+            <div className="relative">
+              <input 
+                type="number" 
+                value={pointData.amount}
+                onChange={e => setPointData({...pointData, amount: parseInt(e.target.value)})}
+                className="w-full border-b border-gray-200 py-3 text-lg font-bold pr-12 focus:outline-none focus:border-venuea-gold transition-colors"
+                required
+              />
+              <span className="absolute right-0 bottom-3 font-bold text-gray-400">P</span>
+            </div>
+          </div>
+          <button className="w-full bg-venuea-dark text-white py-4 rounded-xl font-bold hover:bg-venuea-gold transition-all shadow-lg hover:shadow-venuea-gold/20 mt-4">포인트 적용하기</button>
+        </form>
+      </div>
+
+      <div className="bg-amber-50 rounded-xl p-8 border border-amber-100 max-w-xl">
+        <h3 className="text-amber-800 font-bold mb-4 flex items-center space-x-2">
+          <span>등급 산정 기준 확인</span>
+        </h3>
+        <ul className="space-y-3 text-sm text-amber-900/70">
+          <li className="flex justify-between"><span>Sand</span> <span>신규 가입</span></li>
+          <li className="flex justify-between font-bold border-b border-amber-200 pb-1"><span>Green</span> <span>10만원 이상</span></li>
+          <li className="flex justify-between font-bold border-b border-amber-200 pb-1"><span>Black</span> <span>50만원 이상</span></li>
+          <li className="flex justify-between font-bold text-black"><span>The Black</span> <span>100만원 이상</span></li>
+        </ul>
       </div>
     </div>
   );

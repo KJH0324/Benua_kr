@@ -55,7 +55,50 @@ db.exec(`
     zipcode TEXT,
     address TEXT,
     detail_address TEXT,
+    points INTEGER DEFAULT 0,
+    grade TEXT DEFAULT 'Sand',
+    total_spent_6m INTEGER DEFAULT 0,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
+  CREATE TABLE IF NOT EXISTS coupons (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    code TEXT UNIQUE,
+    type TEXT NOT NULL, -- FIXED, PERCENT, SHIPPING, WELCOME_GIFT
+    value INTEGER DEFAULT 0,
+    min_order_amount INTEGER DEFAULT 0,
+    max_discount_amount INTEGER DEFAULT 0,
+    is_active INTEGER DEFAULT 1,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
+  CREATE TABLE IF NOT EXISTS user_coupons (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER,
+    coupon_id INTEGER,
+    is_used INTEGER DEFAULT 0,
+    used_at DATETIME,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    expires_at DATETIME,
+    FOREIGN KEY(user_id) REFERENCES users(id),
+    FOREIGN KEY(coupon_id) REFERENCES coupons(id)
+  );
+
+  CREATE TABLE IF NOT EXISTS reviews (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    product_id INTEGER,
+    user_id INTEGER,
+    order_id INTEGER,
+    rating INTEGER,
+    content TEXT,
+    image_url TEXT,
+    type TEXT, -- TEXT, PHOTO
+    points_earned INTEGER DEFAULT 0,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(product_id) REFERENCES products(id),
+    FOREIGN KEY(user_id) REFERENCES users(id),
+    FOREIGN KEY(order_id) REFERENCES orders(id)
   );
 
   CREATE TABLE IF NOT EXISTS products (
@@ -84,8 +127,22 @@ db.exec(`
     shipping_address TEXT,
     total_amount INTEGER,
     shipping_fee INTEGER DEFAULT 0,
-    status TEXT DEFAULT 'pending',
+    used_points INTEGER DEFAULT 0,
+    used_coupon_id INTEGER,
+    earned_points INTEGER DEFAULT 0,
+    status TEXT DEFAULT 'pending', -- pending, paid, shipping, completed, refunded
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
+  CREATE TABLE IF NOT EXISTS order_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    order_id INTEGER,
+    product_id INTEGER,
+    name TEXT,
+    price INTEGER,
+    quantity INTEGER,
+    image_url TEXT,
+    FOREIGN KEY(order_id) REFERENCES orders(id)
   );
 
   CREATE TABLE IF NOT EXISTS admin_keys (
@@ -123,14 +180,16 @@ try { db.exec(`ALTER TABLE inquiries ADD COLUMN status TEXT DEFAULT 'pending'`);
 try { db.exec(`ALTER TABLE inquiries ADD COLUMN reply_message TEXT`); } catch(e) {}
 try { db.exec(`ALTER TABLE inquiries ADD COLUMN replied_at DATETIME`); } catch(e) {}
 
+// Defensive ALTER TABLE for users
+try { db.exec(`ALTER TABLE users ADD COLUMN points INTEGER DEFAULT 0`); } catch(e) {}
+try { db.exec(`ALTER TABLE users ADD COLUMN grade TEXT DEFAULT 'Sand'`); } catch(e) {}
+try { db.exec(`ALTER TABLE users ADD COLUMN total_spent_6m INTEGER DEFAULT 0`); } catch(e) {}
+
 // Defensive ALTER TABLE for orders
-try { db.exec(`ALTER TABLE orders ADD COLUMN user_id INTEGER`); } catch(e) {}
-try { db.exec(`ALTER TABLE orders ADD COLUMN customer_name TEXT`); } catch(e) {}
-try { db.exec(`ALTER TABLE orders ADD COLUMN customer_email TEXT`); } catch(e) {}
-try { db.exec(`ALTER TABLE orders ADD COLUMN shipping_address TEXT`); } catch(e) {}
-try { db.exec(`ALTER TABLE orders ADD COLUMN total_amount INTEGER`); } catch(e) {}
-try { db.exec(`ALTER TABLE orders ADD COLUMN shipping_fee INTEGER DEFAULT 0`); } catch(e) {}
-try { db.exec(`ALTER TABLE orders ADD COLUMN status TEXT DEFAULT 'pending'`); } catch(e) {}
+try { db.exec(`ALTER TABLE orders ADD COLUMN used_points INTEGER DEFAULT 0`); } catch(e) {}
+try { db.exec(`ALTER TABLE orders ADD COLUMN used_coupon_id INTEGER`); } catch(e) {}
+try { db.exec(`ALTER TABLE orders ADD COLUMN earned_points INTEGER DEFAULT 0`); } catch(e) {}
+try { db.exec(`ALTER TABLE orders ADD COLUMN order_data_json TEXT`); } catch(e) {}
 
 // Add columns to users table for social linkage
 try { db.exec(`ALTER TABLE users ADD COLUMN google_id TEXT`); } catch(e) {}
@@ -702,17 +761,47 @@ async function startServer() {
 
   // Orders
   app.post("/api/orders", (req, res) => {
-    const { user_id, customer_name, customer_email, shipping_address, total_amount, shipping_fee } = req.body;
+    const { user_id, customer_name, customer_email, shipping_address, total_amount, shipping_fee, items, used_points, used_coupon_id } = req.body;
     const order_number = `ORD-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
     
     try {
-      const info = db.prepare(
-        "INSERT INTO orders (order_number, user_id, customer_name, customer_email, shipping_address, total_amount, shipping_fee) VALUES (?, ?, ?, ?, ?, ?, ?)"
-      ).run(order_number, user_id, customer_name, customer_email, shipping_address, total_amount, shipping_fee);
-      
+      const transaction = db.transaction(() => {
+        // 1. Create Order
+        const info = db.prepare(
+          "INSERT INTO orders (order_number, user_id, customer_name, customer_email, shipping_address, total_amount, shipping_fee, used_points, used_coupon_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
+        ).run(order_number, user_id, customer_name, customer_email, shipping_address, total_amount, shipping_fee, used_points || 0, used_coupon_id || null);
+        
+        const orderId = info.lastInsertRowid;
+
+        // 2. Add Order Items and Reduce Stock
+        if (items && Array.isArray(items)) {
+          for (const item of items) {
+            db.prepare(
+              "INSERT INTO order_items (order_id, product_id, name, price, quantity, image_url) VALUES (?, ?, ?, ?, ?, ?)"
+            ).run(orderId, item.id, item.name, item.price, item.quantity, item.image);
+
+            db.prepare("UPDATE products SET stock = MAX(0, stock - ?) WHERE id = ?").run(item.quantity, item.id);
+          }
+        }
+
+        // 3. Deduct Points
+        if (user_id && used_points > 0) {
+            db.prepare("UPDATE users SET points = points - ? WHERE id = ?").run(used_points, user_id);
+        }
+
+        // 4. Mark Coupon Used
+        if (user_id && used_coupon_id) {
+            db.prepare("UPDATE user_coupons SET is_used = 1, used_at = CURRENT_TIMESTAMP WHERE id = ? AND user_id = ?").run(used_coupon_id, user_id);
+        }
+
+        return orderId;
+      });
+
+      transaction();
       res.json({ success: true, order_number });
-    } catch (err) {
-      res.status(500).json({ error: "주문 생성 실패" });
+    } catch (err: any) {
+      console.error(err);
+      res.status(500).json({ error: "주문 생성 실패: " + err.message });
     }
   });
 
@@ -722,10 +811,156 @@ async function startServer() {
     try {
       const decoded: any = jwt.verify(token, JWT_SECRET);
       const orders = db.prepare("SELECT * FROM orders WHERE user_id = ? ORDER BY created_at DESC").all(decoded.id);
+      for (const order of orders as any) {
+          order.items = db.prepare("SELECT * FROM order_items WHERE order_id = ?").all(order.id);
+      }
+      res.json(orders);
+    } catch (err) {
+      res.status(500).json({ error: "주문 내역 조회 실패" });
+    }
+  });
+
+  app.get("/api/admin/orders", authenticateAdmin, (req, res) => {
+    try {
+      const orders = db.prepare("SELECT * FROM orders ORDER BY created_at DESC").all();
+      for (const order of orders as any) {
+        order.items = db.prepare("SELECT * FROM order_items WHERE order_id = ?").all(order.id);
+      }
       res.json(orders);
     } catch (err) {
       res.status(500).json({ error: "Failed to fetch orders" });
     }
+  });
+
+  app.post("/api/admin/orders/:id/status", authenticateAdmin, (req, res) => {
+    const { status } = req.body;
+    const { id } = req.params;
+    try {
+      const order = db.prepare("SELECT * FROM orders WHERE id = ?").get(id) as any;
+      if (!order) return res.status(404).json({ error: "Order not found" });
+
+      db.prepare("UPDATE orders SET status = ? WHERE id = ?").run(status, id);
+
+      // Point rewarding on completion
+      if (status === 'completed' && order.user_id) {
+          const user = db.prepare("SELECT * FROM users WHERE id = ?").get(order.user_id) as any;
+          let rate = 0.01;
+          if (user.grade === 'Green') rate = 0.03;
+          if (user.grade === 'Black') rate = 0.05;
+          if (user.grade === 'The Black') rate = 0.07;
+          
+          const earned = Math.floor(order.total_amount * rate);
+          db.prepare("UPDATE orders SET earned_points = ? WHERE id = ?").run(earned, id);
+          db.prepare("UPDATE users SET points = points + ?, total_spent_6m = total_spent_6m + ? WHERE id = ?").run(earned, order.total_amount, order.user_id);
+          
+          // Re-evaluate Grade
+          const updatedUser = db.prepare("SELECT * FROM users WHERE id = ?").get(order.user_id) as any;
+          let newGrade = 'Sand';
+          if (updatedUser.total_spent_6m >= 1000000) newGrade = 'The Black';
+          else if (updatedUser.total_spent_6m >= 500000) newGrade = 'Black';
+          else if (updatedUser.total_spent_6m >= 100000) newGrade = 'Green';
+          
+          if (newGrade !== updatedUser.grade) {
+              db.prepare("UPDATE users SET grade = ? WHERE id = ?").run(newGrade, order.user_id);
+          }
+      }
+      
+      if (status === 'refunded' && order.user_id) {
+          db.prepare("UPDATE users SET points = points - ?, total_spent_6m = total_spent_6m - ? WHERE id = ?").run(order.earned_points || 0, order.total_amount, order.user_id);
+      }
+
+      res.json({ success: true });
+    } catch (err) {
+      res.status(500).json({ error: "상태 변경 실패" });
+    }
+  });
+
+  // Coupons
+  app.get("/api/admin/coupons", authenticateAdmin, (req, res) => {
+    const coupons = db.prepare("SELECT * FROM coupons ORDER BY created_at DESC").all();
+    res.json(coupons);
+  });
+
+  app.post("/api/admin/coupons", authenticateAdmin, (req, res) => {
+    const { name, code, type, value, min_order_amount, max_discount_amount } = req.body;
+    try {
+      db.prepare(
+        "INSERT INTO coupons (name, code, type, value, min_order_amount, max_discount_amount) VALUES (?, ?, ?, ?, ?, ?)"
+      ).run(name, code, type, value, min_order_amount, max_discount_amount);
+      res.json({ success: true });
+    } catch (err) {
+      res.status(500).json({ error: "쿠폰 생성 실패" });
+    }
+  });
+
+  app.get("/api/coupons/me", (req, res) => {
+      const token = req.cookies.user_token;
+      if (!token) return res.status(401).json({ error: "Unauthorized" });
+      try {
+          const decoded: any = jwt.verify(token, JWT_SECRET);
+          const coupons = db.prepare(`
+              SELECT uc.id as user_coupon_id, c.*, uc.expires_at, uc.is_used 
+              FROM user_coupons uc 
+              JOIN coupons c ON uc.coupon_id = c.id 
+              WHERE uc.user_id = ? AND uc.is_used = 0 AND (uc.expires_at IS NULL OR uc.expires_at > CURRENT_TIMESTAMP)
+          `).all(decoded.id);
+          res.json(coupons);
+      } catch (err) {
+          res.status(500).json({ error: "쿠폰 조회 실패" });
+      }
+  });
+
+  app.post("/api/admin/users/points", authenticateAdmin, (req, res) => {
+      const { email, amount } = req.body;
+      try {
+          const user = db.prepare("SELECT * FROM users WHERE email = ?").get(email) as any;
+          if (!user) return res.status(404).json({ error: "User not found" });
+          db.prepare("UPDATE users SET points = points + ? WHERE id = ?").run(amount, user.id);
+          res.json({ success: true });
+      } catch (err) {
+          res.status(500).json({ error: "포인트 지급 실패" });
+      }
+  });
+
+  // Reviews
+  app.post("/api/reviews", (req, res) => {
+      const token = req.cookies.user_token;
+      if (!token) return res.status(401).json({ error: "Unauthorized" });
+      const { order_id, product_id, rating, content, image_url } = req.body;
+      try {
+          const decoded: any = jwt.verify(token, JWT_SECRET);
+          const user = db.prepare("SELECT * FROM users WHERE id = ?").get(decoded.id) as any;
+          
+          let points = 100;
+          if (image_url) points = 500;
+          if (user.grade === 'Black' || user.grade === 'The Black') {
+              points = image_url ? 2000 : 500;
+          }
+          
+          db.prepare(
+              "INSERT INTO reviews (product_id, user_id, order_id, rating, content, image_url, type, points_earned) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+          ).run(product_id, user.id, order_id, rating, content, image_url, image_url ? 'PHOTO' : 'TEXT', points);
+          
+          db.prepare("UPDATE users SET points = points + ? WHERE id = ?").run(points, user.id);
+          res.json({ success: true, points_earned: points });
+      } catch (err) {
+          res.status(500).json({ error: "리뷰 작성 실패" });
+      }
+  });
+
+  app.get("/api/products/:id/reviews", (req, res) => {
+      try {
+          const reviews = db.prepare(`
+              SELECT r.*, u.name as user_name 
+              FROM reviews r 
+              JOIN users u ON r.user_id = u.id 
+              WHERE r.product_id = ? 
+              ORDER BY r.created_at DESC
+          `).all(req.params.id);
+          res.json(reviews);
+      } catch (err) {
+          res.status(500).json({ error: "리뷰 조회 실패" });
+      }
   });
 
   app.delete("/api/admin/orders/test", authenticateAdmin, (req, res) => {

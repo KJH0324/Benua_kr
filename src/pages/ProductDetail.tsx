@@ -197,21 +197,6 @@ export default function ProductDetail() {
                   <Heart size={20} />
                 </button>
               </div>
-
-              <div className="grid grid-cols-3 gap-4 pt-4">
-                <div className="text-center space-y-2">
-                  <Truck size={20} className="mx-auto text-venuea-gold" />
-                  <p className="text-[10px] font-bold uppercase tracking-widest text-venuea-dark/60">무료 배송</p>
-                </div>
-                <div className="text-center space-y-2">
-                  <ShieldCheck size={20} className="mx-auto text-venuea-gold" />
-                  <p className="text-[10px] font-bold uppercase tracking-widest text-venuea-dark/60">2년 보증</p>
-                </div>
-                <div className="text-center space-y-2">
-                  <RotateCcw size={20} className="mx-auto text-venuea-gold" />
-                  <p className="text-[10px] font-bold uppercase tracking-widest text-venuea-dark/60">30일 반품</p>
-                </div>
-              </div>
             </div>
           </div>
         </div>
