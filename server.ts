@@ -37,7 +37,12 @@ const storage = multer.diskStorage({
   },
 });
 
-const upload = multer({ storage });
+const upload = multer({ 
+  storage,
+  limits: {
+    fileSize: 50 * 1024 * 1024 // 50MB
+  }
+});
 
 // Initialize tables
 db.exec(`
@@ -87,6 +92,18 @@ db.exec(`
     totp_secret TEXT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
+
+  CREATE TABLE IF NOT EXISTS inquiries (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    email TEXT NOT NULL,
+    subject TEXT NOT NULL,
+    message TEXT NOT NULL,
+    status TEXT DEFAULT 'pending',
+    reply_message TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    replied_at DATETIME
+  );
 `);
 
 // Add columns to existing products table if they don't exist (SQLite ALTER TABLE limitation workaround)
@@ -94,6 +111,10 @@ try { db.exec(`ALTER TABLE products ADD COLUMN stock INTEGER DEFAULT 0`); } catc
 try { db.exec(`ALTER TABLE products ADD COLUMN material TEXT`); } catch(e) {}
 try { db.exec(`ALTER TABLE products ADD COLUMN dimensions TEXT`); } catch(e) {}
 try { db.exec(`ALTER TABLE products ADD COLUMN origin TEXT`); } catch(e) {}
+
+// Add columns to users table for social linkage
+try { db.exec(`ALTER TABLE users ADD COLUMN google_id TEXT`); } catch(e) {}
+try { db.exec(`ALTER TABLE users ADD COLUMN naver_id TEXT`); } catch(e) {}
 
 const JWT_SECRET = process.env.JWT_SECRET || "benua-secret-key-2024";
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "benua-admin-123";
@@ -113,7 +134,8 @@ async function startServer() {
   const app = express();
   const PORT = 3000;
 
-  app.use(express.json());
+  app.use(express.json({ limit: "50mb" }));
+  app.use(express.urlencoded({ limit: "50mb", extended: true }));
   app.use(cookieParser());
   app.use("/uploads", express.static(path.join(process.cwd(), "uploads")));
 
@@ -133,15 +155,21 @@ async function startServer() {
 
   // --- User Auth APIs ---
   app.post("/api/auth/register", (req, res) => {
-    const { email, password, name, phone, zipcode, address, detail_address } = req.body;
+    const { email, password, name, phone, zipcode, address, detail_address, google_id, naver_id } = req.body;
     try {
       const hashedPassword = hashPassword(password);
       const info = db.prepare(
-        "INSERT INTO users (email, password, name, phone, zipcode, address, detail_address) VALUES (?, ?, ?, ?, ?, ?, ?)"
-      ).run(email, hashedPassword, name, phone, zipcode, address, detail_address);
+        "INSERT INTO users (email, password, name, phone, zipcode, address, detail_address, google_id, naver_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
+      ).run(email, hashedPassword, name, phone, zipcode, address, detail_address, google_id || null, naver_id || null);
       
       const token = jwt.sign({ id: info.lastInsertRowid, role: "user" }, JWT_SECRET, { expiresIn: "24h" });
-      res.cookie("user_token", token, { httpOnly: true, secure: process.env.NODE_ENV === "production" });
+      
+      res.cookie("user_token", token, {
+        httpOnly: true,
+        secure: true,
+        sameSite: "none",
+        maxAge: 24 * 60 * 60 * 1000
+      });
       res.json({ success: true });
     } catch (err: any) {
       if (err.code === "SQLITE_CONSTRAINT_UNIQUE") {
@@ -172,7 +200,7 @@ async function startServer() {
     if (!token) return res.json({ user: null });
     try {
       const decoded: any = jwt.verify(token, JWT_SECRET);
-      const user = db.prepare("SELECT id, name, email, phone, zipcode, address, detail_address FROM users WHERE id = ?").get(decoded.id);
+      const user = db.prepare("SELECT id, name, email, phone, zipcode, address, detail_address, google_id, naver_id FROM users WHERE id = ?").get(decoded.id);
       res.json({ user });
     } catch (err) {
       res.json({ user: null });
@@ -184,59 +212,115 @@ async function startServer() {
     res.json({ success: true });
   });
 
+  app.put("/api/auth/me", (req, res) => {
+    const token = req.cookies.user_token;
+    if (!token) return res.status(401).json({ error: "로그인이 필요합니다." });
+    
+    try {
+      const decoded: any = jwt.verify(token, JWT_SECRET);
+      const { name, phone, zipcode, address, detail_address } = req.body;
+      
+      db.prepare(
+        "UPDATE users SET name = ?, phone = ?, zipcode = ?, address = ?, detail_address = ? WHERE id = ?"
+      ).run(name, phone, zipcode, address, detail_address, decoded.id);
+      
+      res.json({ success: true });
+    } catch (err) {
+      res.status(500).json({ error: "정보 수정 실패" });
+    }
+  });
+
   // --- OAuth APIs ---
   const getRedirectUri = (req: express.Request, provider: string) => {
-    const protocol = req.headers['x-forwarded-proto'] || req.protocol;
-    const host = req.headers['x-forwarded-host'] || req.get('host');
+    // In many proxy environments, the protocol might be incorrectly reported as http.
+    // We force https if the host is a .run.app domain (AI Studio environment).
+    let protocol = req.headers["x-forwarded-proto"] || req.protocol;
+    let host = req.headers["x-forwarded-host"] || req.get("host") || "";
+    
+    if (host.includes(".run.app")) {
+      protocol = "https";
+    }
+    
+    // Ensure no trailing slash issues or unexpected double slashes
     return `${protocol}://${host}/api/auth/${provider}/callback`;
   };
 
   app.get("/api/auth/google/url", (req, res) => {
-    const redirectUri = getRedirectUri(req, 'google');
+    const clientId = process.env.GOOGLE_CLIENT_ID;
+    if (!clientId) {
+      return res.status(500).json({ error: "Google Client ID is not configured" });
+    }
+    const redirectUri = getRedirectUri(req, "google");
     const params = new URLSearchParams({
-      client_id: process.env.GOOGLE_CLIENT_ID || '',
+      client_id: clientId,
       redirect_uri: redirectUri,
-      response_type: 'code',
-      scope: 'email profile',
-      access_type: 'offline',
-      prompt: 'consent'
+      response_type: "code",
+      scope: "email profile",
+      access_type: "offline",
+      prompt: "consent"
     });
     res.json({ url: `https://accounts.google.com/o/oauth2/v2/auth?${params}` });
   });
 
   app.get("/api/auth/google/callback", async (req, res) => {
     const { code } = req.query;
-    const redirectUri = getRedirectUri(req, 'google');
+    const redirectUri = getRedirectUri(req, "google");
+    const existingToken = req.cookies.user_token;
     
     try {
-      const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      const tokenRes = await fetch("https://oauth2.googleapis.com/token", {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
         body: new URLSearchParams({
           code: code as string,
-          client_id: process.env.GOOGLE_CLIENT_ID || '',
-          client_secret: process.env.GOOGLE_CLIENT_SECRET || '',
+          client_id: process.env.GOOGLE_CLIENT_ID || "",
+          client_secret: process.env.GOOGLE_CLIENT_SECRET || "",
           redirect_uri: redirectUri,
-          grant_type: 'authorization_code'
+          grant_type: "authorization_code"
         })
       });
       const tokenData = await tokenRes.json();
       
-      if (!tokenData.access_token) throw new Error('No access token');
+      if (!tokenData.access_token) {
+        console.error("Google Token Exchange Failed:", tokenData);
+        throw new Error("No access token");
+      }
 
-      const userRes = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', {
+      const userRes = await fetch("https://www.googleapis.com/oauth2/v2/userinfo", {
         headers: { Authorization: `Bearer ${tokenData.access_token}` }
       });
       const userData = await userRes.json();
       
-      const user = db.prepare("SELECT * FROM users WHERE email = ?").get(userData.email) as any;
+      // Handle linking if logged in
+      if (existingToken) {
+        try {
+          const decoded: any = jwt.verify(existingToken, JWT_SECRET);
+          db.prepare("UPDATE users SET google_id = ? WHERE id = ?").run(userData.id, decoded.id);
+          res.send(`<html><body><script>if (window.opener) { window.opener.postMessage({ type: 'OAUTH_LINK_SUCCESS', provider: 'google' }, '*'); window.close(); }</script></body></html>`);
+          return;
+        } catch (e) {
+          // Token invalid, proceed as login
+        }
+      }
+
+      // Try login by google_id first, then email
+      let user = db.prepare("SELECT * FROM users WHERE google_id = ?").get(userData.id) as any;
+      if (!user) {
+        user = db.prepare("SELECT * FROM users WHERE email = ?").get(userData.email) as any;
+        if (user) {
+          // Auto-link if email matches
+          db.prepare("UPDATE users SET google_id = ? WHERE id = ?").run(userData.id, user.id);
+        }
+      }
       
       if (!user) {
         res.send(`
           <html><body><script>
             if (window.opener) {
-              window.opener.postMessage({ type: 'OAUTH_ERROR', error: 'not_registered' }, '*');
+              window.opener.postMessage({ type: 'OAUTH_ERROR', error: 'not_registered', email: '${userData.email}', socialId: '${userData.id}', provider: 'google' }, '*');
               window.close();
+            } else {
+              window.location.href = '/login?error=not_registered&email=${userData.email}&socialId=${userData.id}&provider=google';
             }
           </script></body></html>
         `);
@@ -256,15 +340,20 @@ async function startServer() {
           if (window.opener) {
             window.opener.postMessage({ type: 'OAUTH_SUCCESS' }, '*');
             window.close();
+          } else {
+            window.location.href = '/profile';
           }
         </script></body></html>
       `);
     } catch (error) {
+      console.error("Google Callback Error:", error);
       res.send(`
         <html><body><script>
           if (window.opener) {
             window.opener.postMessage({ type: 'OAUTH_ERROR', error: 'server_error' }, '*');
             window.close();
+          } else {
+            window.location.href = '/login?error=server_error';
           }
         </script></body></html>
       `);
@@ -272,12 +361,16 @@ async function startServer() {
   });
 
   app.get("/api/auth/naver/url", (req, res) => {
-    const redirectUri = getRedirectUri(req, 'naver');
+    const clientId = process.env.NAVER_CLIENT_ID;
+    if (!clientId) {
+      return res.status(500).json({ error: "Naver Client ID is not configured" });
+    }
+    const redirectUri = getRedirectUri(req, "naver");
     const state = Math.random().toString(36).substring(7);
     const params = new URLSearchParams({
-      client_id: process.env.NAVER_CLIENT_ID || '',
+      client_id: clientId,
       redirect_uri: redirectUri,
-      response_type: 'code',
+      response_type: "code",
       state: state
     });
     res.json({ url: `https://nid.naver.com/oauth2.0/authorize?${params}` });
@@ -285,29 +378,58 @@ async function startServer() {
 
   app.get("/api/auth/naver/callback", async (req, res) => {
     const { code, state } = req.query;
+    const redirectUri = getRedirectUri(req, "naver");
+    const existingToken = req.cookies.user_token;
     
     try {
-      const tokenRes = await fetch(`https://nid.naver.com/oauth2.0/token?grant_type=authorization_code&client_id=${process.env.NAVER_CLIENT_ID}&client_secret=${process.env.NAVER_CLIENT_SECRET}&code=${code as string}&state=${state as string}`);
+      const tokenRes = await fetch(`https://nid.naver.com/oauth2.0/token?grant_type=authorization_code&client_id=${process.env.NAVER_CLIENT_ID}&client_secret=${process.env.NAVER_CLIENT_SECRET}&code=${code as string}&state=${state as string}&redirect_uri=${encodeURIComponent(redirectUri)}`);
       const tokenData = await tokenRes.json();
       
-      if (!tokenData.access_token) throw new Error('No access token');
+      if (!tokenData.access_token) {
+        console.error("Naver Token Exchange Failed:", tokenData);
+        throw new Error("No access token");
+      }
 
-      const userRes = await fetch('https://openapi.naver.com/v1/nid/me', {
+      const userRes = await fetch("https://openapi.naver.com/v1/nid/me", {
         headers: { Authorization: `Bearer ${tokenData.access_token}` }
       });
       const userData = await userRes.json();
       
-      if (userData.resultcode !== '00') throw new Error('Failed to get user profile');
+      if (userData.resultcode !== "00") throw new Error("Failed to get user profile");
 
+      const socialId = userData.response.id;
       const email = userData.response.email;
-      const user = db.prepare("SELECT * FROM users WHERE email = ?").get(email) as any;
+
+      // Handle linking if logged in
+      if (existingToken) {
+        try {
+          const decoded: any = jwt.verify(existingToken, JWT_SECRET);
+          db.prepare("UPDATE users SET naver_id = ? WHERE id = ?").run(socialId, decoded.id);
+          res.send(`<html><body><script>if (window.opener) { window.opener.postMessage({ type: 'OAUTH_LINK_SUCCESS', provider: 'naver' }, '*'); window.close(); }</script></body></html>`);
+          return;
+        } catch (e) {
+          // Token invalid, proceed as login
+        }
+      }
+
+      // Try login by naver_id first, then email
+      let user = db.prepare("SELECT * FROM users WHERE naver_id = ?").get(socialId) as any;
+      if (!user) {
+        user = db.prepare("SELECT * FROM users WHERE email = ?").get(email) as any;
+        if (user) {
+          // Auto-link if email matches
+          db.prepare("UPDATE users SET naver_id = ? WHERE id = ?").run(socialId, user.id);
+        }
+      }
       
       if (!user) {
         res.send(`
           <html><body><script>
             if (window.opener) {
-              window.opener.postMessage({ type: 'OAUTH_ERROR', error: 'not_registered' }, '*');
+              window.opener.postMessage({ type: 'OAUTH_ERROR', error: 'not_registered', email: '${email}', socialId: '${socialId}', provider: 'naver' }, '*');
               window.close();
+            } else {
+              window.location.href = '/login?error=not_registered&email=${email}&socialId=${socialId}&provider=naver';
             }
           </script></body></html>
         `);
@@ -327,15 +449,20 @@ async function startServer() {
           if (window.opener) {
             window.opener.postMessage({ type: 'OAUTH_SUCCESS' }, '*');
             window.close();
+          } else {
+            window.location.href = '/profile';
           }
         </script></body></html>
       `);
     } catch (error) {
+      console.error("Naver Callback Error:", error);
       res.send(`
         <html><body><script>
           if (window.opener) {
             window.opener.postMessage({ type: 'OAUTH_ERROR', error: 'server_error' }, '*');
             window.close();
+          } else {
+            window.location.href = '/login?error=server_error';
           }
         </script></body></html>
       `);
@@ -459,16 +586,27 @@ async function startServer() {
     const { name, price, description, category, stock, material, dimensions, origin } = req.body;
     const files = req.files as { [fieldname: string]: Express.Multer.File[] };
     
+    // Validate required fields
+    if (!name || isNaN(parseInt(price))) {
+      return res.status(400).json({ error: "상품명과 가격은 필수이며, 가격은 숫자여야 합니다." });
+    }
+
     const image_url = files["image"] ? `/uploads/${files["image"][0].filename}` : null;
     const description_image_url = files["description_image"] ? `/uploads/${files["description_image"][0].filename}` : null;
 
     try {
+      const parsedPrice = parseInt(price);
+      const parsedStock = parseInt(stock) || 0;
+
       const info = db.prepare(
         "INSERT INTO products (name, price, description, image_url, description_image_url, category, stock, material, dimensions, origin) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
-      ).run(name, parseInt(price), description, image_url, description_image_url, category, parseInt(stock) || 0, material, dimensions, origin);
+      ).run(name, parsedPrice, description, image_url, description_image_url, category, parsedStock, material, dimensions, origin);
+      
+      console.log("Product created successfully:", name, "ID:", info.lastInsertRowid);
       res.json({ id: info.lastInsertRowid, success: true });
-    } catch (err) {
-      res.status(500).json({ error: "Failed to create product" });
+    } catch (err: any) {
+      console.error("Failed to create product:", err);
+      res.status(500).json({ error: "상품 등록에 실패했습니다: " + err.message });
     }
   });
 
@@ -515,6 +653,45 @@ async function startServer() {
       res.json({ success: true });
     } catch (err) {
       res.status(500).json({ error: "테스트 주문 삭제 실패" });
+    }
+  });
+
+  // Inquiries
+  app.post("/api/inquiries", (req, res) => {
+    const { name, email, subject, message } = req.body;
+    try {
+      db.prepare(
+        "INSERT INTO inquiries (name, email, subject, message) VALUES (?, ?, ?, ?)"
+      ).run(name, email, subject, message);
+      res.json({ success: true });
+    } catch (err) {
+      res.status(500).json({ error: "Inquiry submission failed" });
+    }
+  });
+
+  app.get("/api/admin/inquiries", authenticateAdmin, (req, res) => {
+    try {
+      const inquiries = db.prepare("SELECT * FROM inquiries ORDER BY created_at DESC").all();
+      res.json(inquiries);
+    } catch (err) {
+      res.status(500).json({ error: "Failed to fetch inquiries" });
+    }
+  });
+
+  app.post("/api/admin/inquiries/:id/reply", authenticateAdmin, (req, res) => {
+    const { replyMessage } = req.body;
+    const { id } = req.params;
+    try {
+      db.prepare(
+        "UPDATE inquiries SET reply_message = ?, status = 'replied', replied_at = CURRENT_TIMESTAMP WHERE id = ?"
+      ).run(replyMessage, id);
+      
+      // Simulate email sending
+      console.log(`[SIMULATED EMAIL] To: (User's Email), Message: ${replyMessage}`);
+      
+      res.json({ success: true });
+    } catch (err) {
+      res.status(500).json({ error: "Failed to send reply" });
     }
   });
 

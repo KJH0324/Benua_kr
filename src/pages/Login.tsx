@@ -4,6 +4,7 @@ import { Mail, Lock, Chrome, ArrowRight, X } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import DaumPostcode from "react-daum-postcode";
+import { cn } from "../lib/utils";
 
 export default function Login() {
   const [isLogin, setIsLogin] = useState(true);
@@ -15,7 +16,9 @@ export default function Login() {
     phone: "",
     zipcode: "",
     address: "",
-    detail_address: ""
+    detail_address: "",
+    google_id: "",
+    naver_id: ""
   });
   const [isAddressModalOpen, setIsAddressModalOpen] = useState(false);
   const [validationErrors, setValidationErrors] = useState<Record<string, string>>({});
@@ -115,14 +118,22 @@ export default function Login() {
         return;
       }
       
-      if (event.data?.type === 'OAUTH_SUCCESS') {
+      const { type, error, email, socialId, provider } = event.data || {};
+
+      if (type === 'OAUTH_SUCCESS') {
         toast.success("로그인되었습니다.");
         navigate("/profile");
         window.location.reload();
-      } else if (event.data?.type === 'OAUTH_ERROR') {
-        if (event.data.error === 'not_registered') {
-          toast.error("가입된 계정이 없습니다. 회원가입을 진행해주세요.");
+      } else if (type === 'OAUTH_ERROR') {
+        if (error === 'not_registered') {
+          toast.info("가입된 정보가 없습니다. 회원가입을 위해 정보를 입력해주세요.");
           setIsLogin(false);
+          setFormData(prev => ({
+            ...prev,
+            email: email || prev.email,
+            google_id: provider === 'google' ? socialId : prev.google_id,
+            naver_id: provider === 'naver' ? socialId : prev.naver_id
+          }));
         } else {
           toast.error("소셜 로그인 중 오류가 발생했습니다.");
         }
@@ -148,28 +159,32 @@ export default function Login() {
           </p>
         </div>
 
-        <div className="flex justify-center gap-6 mb-8">
-          <button onClick={() => handleOAuth('Google')} type="button" className="w-14 h-14 rounded-full border border-venuea-dark/10 flex items-center justify-center hover:bg-[#F9F9F9] transition-colors">
-            <svg width="24" height="24" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-              <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/>
-              <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
-              <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/>
-              <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
-            </svg>
-          </button>
-          <button onClick={() => handleOAuth('Naver')} type="button" className="w-14 h-14 rounded-full border border-venuea-dark/10 flex items-center justify-center hover:bg-[#F9F9F9] transition-colors">
-            <svg width="24" height="24" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-              <path d="M16.273 12.845 7.376 0H0v24h7.727V11.155L16.624 24H24V0h-7.727v12.845z" fill="#03C75A"/>
-            </svg>
-          </button>
-        </div>
+        {isLogin && (
+          <div className="flex justify-center gap-6 mb-8">
+            <button onClick={() => handleOAuth('Google')} type="button" className="w-14 h-14 rounded-full border border-venuea-dark/10 flex items-center justify-center hover:bg-[#F9F9F9] transition-colors">
+              <svg width="24" height="24" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/>
+                <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
+                <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/>
+                <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
+              </svg>
+            </button>
+            <button onClick={() => handleOAuth('Naver')} type="button" className="w-14 h-14 rounded-full border border-venuea-dark/10 flex items-center justify-center hover:bg-[#F9F9F9] transition-colors">
+              <svg width="24" height="24" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                <path d="M16.273 12.845 7.376 0H0v24h7.727V11.155L16.624 24H24V0h-7.727v12.845z" fill="#03C75A"/>
+              </svg>
+            </button>
+          </div>
+        )}
 
         <div className="relative mb-8">
           <div className="absolute inset-0 flex items-center">
             <div className="w-full border-t border-venuea-dark/10"></div>
           </div>
           <div className="relative flex justify-center text-[10px] uppercase tracking-[2px]">
-            <span className="bg-white px-4 text-venuea-dark/30">또는 이메일로 계속하기</span>
+            <span className="bg-white px-4 text-venuea-dark/30">
+              {isLogin ? "또는 이메일로 계속하기" : "이메일 정보 입력"}
+            </span>
           </div>
         </div>
 
@@ -296,6 +311,45 @@ export default function Login() {
             <ArrowRight size={16} className="group-hover:translate-x-1 transition-transform" />
           </button>
         </form>
+
+        {!isLogin && (
+          <div className="mt-10 pt-8 border-t border-venuea-dark/5 space-y-4">
+            <p className="text-[10px] font-bold uppercase tracking-widest text-venuea-dark/30 text-center mb-2">간편 연동 가입</p>
+            <div className="grid grid-cols-2 gap-3">
+              <button 
+                type="button"
+                onClick={() => handleOAuth('Google')}
+                className={cn(
+                  "flex items-center justify-center space-x-2 py-3 border text-[10px] font-bold uppercase tracking-widest transition-all",
+                  formData.google_id 
+                    ? "bg-blue-50 border-blue-100 text-blue-600" 
+                    : "hover:border-venuea-gold text-venuea-dark"
+                )}
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/>
+                  <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
+                  <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/>
+                  <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
+                </svg>
+                <span>{formData.google_id ? "Google 연동됨" : "Google 연동하기"}</span>
+              </button>
+              <button 
+                type="button"
+                onClick={() => handleOAuth('Naver')}
+                className={cn(
+                  "flex items-center justify-center space-x-2 py-3 border text-[10px] font-bold uppercase tracking-widest transition-all",
+                  formData.naver_id 
+                    ? "bg-green-50 border-green-100 text-green-600" 
+                    : "hover:border-venuea-gold text-venuea-dark"
+                )}
+              >
+                <div className="w-3.5 h-3.5 bg-[#03C75A] text-white flex items-center justify-center text-[10px] font-bold rounded-sm">N</div>
+                <span>{formData.naver_id ? "Naver 연동됨" : "Naver 연동하기"}</span>
+              </button>
+            </div>
+          </div>
+        )}
 
         <div className="mt-8 text-center">
           <button 

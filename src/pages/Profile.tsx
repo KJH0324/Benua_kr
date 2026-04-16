@@ -1,49 +1,74 @@
 import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "motion/react";
-import { User, Mail, Shield, LogOut, Package, CreditCard, ExternalLink, ChevronRight } from "lucide-react";
+import { User, Mail, Shield, LogOut, Package, CreditCard, ExternalLink, ChevronRight, Edit3, X, Check, Search } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
 import { cn, formatPrice } from "../lib/utils";
 import { toast } from "sonner";
+import DaumPostcode from "react-daum-postcode";
 
 export default function Profile() {
   const [user, setUser] = useState<any>(null);
   const [orders, setOrders] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [isEditing, setIsEditing] = useState(false);
+  const [editForm, setEditForm] = useState({
+    name: "",
+    phone: "",
+    zipcode: "",
+    address: "",
+    detail_address: ""
+  });
+  const [isAddressModalOpen, setIsAddressModalOpen] = useState(false);
   const navigate = useNavigate();
 
-  useEffect(() => {
-    const fetchData = async () => {
-      try {
-        const userRes = await fetch("/api/auth/me");
-        const userData = await userRes.json();
-        
-        if (!userData.user) {
-          console.log("No user found, redirecting to login");
-          navigate("/login");
-          return;
-        }
-
-        setUser(userData.user);
-
-        const ordersRes = await fetch("/api/orders/me");
-        const ordersData = await ordersRes.json();
-        
-        if (Array.isArray(ordersData)) {
-          setOrders(ordersData);
-        } else {
-          console.error("Orders data is not an array:", ordersData);
-          setOrders([]);
-        }
-      } catch (error) {
-        console.error("Failed to fetch profile data:", error);
-        toast.error("데이터를 불러오는데 실패했습니다.");
-      } finally {
-        setIsLoading(false);
+  const fetchData = async () => {
+    try {
+      const userRes = await fetch("/api/auth/me");
+      const userData = await userRes.json();
+      
+      if (!userData.user) {
+        navigate("/login");
+        return;
       }
-    };
 
+      setUser(userData.user);
+      setEditForm({
+        name: userData.user.name || "",
+        phone: userData.user.phone || "",
+        zipcode: userData.user.zipcode || "",
+        address: userData.user.address || "",
+        detail_address: userData.user.detail_address || ""
+      });
+
+      const ordersRes = await fetch("/api/orders/me");
+      const ordersData = await ordersRes.json();
+      
+      if (Array.isArray(ordersData)) {
+        setOrders(ordersData);
+      } else {
+        setOrders([]);
+      }
+    } catch (error) {
+      toast.error("데이터를 불러오는데 실패했습니다.");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  useEffect(() => {
     fetchData();
   }, [navigate]);
+
+  useEffect(() => {
+    const handleMessage = (event: MessageEvent) => {
+      if (event.data?.type === 'OAUTH_LINK_SUCCESS') {
+        toast.success("계정이 성공적으로 연동되었습니다.");
+        fetchData();
+      }
+    };
+    window.addEventListener('message', handleMessage);
+    return () => window.removeEventListener('message', handleMessage);
+  }, []);
 
   const handleLogout = async () => {
     try {
@@ -56,11 +81,60 @@ export default function Profile() {
     }
   };
 
+  const handleUpdateProfile = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      const response = await fetch("/api/auth/me", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(editForm)
+      });
+      
+      if (response.ok) {
+        toast.success("정보가 수정되었습니다.");
+        setIsEditing(false);
+        fetchData();
+      } else {
+        toast.error("수정 실패");
+      }
+    } catch {
+      toast.error("서버 오류");
+    }
+  };
+
+  const handleAddressComplete = (data: any) => {
+    let fullAddress = data.address;
+    let extraAddress = '';
+
+    if (data.addressType === 'R') {
+      if (data.bname !== '') extraAddress += data.bname;
+      if (data.buildingName !== '') extraAddress += extraAddress !== '' ? `, ${data.buildingName}` : data.buildingName;
+      fullAddress += extraAddress !== '' ? ` (${extraAddress})` : '';
+    }
+
+    setEditForm({
+      ...editForm,
+      zipcode: data.zonecode,
+      address: fullAddress,
+    });
+    setIsAddressModalOpen(false);
+  };
+
+  const handleOAuthLink = async (provider: string) => {
+    try {
+      const response = await fetch(`/api/auth/${provider}/url`);
+      const { url } = await response.json();
+      window.open(url, 'oauth_popup', 'width=600,height=700');
+    } catch {
+      toast.error("연동 URL을 불러올 수 없습니다.");
+    }
+  };
+
   if (isLoading) return <div className="pt-32 min-h-screen flex justify-center text-venuea-dark uppercase tracking-widest text-xs">Loading Profile...</div>;
   if (!user) return <div className="pt-32 min-h-screen flex justify-center text-venuea-dark uppercase tracking-widest text-xs">Redirecting to login...</div>;
 
-  const googleLogo = (
-    <svg width="20" height="20" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+  const googleIcon = (
+    <svg width="16" height="16" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
       <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/>
       <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
       <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/>
@@ -71,18 +145,27 @@ export default function Profile() {
   return (
     <div className="pt-32 pb-20 px-6">
       <div className="max-w-5xl mx-auto">
-        <header className="flex justify-between items-end mb-12">
+        <header className="flex flex-col md:flex-row md:items-end justify-between gap-6 mb-12">
           <div>
             <h1 className="text-4xl font-bold text-venuea-dark mb-2 uppercase tracking-tight">마이 프로필</h1>
             <p className="text-venuea-muted underline decoration-venuea-gold/30 underline-offset-4 tracking-tight">회원 정보 및 주문 내역을 한눈에 확인하세요.</p>
           </div>
-          <button 
-            onClick={handleLogout}
-            className="flex items-center space-x-2 text-xs font-bold uppercase tracking-widest text-red-500 hover:text-red-600 transition-colors bg-red-50 px-4 py-2 rounded-lg"
-          >
-            <LogOut size={16} />
-            <span>로그아웃</span>
-          </button>
+          <div className="flex items-center space-x-3">
+            <button 
+              onClick={() => setIsEditing(!isEditing)}
+              className="flex items-center space-x-2 text-xs font-bold uppercase tracking-widest text-venuea-dark hover:text-venuea-gold transition-colors bg-white border border-venuea-dark/10 px-4 py-2 rounded-lg"
+            >
+              {isEditing ? <X size={16} /> : <Edit3 size={16} />}
+              <span>{isEditing ? "취소" : "정보 수정"}</span>
+            </button>
+            <button 
+              onClick={handleLogout}
+              className="flex items-center space-x-2 text-xs font-bold uppercase tracking-widest text-red-500 hover:text-red-600 transition-colors bg-red-50 px-4 py-2 rounded-lg"
+            >
+              <LogOut size={16} />
+              <span>로그아웃</span>
+            </button>
+          </div>
         </header>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-12">
@@ -95,9 +178,39 @@ export default function Profile() {
               </div>
               <h3 className="text-2xl font-bold text-venuea-dark uppercase tracking-tight">{user.name}</h3>
               <p className="text-sm text-venuea-muted font-mono">{user.email}</p>
-              <div className="mt-6 flex justify-center gap-3">
-                {googleLogo}
-                <div className="w-5 h-5 bg-[#03C75A] text-white flex items-center justify-center text-[10px] font-bold rounded-sm">N</div>
+              
+              <div className="mt-8 space-y-3">
+                <p className="text-[10px] font-bold uppercase tracking-widest text-venuea-dark/30 mb-2">Social Linkage</p>
+                <div className="flex flex-col gap-2">
+                  <button 
+                    onClick={() => !user.google_id && handleOAuthLink('google')}
+                    disabled={!!user.google_id}
+                    className={cn(
+                      "flex items-center justify-center space-x-2 py-2 px-4 text-[10px] font-bold uppercase tracking-widest border transition-all",
+                      user.google_id 
+                        ? "bg-blue-50 border-blue-100 text-blue-600 cursor-default" 
+                        : "bg-white border-venuea-dark/10 text-venuea-dark hover:border-venuea-gold"
+                    )}
+                  >
+                    {googleIcon}
+                    <span>{user.google_id ? "Google 연동됨" : "Google 연동하기"}</span>
+                    {user.google_id && <Check size={12} />}
+                  </button>
+                  <button 
+                    onClick={() => !user.naver_id && handleOAuthLink('naver')}
+                    disabled={!!user.naver_id}
+                    className={cn(
+                      "flex items-center justify-center space-x-2 py-2 px-4 text-[10px] font-bold uppercase tracking-widest border transition-all",
+                      user.naver_id 
+                        ? "bg-green-50 border-green-100 text-green-600 cursor-default" 
+                        : "bg-white border-venuea-dark/10 text-venuea-dark hover:border-venuea-gold"
+                    )}
+                  >
+                    <div className="w-4 h-4 bg-[#03C75A] text-white flex items-center justify-center text-[8px] font-bold rounded-sm">N</div>
+                    <span>{user.naver_id ? "Naver 연동됨" : "Naver 연동하기"}</span>
+                    {user.naver_id && <Check size={12} />}
+                  </button>
+                </div>
               </div>
             </div>
 
@@ -117,78 +230,200 @@ export default function Profile() {
 
           {/* Detailed Content */}
           <div className="lg:col-span-2 space-y-12">
-            {/* Recent Orders */}
-            <div className="bg-white p-8 border border-venuea-dark/5 shadow-[0_20px_40px_rgba(0,0,0,0.03)]">
-              <header className="flex justify-between items-center mb-8">
-                <h3 className="text-lg font-bold text-venuea-dark uppercase tracking-widest flex items-center space-x-3">
-                  <div className="w-1.5 h-6 bg-venuea-gold" />
-                  <span>최근 주문 내역</span>
-                </h3>
-                <Link to="/track" className="text-[10px] font-bold uppercase tracking-widest text-venuea-gold hover:underline">배송 상세 조회</Link>
-              </header>
-
-              {orders.length === 0 ? (
-                <div className="py-20 text-center border-2 border-dashed border-venuea-dark/5">
-                  <Package size={40} className="mx-auto text-venuea-dark/10 mb-4" />
-                  <p className="text-sm text-venuea-muted uppercase tracking-widest">주문 내역이 없습니다.</p>
-                  <Link to="/shop" className="mt-6 inline-block bg-venuea-dark text-white px-8 py-3 text-[10px] font-bold uppercase tracking-widest hover:bg-venuea-gold transition-colors">
-                    쇼핑 시작하기
-                  </Link>
-                </div>
-              ) : (
-                <div className="space-y-4">
-                  {orders.map((order) => (
-                    <div key={order.id} className="p-6 bg-[#F9F9F9] border border-venuea-dark/5 group hover:border-venuea-gold transition-colors">
-                      <div className="flex justify-between items-start mb-4">
-                        <div>
-                          <p className="text-[10px] font-bold text-venuea-gold uppercase tracking-widest mb-1">
-                            {new Date(order.created_at).toLocaleDateString()}
-                          </p>
-                          <h4 className="text-sm font-bold text-venuea-dark">주문 번호: #{order.id}</h4>
-                        </div>
-                        <div className="text-right">
-                          <p className="text-sm font-bold text-venuea-dark font-mono">{formatPrice(order.total_amount)}</p>
-                          <p className="text-[10px] text-venuea-dark/40 uppercase tracking-widest mt-1">결제 완료</p>
-                        </div>
+            <AnimatePresence mode="wait">
+              {isEditing ? (
+                <motion.div 
+                  key="edit-form"
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -10 }}
+                  className="bg-white p-8 border border-venuea-gold shadow-[0_20px_40px_rgba(0,0,0,0.05)]"
+                >
+                  <h3 className="text-lg font-bold text-venuea-dark uppercase tracking-widest mb-8 flex items-center space-x-3">
+                    <div className="w-1.5 h-6 bg-venuea-gold" />
+                    <span>회원 정보 수정</span>
+                  </h3>
+                  <form onSubmit={handleUpdateProfile} className="space-y-6">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                      <div className="space-y-2">
+                        <label className="text-[10px] font-bold uppercase tracking-widest text-venuea-dark/40">이름</label>
+                        <input 
+                          type="text" 
+                          required
+                          value={editForm.name}
+                          onChange={e => setEditForm({...editForm, name: e.target.value})}
+                          className="w-full bg-[#F9F9F9] border border-venuea-dark/10 px-4 py-3 text-sm focus:outline-none focus:border-venuea-gold"
+                        />
                       </div>
-                      <div className="flex items-center space-x-2 text-[10px] text-venuea-dark/60 uppercase tracking-widest pt-4 border-t border-venuea-dark/5">
-                        <User size={12} />
-                        <span>수령인: {order.customer_name}</span>
-                        <span className="mx-2 text-venuea-dark/10">|</span>
-                        <Package size={12} />
-                        <span className="line-clamp-1">{order.shipping_address}</span>
+                      <div className="space-y-2">
+                        <label className="text-[10px] font-bold uppercase tracking-widest text-venuea-dark/40">전화번호</label>
+                        <input 
+                          type="tel" 
+                          required
+                          value={editForm.phone}
+                          onChange={e => setEditForm({...editForm, phone: e.target.value})}
+                          placeholder="010-0000-0000"
+                          className="w-full bg-[#F9F9F9] border border-venuea-dark/10 px-4 py-3 text-sm focus:outline-none focus:border-venuea-gold"
+                        />
                       </div>
                     </div>
-                  ))}
-                </div>
-              )}
-            </div>
 
-            {/* Address Info */}
-            <div className="bg-white p-8 border border-venuea-dark/5 shadow-[0_20px_40px_rgba(0,0,0,0.03)]">
-              <h3 className="text-lg font-bold text-venuea-dark uppercase tracking-widest mb-8 flex items-center space-x-3">
-                <div className="w-1.5 h-6 bg-venuea-dark" />
-                <span>나의 배송지 정보</span>
-              </h3>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                <div className="space-y-1">
-                  <p className="text-[10px] font-bold text-venuea-dark/40 uppercase tracking-widest">이름 / 연락처</p>
-                  <p className="text-sm font-bold text-venuea-dark tracking-tight">{user.name} | {user.phone || '미등록'}</p>
-                </div>
-                <div className="space-y-1">
-                  <p className="text-[10px] font-bold text-venuea-dark/40 uppercase tracking-widest">기본 배송지</p>
-                  <p className="text-sm font-bold text-venuea-dark leading-relaxed">
-                    {user.zipcode ? `[${user.zipcode}] ${user.address} ${user.detail_address}` : '배송지 정보가 없습니다.'}
-                  </p>
-                </div>
-              </div>
-              <Link to="/settings" className="mt-8 inline-block text-[10px] font-bold uppercase tracking-widest text-venuea-gold hover:underline">
-                정보 수정하기
-              </Link>
-            </div>
+                    <div className="space-y-4">
+                      <div className="flex items-end space-x-4">
+                        <div className="flex-grow space-y-2">
+                          <label className="text-[10px] font-bold uppercase tracking-widest text-venuea-dark/40">우편번호</label>
+                          <input 
+                            type="text" 
+                            readOnly
+                            value={editForm.zipcode}
+                            className="w-full bg-[#F9F9F9] border border-venuea-dark/10 px-4 py-3 text-sm focus:outline-none"
+                          />
+                        </div>
+                        <button 
+                          type="button"
+                          onClick={() => setIsAddressModalOpen(true)}
+                          className="bg-venuea-dark text-white h-[46px] px-6 text-[10px] font-bold uppercase tracking-widest hover:bg-venuea-gold transition-colors flex items-center space-x-2"
+                        >
+                          <Search size={14} />
+                          <span>검색</span>
+                        </button>
+                      </div>
+                      <div className="space-y-2">
+                        <label className="text-[10px] font-bold uppercase tracking-widest text-venuea-dark/40">기본 주소</label>
+                        <input 
+                          type="text" 
+                          readOnly
+                          value={editForm.address}
+                          className="w-full bg-[#F9F9F9] border border-venuea-dark/10 px-4 py-3 text-sm focus:outline-none"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <label className="text-[10px] font-bold uppercase tracking-widest text-venuea-dark/40">상세 주소</label>
+                        <input 
+                          type="text" 
+                          required
+                          value={editForm.detail_address}
+                          onChange={e => setEditForm({...editForm, detail_address: e.target.value})}
+                          className="w-full bg-[#F9F9F9] border border-venuea-dark/10 px-4 py-3 text-sm focus:outline-none focus:border-venuea-gold"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="pt-6 border-t border-venuea-dark/5">
+                      <button className="w-full bg-venuea-dark text-white py-4 font-bold uppercase tracking-widest hover:bg-venuea-gold transition-all">
+                        변경사항 저장하기
+                      </button>
+                    </div>
+                  </form>
+                </motion.div>
+              ) : (
+                <motion.div 
+                  key="info-content"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  className="space-y-12"
+                >
+                  {/* Recent Orders */}
+                  <div className="bg-white p-8 border border-venuea-dark/5 shadow-[0_20px_40px_rgba(0,0,0,0.03)]">
+                    <header className="flex justify-between items-center mb-8">
+                      <h3 className="text-lg font-bold text-venuea-dark uppercase tracking-widest flex items-center space-x-3">
+                        <div className="w-1.5 h-6 bg-venuea-gold" />
+                        <span>최근 주문 내역</span>
+                      </h3>
+                      <Link to="/track" className="text-[10px] font-bold uppercase tracking-widest text-venuea-gold hover:underline">배송 상세 조회</Link>
+                    </header>
+
+                    {orders.length === 0 ? (
+                      <div className="py-20 text-center border-2 border-dashed border-venuea-dark/5">
+                        <Package size={40} className="mx-auto text-venuea-dark/10 mb-4" />
+                        <p className="text-sm text-venuea-muted uppercase tracking-widest">주문 내역이 없습니다.</p>
+                        <Link to="/shop" className="mt-6 inline-block bg-venuea-dark text-white px-8 py-3 text-[10px] font-bold uppercase tracking-widest hover:bg-venuea-gold transition-colors">
+                          쇼핑 시작하기
+                        </Link>
+                      </div>
+                    ) : (
+                      <div className="space-y-4">
+                        {orders.map((order) => (
+                          <div key={order.id} className="p-6 bg-[#F9F9F9] border border-venuea-dark/5 group hover:border-venuea-gold transition-colors">
+                            <div className="flex justify-between items-start mb-4">
+                              <div>
+                                <p className="text-[10px] font-bold text-venuea-gold uppercase tracking-widest mb-1">
+                                  {new Date(order.created_at).toLocaleDateString()}
+                                </p>
+                                <h4 className="text-sm font-bold text-venuea-dark">주문 번호: #{order.id}</h4>
+                              </div>
+                              <div className="text-right">
+                                <p className="text-sm font-bold text-venuea-dark font-mono">{formatPrice(order.total_amount)}</p>
+                                <p className="text-[10px] text-venuea-dark/40 uppercase tracking-widest mt-1">결제 완료</p>
+                              </div>
+                            </div>
+                            <div className="flex items-center space-x-2 text-[10px] text-venuea-dark/60 uppercase tracking-widest pt-4 border-t border-venuea-dark/5">
+                              <User size={12} />
+                              <span>수령인: {order.customer_name}</span>
+                              <span className="mx-2 text-venuea-dark/10">|</span>
+                              <Package size={12} />
+                              <span className="line-clamp-1">{order.shipping_address}</span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Address Info Display */}
+                  <div className="bg-white p-8 border border-venuea-dark/5 shadow-[0_20px_40px_rgba(0,0,0,0.03)]">
+                    <h3 className="text-lg font-bold text-venuea-dark uppercase tracking-widest mb-8 flex items-center space-x-3">
+                      <div className="w-1.5 h-6 bg-venuea-dark" />
+                      <span>나의 배송지 정보</span>
+                    </h3>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                      <div className="space-y-1">
+                        <p className="text-[10px] font-bold text-venuea-dark/40 uppercase tracking-widest">이름 / 연락처</p>
+                        <p className="text-sm font-bold text-venuea-dark tracking-tight">{user.name} | {user.phone || '미등록'}</p>
+                      </div>
+                      <div className="space-y-1">
+                        <p className="text-[10px] font-bold text-venuea-dark/40 uppercase tracking-widest">기본 배송지</p>
+                        <p className="text-sm font-bold text-venuea-dark leading-relaxed">
+                          {user.zipcode ? `[${user.zipcode}] ${user.address} ${user.detail_address}` : '배송지 정보가 없습니다.'}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
           </div>
         </div>
       </div>
+
+      <AnimatePresence>
+        {isAddressModalOpen && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+              onClick={() => setIsAddressModalOpen(false)}
+            />
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              className="relative bg-white w-full max-w-lg rounded-2xl overflow-hidden shadow-2xl"
+            >
+              <div className="p-4 bg-venuea-dark text-white flex justify-between items-center">
+                <span className="text-xs font-bold uppercase tracking-widest">주소 검색</span>
+                <button onClick={() => setIsAddressModalOpen(false)} className="hover:text-venuea-gold">
+                  <X size={20} />
+                </button>
+              </div>
+              <DaumPostcode onComplete={handleAddressComplete} />
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

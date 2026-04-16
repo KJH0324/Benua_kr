@@ -16,7 +16,9 @@ import {
   Trash2,
   Loader2,
   X,
-  AlertCircle
+  AlertCircle,
+  MessageSquare,
+  Reply
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { cn, formatPrice } from "../lib/utils";
@@ -64,6 +66,7 @@ export default function AdminDashboard() {
     { name: "개요", path: "/admin", icon: LayoutDashboard },
     { name: "상품 관리", path: "/admin/products", icon: Package },
     { name: "주문 내역", path: "/admin/orders", icon: ShoppingBag },
+    { name: "고객 문의", path: "/admin/inquiries", icon: MessageSquare },
     { name: "고객 관리", path: "/admin/customers", icon: Users },
     { name: "관리자 키", path: "/admin/keys", icon: Settings },
   ];
@@ -117,6 +120,7 @@ export default function AdminDashboard() {
           <Route path="/" element={<AdminOverview />} />
           <Route path="/products" element={<AdminProducts />} />
           <Route path="/orders" element={<AdminOrders />} />
+          <Route path="/inquiries" element={<AdminInquiries />} />
           <Route path="/keys" element={<AdminKeys />} />
         </Routes>
       </main>
@@ -228,6 +232,7 @@ function AdminProducts() {
         method: "POST",
         body: formData,
       });
+      const data = await response.json();
       if (response.ok) {
         toast.success("상품이 등록되었습니다.");
         setIsModalOpen(false);
@@ -236,7 +241,7 @@ function AdminProducts() {
         setDescImage(null);
         fetchProducts();
       } else {
-        toast.error("상품 등록 실패");
+        toast.error(data.error || "상품 등록 실패");
       }
     } catch (error) {
       toast.error("서버 오류");
@@ -600,6 +605,183 @@ function AdminKeys() {
           </tbody>
         </table>
       </div>
+    </div>
+  );
+}
+
+function AdminInquiries() {
+  const [inquiries, setInquiries] = useState<any[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [selectedInquiry, setSelectedInquiry] = useState<any>(null);
+  const [replyMessage, setReplyMessage] = useState("");
+  const [isReplying, setIsReplying] = useState(false);
+
+  const fetchInquiries = async () => {
+    setIsLoading(true);
+    try {
+      const response = await fetch("/api/admin/inquiries");
+      const data = await response.json();
+      setInquiries(data);
+    } catch (error) {
+      toast.error("문의 목록을 불러오지 못했습니다.");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchInquiries();
+  }, []);
+
+  const handleReply = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!replyMessage.trim()) return;
+    setIsReplying(true);
+
+    try {
+      const response = await fetch(`/api/admin/inquiries/${selectedInquiry.id}/reply`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ replyMessage })
+      });
+
+      if (response.ok) {
+        toast.success("답변이 전송되었습니다.");
+        setSelectedInquiry(null);
+        setReplyMessage("");
+        fetchInquiries();
+      } else {
+        toast.error("답변 전송 실패");
+      }
+    } catch (error) {
+      toast.error("서버 오류");
+    } finally {
+      setIsReplying(false);
+    }
+  };
+
+  if (isLoading) return <div className="flex justify-center p-20"><Loader2 className="animate-spin text-venuea-gold" size={24} /></div>;
+
+  return (
+    <div className="space-y-8">
+      <header>
+        <h1 className="text-2xl font-bold text-gray-900 uppercase tracking-tight">고객 문의 관리</h1>
+        <p className="text-sm text-gray-500">고객님들이 남겨주신 문의 사항을 확인하고 답변하세요.</p>
+      </header>
+
+      <div className="bg-white rounded-xl border border-gray-200 overflow-hidden shadow-sm">
+        <table className="w-full text-left text-sm">
+          <thead className="bg-gray-50 text-gray-500">
+            <tr>
+              <th className="px-6 py-4 font-medium uppercase tracking-widest text-[10px]">상태</th>
+              <th className="px-6 py-4 font-medium uppercase tracking-widest text-[10px]">고객/이메일</th>
+              <th className="px-6 py-4 font-medium uppercase tracking-widest text-[10px]">제목</th>
+              <th className="px-6 py-4 font-medium uppercase tracking-widest text-[10px]">날짜</th>
+              <th className="px-6 py-4 font-medium uppercase tracking-widest text-[10px] text-right">관리</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-100">
+            {inquiries.map((inquiry) => (
+              <tr key={inquiry.id} className="hover:bg-gray-50/50 transition-colors">
+                <td className="px-6 py-4">
+                  <span className={cn(
+                    "inline-flex items-center px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-widest",
+                    inquiry.status === 'replied' 
+                      ? "bg-green-50 text-green-700" 
+                      : "bg-red-50 text-red-700"
+                  )}>
+                    {inquiry.status === 'replied' ? "답변완료" : "답변대기"}
+                  </span>
+                </td>
+                <td className="px-6 py-4">
+                  <p className="font-bold text-gray-900">{inquiry.name}</p>
+                  <p className="text-xs text-gray-500">{inquiry.email}</p>
+                </td>
+                <td className="px-6 py-4 font-medium text-gray-700">{inquiry.subject}</td>
+                <td className="px-6 py-4 text-gray-500 font-mono text-xs">
+                  {new Date(inquiry.created_at).toLocaleDateString()}
+                </td>
+                <td className="px-6 py-4 text-right">
+                  <button 
+                    onClick={() => setSelectedInquiry(inquiry)}
+                    className="p-2 text-venuea-dark hover:bg-gray-100 rounded-lg transition-colors"
+                  >
+                    <ExternalLink size={18} />
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <AnimatePresence>
+        {selectedInquiry && (
+          <div className="fixed inset-0 bg-black/50 z-[100] flex items-center justify-center p-4 overflow-y-auto">
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="bg-white rounded-2xl w-full max-w-2xl overflow-hidden shadow-2xl my-auto"
+            >
+              <div className="p-6 border-b border-gray-100 flex justify-between items-center bg-gray-50">
+                <div>
+                  <h2 className="text-xl font-bold">문의 내용 확인</h2>
+                  <p className="text-xs text-gray-500 mt-1">{selectedInquiry.email}님의 문의</p>
+                </div>
+                <button onClick={() => setSelectedInquiry(null)} className="text-gray-400 hover:text-gray-600">
+                  <X size={24} />
+                </button>
+              </div>
+              <div className="p-8 space-y-6">
+                <div className="space-y-4">
+                  <div className="bg-gray-50 p-6 rounded-xl border border-gray-100">
+                    <h4 className="text-[10px] font-bold uppercase tracking-widest text-gray-400 mb-2">문의 제목</h4>
+                    <p className="text-lg font-bold text-gray-900">{selectedInquiry.subject}</p>
+                    <div className="mt-4 pt-4 border-t border-gray-200">
+                      <h4 className="text-[10px] font-bold uppercase tracking-widest text-gray-400 mb-2">상세 내역</h4>
+                      <p className="text-gray-700 leading-relaxed whitespace-pre-wrap">{selectedInquiry.message}</p>
+                    </div>
+                  </div>
+
+                  {selectedInquiry.status === 'replied' ? (
+                    <div className="bg-green-50 p-6 rounded-xl border border-green-100">
+                      <h4 className="text-[10px] font-bold uppercase tracking-widest text-green-700 mb-2 flex items-center gap-2">
+                        <CheckCircle2 size={12} /> 보낸 답변
+                      </h4>
+                      <p className="text-green-800 whitespace-pre-wrap">{selectedInquiry.reply_message}</p>
+                      <p className="text-[10px] text-green-600 mt-4 uppercase tracking-widest">
+                        발송일: {new Date(selectedInquiry.replied_at).toLocaleString()}
+                      </p>
+                    </div>
+                  ) : (
+                    <form onSubmit={handleReply} className="space-y-4">
+                      <div className="space-y-2">
+                        <label className="text-xs font-bold text-gray-400 uppercase tracking-widest">답변 작성</label>
+                        <textarea 
+                          rows={6}
+                          required
+                          value={replyMessage}
+                          onChange={e => setReplyMessage(e.target.value)}
+                          placeholder="이메일로 발송될 답변 내용을 입력해 주세요."
+                          className="w-full border border-gray-200 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-venuea-dark/10 resize-none text-sm"
+                        />
+                      </div>
+                      <button 
+                        disabled={isReplying}
+                        className="w-full bg-venuea-dark text-white py-4 rounded-xl font-bold uppercase tracking-widest hover:bg-venuea-gold transition-all flex items-center justify-center space-x-3 disabled:opacity-50 shadow-lg shadow-venuea-dark/20"
+                      >
+                        <Reply size={18} />
+                        <span>{isReplying ? "전송 중..." : "답변 메일 보내기"}</span>
+                      </button>
+                    </form>
+                  )}
+                </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
