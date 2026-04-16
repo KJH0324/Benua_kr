@@ -49,7 +49,7 @@ export default function Contact() {
                 </div>
                 <div>
                   <h4 className="text-xs font-bold uppercase tracking-widest text-venuea-dark mb-1">주소</h4>
-                  <p className="text-venuea-muted">서울특별시 강남구 테헤란로 123 베뉴아 빌딩 5층</p>
+                  <p className="text-venuea-muted">인천광역시 [상세 주소 입력]</p>
                 </div>
               </div>
             </div>

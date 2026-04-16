@@ -48,7 +48,9 @@ export default function Footer() {
       </div>
       
       <div className="max-w-[1440px] mx-auto mt-16 pt-8 border-t border-venuea-dark/5 flex flex-col md:flex-row justify-between items-center space-y-8 md:space-y-0">
-        <div className="flex flex-wrap gap-8 items-center justify-center md:justify-start">
+        <div className="flex flex-wrap gap-8 items-center justify-center md:justify-start text-[10px] text-venuea-muted tracking-widest">
+          <span>인천광역시 [상세 주소 입력]</span>
+          <span>사업자등록번호: [번호 입력]</span>
         </div>
         
         <p className="text-[10px] text-venuea-muted uppercase tracking-widest">
