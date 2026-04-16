@@ -11,10 +11,17 @@ export default function AdminLogin() {
   const [qrCodeUrl, setQrCodeUrl] = useState("");
   const [secret, setSecret] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [keyError, setKeyError] = useState("");
+  const [tokenError, setTokenError] = useState("");
   const navigate = useNavigate();
 
   const handleKeySubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
+    if (!adminKey) {
+      setKeyError("관리자 Key를 입력하세요");
+      return;
+    }
+    setKeyError("");
     setIsLoading(true);
 
     try {
@@ -44,6 +51,11 @@ export default function AdminLogin() {
 
   const handleTotpSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
+    if (token.length !== 6) {
+      setTokenError("6자리 코드를 입력하세요");
+      return;
+    }
+    setTokenError("");
     setIsLoading(true);
 
     try {
@@ -91,18 +103,24 @@ export default function AdminLogin() {
               animate={{ opacity: 1, x: 0 }}
               exit={{ opacity: 0, x: 20 }}
               onSubmit={handleKeySubmit} 
+              noValidate
               className="space-y-6"
             >
-              <div className="space-y-2">
+              <div className="space-y-2 relative">
                 <label className="text-[10px] font-bold uppercase tracking-widest text-venuea-dark/40">관리자 Key</label>
+                {keyError && (
+                  <span className="absolute top-0 right-0 text-[#FF4000] text-[10px] font-bold">{keyError}</span>
+                )}
                 <div className="relative">
                   <input 
                     type="password" 
                     value={adminKey}
-                    onChange={(e) => setAdminKey(e.target.value)}
+                    onChange={(e) => {
+                      setAdminKey(e.target.value);
+                      if (e.target.value) setKeyError("");
+                    }}
                     className="w-full bg-[#F9F9F9] border border-venuea-dark/10 px-4 py-3 text-venuea-dark focus:outline-none focus:border-venuea-gold transition-colors"
                     placeholder="관리자 Key를 입력하세요"
-                    required
                   />
                   <KeyRound size={18} className="absolute right-4 top-1/2 -translate-y-1/2 text-venuea-dark/20" />
                 </div>
@@ -122,6 +140,7 @@ export default function AdminLogin() {
               animate={{ opacity: 1, x: 0 }}
               exit={{ opacity: 0, x: 20 }}
               onSubmit={handleTotpSubmit} 
+              noValidate
               className="space-y-6"
             >
               {qrCodeUrl && (
@@ -135,16 +154,21 @@ export default function AdminLogin() {
                 </div>
               )}
 
-              <div className="space-y-2">
+              <div className="space-y-2 relative">
                 <label className="text-[10px] font-bold uppercase tracking-widest text-venuea-dark/40">2FA 인증 코드</label>
+                {tokenError && (
+                  <span className="absolute top-0 right-0 text-[#FF4000] text-[10px] font-bold">{tokenError}</span>
+                )}
                 <div className="relative">
                   <input 
                     type="text" 
                     value={token}
-                    onChange={(e) => setToken(e.target.value.replace(/[^0-9]/g, '').slice(0, 6))}
+                    onChange={(e) => {
+                      setToken(e.target.value.replace(/[^0-9]/g, '').slice(0, 6));
+                      if (e.target.value) setTokenError("");
+                    }}
                     className="w-full bg-[#F9F9F9] border border-venuea-dark/10 px-4 py-3 text-venuea-dark focus:outline-none focus:border-venuea-gold transition-colors text-center tracking-[0.5em] font-mono text-lg"
                     placeholder="000000"
-                    required
                   />
                   <QrCode size={18} className="absolute right-4 top-1/2 -translate-y-1/2 text-venuea-dark/20" />
                 </div>

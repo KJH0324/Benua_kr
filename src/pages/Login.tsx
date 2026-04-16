@@ -18,6 +18,7 @@ export default function Login() {
     detail_address: ""
   });
   const [isAddressModalOpen, setIsAddressModalOpen] = useState(false);
+  const [validationErrors, setValidationErrors] = useState<Record<string, string>>({});
 
   const handleComplete = (data: any) => {
     let fullAddress = data.address;
@@ -43,6 +44,26 @@ export default function Login() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    
+    // Custom Validation
+    const errors: Record<string, string> = {};
+    if (!formData.email) errors.email = "이메일을 입력하세요";
+    if (!formData.password) errors.password = "비밀번호를 입력하세요";
+    
+    if (!isLogin) {
+      if (!formData.name) errors.name = "이름을 입력하세요";
+      if (!formData.phone) errors.phone = "전화번호를 입력하세요";
+      if (!formData.zipcode) errors.zipcode = "주소를 검색하세요";
+      if (!formData.detail_address) errors.detail_address = "상세 주소를 입력하세요";
+    }
+
+    if (Object.keys(errors).length > 0) {
+      setValidationErrors(errors);
+      return;
+    }
+
+    setValidationErrors({});
+
     const endpoint = isLogin ? "/api/auth/login" : "/api/auth/register";
     
     try {
@@ -128,16 +149,16 @@ export default function Login() {
         </div>
 
         <div className="flex justify-center gap-6 mb-8">
-          <button onClick={() => handleOAuth('Google')} type="button" className="w-10 h-10 rounded-full border border-venuea-dark/10 flex items-center justify-center hover:bg-[#F9F9F9] transition-colors">
-            <svg width="18" height="18" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+          <button onClick={() => handleOAuth('Google')} type="button" className="w-14 h-14 rounded-full border border-venuea-dark/10 flex items-center justify-center hover:bg-[#F9F9F9] transition-colors">
+            <svg width="24" height="24" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
               <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/>
               <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
               <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/>
               <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
             </svg>
           </button>
-          <button onClick={() => handleOAuth('Naver')} type="button" className="w-10 h-10 rounded-full border border-venuea-dark/10 flex items-center justify-center hover:bg-[#F9F9F9] transition-colors">
-            <svg width="15" height="15" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+          <button onClick={() => handleOAuth('Naver')} type="button" className="w-14 h-14 rounded-full border border-venuea-dark/10 flex items-center justify-center hover:bg-[#F9F9F9] transition-colors">
+            <svg width="24" height="24" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
               <path d="M16.273 12.845 7.376 0H0v24h7.727V11.155L16.624 24H24V0h-7.727v12.845z" fill="#03C75A"/>
             </svg>
           </button>
@@ -152,37 +173,49 @@ export default function Login() {
           </div>
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-6">
+        <form onSubmit={handleSubmit} noValidate className="space-y-6">
           {!isLogin && (
             <>
-              <div className="space-y-2">
+              <div className="space-y-2 relative">
                 <label className="text-[10px] font-bold uppercase tracking-[2px] text-venuea-dark/60">성함</label>
+                {validationErrors.name && (
+                  <span className="absolute top-0 right-0 text-[#FF4000] text-[10px] font-bold">{validationErrors.name}</span>
+                )}
                 <input 
                   type="text" 
-                  required
                   value={formData.name}
-                  onChange={e => setFormData({...formData, name: e.target.value})}
+                  onChange={e => {
+                    setFormData({...formData, name: e.target.value});
+                    if (e.target.value) setValidationErrors(prev => ({...prev, name: ''}));
+                  }}
                   className="w-full bg-[#F9F9F9] border border-venuea-dark/10 px-4 py-3 focus:outline-none focus:border-venuea-gold transition-colors"
                   placeholder="홍길동"
                 />
               </div>
-              <div className="space-y-2">
+              <div className="space-y-2 relative">
                 <label className="text-[10px] font-bold uppercase tracking-[2px] text-venuea-dark/60">전화번호</label>
+                {validationErrors.phone && (
+                  <span className="absolute top-0 right-0 text-[#FF4000] text-[10px] font-bold">{validationErrors.phone}</span>
+                )}
                 <input 
                   type="tel" 
-                  required
                   value={formData.phone}
-                  onChange={e => setFormData({...formData, phone: e.target.value})}
+                  onChange={e => {
+                    setFormData({...formData, phone: e.target.value});
+                    if (e.target.value) setValidationErrors(prev => ({...prev, phone: ''}));
+                  }}
                   className="w-full bg-[#F9F9F9] border border-venuea-dark/10 px-4 py-3 focus:outline-none focus:border-venuea-gold transition-colors"
                   placeholder="010-1234-5678"
                 />
               </div>
-              <div className="space-y-2">
+              <div className="space-y-2 relative">
                 <label className="text-[10px] font-bold uppercase tracking-[2px] text-venuea-dark/60">주소</label>
+                {validationErrors.zipcode && (
+                  <span className="absolute top-0 right-0 text-[#FF4000] text-[10px] font-bold">{validationErrors.zipcode}</span>
+                )}
                 <div className="flex gap-2">
                   <input 
                     type="text" 
-                    required
                     readOnly
                     value={formData.zipcode}
                     className="w-1/3 bg-[#F9F9F9] border border-venuea-dark/10 px-4 py-3 focus:outline-none transition-colors text-venuea-dark/60 cursor-not-allowed"
@@ -198,47 +231,61 @@ export default function Login() {
                 </div>
                 <input 
                   type="text" 
-                  required
                   readOnly
                   value={formData.address}
                   className="w-full bg-[#F9F9F9] border border-venuea-dark/10 px-4 py-3 focus:outline-none transition-colors text-venuea-dark/60 cursor-not-allowed"
                   placeholder="기본 주소"
                 />
               </div>
-              <div className="space-y-2">
+              <div className="space-y-2 relative">
                 <label className="text-[10px] font-bold uppercase tracking-[2px] text-venuea-dark/60">상세 주소</label>
+                {validationErrors.detail_address && (
+                  <span className="absolute top-0 right-0 text-[#FF4000] text-[10px] font-bold">{validationErrors.detail_address}</span>
+                )}
                 <input 
                   type="text" 
-                  required
                   value={formData.detail_address}
-                  onChange={e => setFormData({...formData, detail_address: e.target.value})}
+                  onChange={e => {
+                    setFormData({...formData, detail_address: e.target.value});
+                    if (e.target.value) setValidationErrors(prev => ({...prev, detail_address: ''}));
+                  }}
                   className="w-full bg-[#F9F9F9] border border-venuea-dark/10 px-4 py-3 focus:outline-none focus:border-venuea-gold transition-colors"
                   placeholder="101동 202호"
                 />
               </div>
             </>
           )}
-          <div className="space-y-2">
+          <div className="space-y-2 relative">
             <label className="text-[10px] font-bold uppercase tracking-[2px] text-venuea-dark/60">이메일 주소</label>
+            {validationErrors.email && (
+              <span className="absolute top-0 right-0 text-[#FF4000] text-[10px] font-bold">{validationErrors.email}</span>
+            )}
             <input 
               type="email" 
-              required
               value={formData.email}
-              onChange={e => setFormData({...formData, email: e.target.value})}
+              onChange={e => {
+                setFormData({...formData, email: e.target.value});
+                if (e.target.value) setValidationErrors(prev => ({...prev, email: ''}));
+              }}
               className="w-full bg-[#F9F9F9] border border-venuea-dark/10 px-4 py-3 focus:outline-none focus:border-venuea-gold transition-colors"
               placeholder="name@example.com"
             />
           </div>
-          <div className="space-y-2">
-            <div className="flex justify-between">
+          <div className="space-y-2 relative">
+            <div className="flex justify-between relative">
               <label className="text-[10px] font-bold uppercase tracking-[2px] text-venuea-dark/60">비밀번호</label>
-              {isLogin && <button type="button" className="text-[10px] text-venuea-gold font-bold uppercase tracking-widest">비밀번호 찾기</button>}
+              {isLogin && <button type="button" onClick={() => toast.info('비밀번호 찾기 기능은 아직 지원하지 않습니다', { icon: 'ℹ️' })} className="text-[10px] text-venuea-gold font-bold uppercase tracking-widest z-10">비밀번호 찾기</button>}
             </div>
+            {validationErrors.password && (
+              <span className="absolute top-0 right-0 text-[#FF4000] text-[10px] font-bold z-0" style={{ right: isLogin ? '80px' : '0' }}>{validationErrors.password}</span>
+            )}
             <input 
               type="password" 
-              required
               value={formData.password}
-              onChange={e => setFormData({...formData, password: e.target.value})}
+              onChange={e => {
+                setFormData({...formData, password: e.target.value});
+                if (e.target.value) setValidationErrors(prev => ({...prev, password: ''}));
+              }}
               className="w-full bg-[#F9F9F9] border border-venuea-dark/10 px-4 py-3 focus:outline-none focus:border-venuea-gold transition-colors"
               placeholder="••••••••"
             />

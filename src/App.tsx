@@ -44,7 +44,15 @@ export default function App() {
           </AnimatePresence>
         </main>
         <Footer />
-        <Toaster position="top-center" richColors />
+        <Toaster 
+          position="top-center" 
+          toastOptions={{
+            classNames: {
+              error: 'bg-[#FF4000] text-white border-[#FF4000]',
+              warning: 'bg-[#FF4000] text-white border-[#FF4000]',
+            }
+          }} 
+        />
       </div>
     </Router>
   );
