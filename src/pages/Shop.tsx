@@ -1,24 +1,41 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { motion } from "motion/react";
-import { Search, Filter, ChevronDown } from "lucide-react";
+import { Search, Filter, ChevronDown, Loader2 } from "lucide-react";
 import { formatPrice } from "../lib/utils";
 
 const CATEGORIES = ["전체", "리빙", "키친", "데코", "침구", "욕실"];
 
-const MOCK_PRODUCTS = [
-  { id: "1", name: "리넨 소파 커버", category: "리빙", price: 85000, image: "https://picsum.photos/seed/sofa/800/1000" },
-  { id: "2", name: "세라믹 커피 세트", category: "키친", price: 42000, image: "https://picsum.photos/seed/coffee/800/1000" },
-  { id: "3", name: "오크 우드 미러", category: "데코", price: 120000, image: "https://picsum.photos/seed/mirror/800/1000" },
-  { id: "4", name: "코튼 블랭킷", category: "침구", price: 55000, image: "https://picsum.photos/seed/blanket/800/1000" },
-  { id: "5", name: "아로마 캔들", category: "데코", price: 28000, image: "https://picsum.photos/seed/candle/800/1000" },
-  { id: "6", name: "대나무 욕실 매트", category: "욕실", price: 35000, image: "https://picsum.photos/seed/bath/800/1000" },
-];
+interface Product {
+  id: string;
+  name: string;
+  category: string;
+  price: number;
+  image_url: string;
+}
 
 export default function Shop() {
+  const [products, setProducts] = useState<Product[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
   const [selectedCategory, setSelectedCategory] = useState("전체");
   const [searchQuery, setSearchQuery] = useState("");
 
-  const filteredProducts = MOCK_PRODUCTS.filter(p => 
+  useEffect(() => {
+    const fetchProducts = async () => {
+      try {
+        const response = await fetch("/api/products");
+        const data = await response.json();
+        setProducts(data);
+      } catch (error) {
+        console.error("Failed to fetch products:", error);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    fetchProducts();
+  }, []);
+
+  const filteredProducts = products.filter(p => 
     (selectedCategory === "전체" || p.category === selectedCategory) &&
     p.name.toLowerCase().includes(searchQuery.toLowerCase())
   );
@@ -62,39 +79,45 @@ export default function Shop() {
         </div>
 
         {/* Product Grid */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-12 gap-y-16">
-          {filteredProducts.map((product, index) => (
-            <motion.div
-              key={product.id}
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: index * 0.1 }}
-              className="group cursor-pointer"
-            >
-              <div className="aspect-[3/4] overflow-hidden bg-[#F9F9F9] mb-6 relative">
-                <img 
-                  src={product.image} 
-                  alt={product.name} 
-                  className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700"
-                  referrerPolicy="no-referrer"
-                />
-                <div className="absolute inset-0 bg-venuea-dark/0 group-hover:bg-venuea-dark/5 transition-colors duration-500" />
-                <button className="absolute bottom-4 left-4 right-4 bg-venuea-dark text-white py-3 text-[10px] font-bold uppercase tracking-widest opacity-0 group-hover:opacity-100 translate-y-4 group-hover:translate-y-0 transition-all duration-500 hover:bg-venuea-gold">
-                  장바구니 담기
-                </button>
-              </div>
-              <div className="flex justify-between items-start">
-                <div>
-                  <h4 className="text-lg font-bold text-venuea-dark mb-1 uppercase tracking-tight">{product.name}</h4>
-                  <p className="text-[10px] text-venuea-muted uppercase tracking-widest">{product.category}</p>
+        {isLoading ? (
+          <div className="flex justify-center items-center py-40">
+            <Loader2 className="animate-spin text-venuea-gold" size={40} />
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-12 gap-y-16">
+            {filteredProducts.map((product, index) => (
+              <motion.div
+                key={product.id}
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: index * 0.1 }}
+                className="group cursor-pointer"
+              >
+                <div className="aspect-[3/4] overflow-hidden bg-[#F9F9F9] mb-6 relative">
+                  <img 
+                    src={product.image_url || "https://picsum.photos/seed/placeholder/800/1000"} 
+                    alt={product.name} 
+                    className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700"
+                    referrerPolicy="no-referrer"
+                  />
+                  <div className="absolute inset-0 bg-venuea-dark/0 group-hover:bg-venuea-dark/5 transition-colors duration-500" />
+                  <button className="absolute bottom-4 left-4 right-4 bg-venuea-dark text-white py-3 text-[10px] font-bold uppercase tracking-widest opacity-0 group-hover:opacity-100 translate-y-4 group-hover:translate-y-0 transition-all duration-500 hover:bg-venuea-gold">
+                    장바구니 담기
+                  </button>
                 </div>
-                <p className="text-venuea-gold font-bold">{formatPrice(product.price)}</p>
-              </div>
-            </motion.div>
-          ))}
-        </div>
+                <div className="flex justify-between items-start">
+                  <div>
+                    <h4 className="text-lg font-bold text-venuea-dark mb-1 uppercase tracking-tight">{product.name}</h4>
+                    <p className="text-[10px] text-venuea-muted uppercase tracking-widest">{product.category}</p>
+                  </div>
+                  <p className="text-venuea-gold font-bold">{formatPrice(product.price)}</p>
+                </div>
+              </motion.div>
+            ))}
+          </div>
+        )}
 
-        {filteredProducts.length === 0 && (
+        {!isLoading && filteredProducts.length === 0 && (
           <div className="py-40 text-center">
             <p className="text-venuea-dark/40 font-serif italic text-2xl">검색 결과가 없습니다.</p>
           </div>
