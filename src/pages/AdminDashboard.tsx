@@ -589,10 +589,11 @@ function AdminProducts() {
                   <input 
                     type="file" 
                     accept="image/*"
-                    required
+                    required={!editingId}
                     onChange={e => setMainImage(e.target.files ? e.target.files[0] : null)}
                     className="w-full border border-gray-200 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-venuea-dark/20"
                   />
+                  {editingId && <p className="text-[10px] text-gray-400">수정 시 이미지를 변경하려면 파일을 선택하세요. 선택하지 않으면 기존 이미지가 유지됩니다.</p>}
                 </div>
                 <div className="space-y-1">
                   <label className="text-xs font-bold text-gray-400 uppercase">상세 설명 이미지 (긴 이미지)</label>

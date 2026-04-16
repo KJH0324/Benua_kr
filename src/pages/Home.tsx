@@ -37,7 +37,24 @@ export default function Home() {
       try {
         const response = await fetch("/api/products");
         const data = await response.json();
-        // Filter by show_on_main and take top 3
+        
+        // Featured selection (Monthly recommendation) - Top 3 by discount rate
+        const featured = [...data]
+          .sort((a: any, b: any) => (b.discount_rate || 0) - (a.discount_rate || 0))
+          .slice(0, 3)
+          .map((p: any) => ({
+            id: p.id,
+            name: p.name,
+            description: p.description,
+            price: formatPrice(p.price * (1 - (p.discount_rate || 0) / 100)),
+            image: p.image_url || "https://picsum.photos/seed/placeholder/800/1000"
+          }));
+        
+        if (featured.length > 0) {
+          setFeaturedProductsFromDB(featured);
+        }
+
+        // Featured Grid (Craftsmanship) - Filter by show_on_main and take top 3
         const mainProducts = data.filter((p: any) => p.show_on_main === 1).slice(0, 3);
         setRealProducts(mainProducts);
       } catch (error) {
@@ -47,12 +64,15 @@ export default function Home() {
     fetchProducts();
   }, []);
 
+  const [featuredProductsFromDB, setFeaturedProductsFromDB] = useState<any[]>([]);
+  const displayFeatured = featuredProductsFromDB.length > 0 ? featuredProductsFromDB : featuredProducts;
+
   useEffect(() => {
     const interval = setInterval(() => {
-      setActiveFeatured((prev) => (prev + 1) % featuredProducts.length);
+      setActiveFeatured((prev) => (prev + 1) % displayFeatured.length);
     }, 5000);
     return () => clearInterval(interval);
-  }, []);
+  }, [displayFeatured.length]);
 
   return (
     <div className="relative">
@@ -138,8 +158,8 @@ export default function Home() {
                     initial={{ scale: 1.1 }}
                     animate={{ scale: 1 }}
                     transition={{ duration: 1.2 }}
-                    src={featuredProducts[activeFeatured].image}
-                    alt={featuredProducts[activeFeatured].name}
+                    src={displayFeatured[activeFeatured].image}
+                    alt={displayFeatured[activeFeatured].name}
                     className="w-full h-full object-cover"
                     referrerPolicy="no-referrer"
                   />
@@ -151,7 +171,7 @@ export default function Home() {
                     transition={{ delay: 0.2 }}
                     className="text-2xl md:text-4xl font-bold text-venuea-dark"
                   >
-                    {featuredProducts[activeFeatured].name}
+                    {displayFeatured[activeFeatured].name}
                   </motion.h4>
                   <motion.p 
                     initial={{ y: 20, opacity: 0 }}
@@ -159,7 +179,7 @@ export default function Home() {
                     transition={{ delay: 0.3 }}
                     className="text-base md:text-lg text-venuea-muted leading-relaxed"
                   >
-                    {featuredProducts[activeFeatured].description}
+                    {displayFeatured[activeFeatured].description}
                   </motion.p>
                   <motion.div 
                     initial={{ y: 20, opacity: 0 }}
@@ -167,8 +187,8 @@ export default function Home() {
                     transition={{ delay: 0.4 }}
                     className="flex flex-wrap items-center gap-6"
                   >
-                    <span className="text-xl md:text-2xl font-bold text-venuea-gold">{featuredProducts[activeFeatured].price}</span>
-                    <Link to="/shop" className="text-sm font-bold uppercase tracking-widest text-venuea-dark border-b-2 border-venuea-dark pb-1 hover:text-venuea-gold hover:border-venuea-gold transition-all">
+                    <span className="text-xl md:text-2xl font-bold text-venuea-gold">{displayFeatured[activeFeatured].price}</span>
+                    <Link to={`/product/${displayFeatured[activeFeatured].id}`} className="text-sm font-bold uppercase tracking-widest text-venuea-dark border-b-2 border-venuea-dark pb-1 hover:text-venuea-gold hover:border-venuea-gold transition-all">
                       자세히 보기
                     </Link>
                   </motion.div>
@@ -179,7 +199,7 @@ export default function Home() {
 
           {/* Indicators */}
           <div className="flex justify-center mt-12 space-x-4">
-            {featuredProducts.map((_, i) => (
+            {displayFeatured.map((_, i) => (
               <button
                 key={i}
                 onClick={() => setActiveFeatured(i)}
