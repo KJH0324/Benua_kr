@@ -181,8 +181,9 @@ function AdminProducts() {
     price: 0,
     category: "리빙",
     description: "",
-    image_url: ""
   });
+  const [mainImage, setMainImage] = useState<File | null>(null);
+  const [descImage, setDescImage] = useState<File | null>(null);
 
   const fetchProducts = async () => {
     setIsLoading(true);
@@ -203,16 +204,26 @@ function AdminProducts() {
 
   const handleAddProduct = async (e: React.FormEvent) => {
     e.preventDefault();
+    
+    const formData = new FormData();
+    formData.append("name", newProduct.name);
+    formData.append("price", newProduct.price.toString());
+    formData.append("category", newProduct.category);
+    formData.append("description", newProduct.description);
+    if (mainImage) formData.append("image", mainImage);
+    if (descImage) formData.append("description_image", descImage);
+
     try {
       const response = await fetch("/api/products", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(newProduct),
+        body: formData,
       });
       if (response.ok) {
         toast.success("상품이 등록되었습니다.");
         setIsModalOpen(false);
-        setNewProduct({ name: "", price: 0, category: "리빙", description: "", image_url: "" });
+        setNewProduct({ name: "", price: 0, category: "리빙", description: "" });
+        setMainImage(null);
+        setDescImage(null);
         fetchProducts();
       } else {
         toast.error("상품 등록 실패");
@@ -345,12 +356,21 @@ function AdminProducts() {
                   </div>
                 </div>
                 <div className="space-y-1">
-                  <label className="text-xs font-bold text-gray-400 uppercase">이미지 URL</label>
+                  <label className="text-xs font-bold text-gray-400 uppercase">대표 이미지</label>
                   <input 
-                    type="text" 
-                    value={newProduct.image_url}
-                    onChange={e => setNewProduct({...newProduct, image_url: e.target.value})}
-                    placeholder="https://..."
+                    type="file" 
+                    accept="image/*"
+                    required
+                    onChange={e => setMainImage(e.target.files ? e.target.files[0] : null)}
+                    className="w-full border border-gray-200 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-venuea-dark/20"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-gray-400 uppercase">상세 설명 이미지 (긴 이미지)</label>
+                  <input 
+                    type="file" 
+                    accept="image/*"
+                    onChange={e => setDescImage(e.target.files ? e.target.files[0] : null)}
                     className="w-full border border-gray-200 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-venuea-dark/20"
                   />
                 </div>

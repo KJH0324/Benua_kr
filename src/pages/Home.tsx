@@ -7,6 +7,7 @@ import { cn, formatPrice } from "../lib/utils";
 export default function Home() {
   const [isLoaded, setIsLoaded] = useState(false);
   const [activeFeatured, setActiveFeatured] = useState(0);
+  const [realProducts, setRealProducts] = useState<any[]>([]);
 
   const featuredProducts = [
     {
@@ -31,6 +32,19 @@ export default function Home() {
       image: "https://images.unsplash.com/photo-1493663284031-b7e3aefcae8e?auto=format&fit=crop&q=80&w=1000"
     }
   ];
+
+  useEffect(() => {
+    const fetchProducts = async () => {
+      try {
+        const response = await fetch("/api/products");
+        const data = await response.json();
+        setRealProducts(data.slice(0, 3));
+      } catch (error) {
+        console.error(error);
+      }
+    };
+    fetchProducts();
+  }, []);
 
   useEffect(() => {
     const timer = setTimeout(() => setIsLoaded(true), 1000);
@@ -87,7 +101,7 @@ export default function Home() {
               순수한 우아함을<br />경험하세요.
             </h1>
             <p className="text-base md:text-[16px] text-venuea-muted max-w-[400px] mb-12 leading-[1.6]">
-              베누아는 미니멀리즘 공예의 정점을 상징합니다. 독자적인 컬렉션을 탐색하고 안전한 인프라에서 제공되는 완벽한 쇼핑 경험을 즐겨보세요.
+              베누아는 미니멀리즘 공예의 정점을 상징합니다. 독자적인 컬렉션을 탐색하고 완벽한 쇼핑 경험을 즐겨보세요.
             </p>
             <div className="flex flex-col sm:flex-row gap-5">
               <Link 
@@ -227,25 +241,51 @@ export default function Home() {
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-12">
-            {[1, 2, 3].map((i) => (
-              <motion.div 
-                key={i}
-                whileHover={{ y: -10 }}
-                className="group cursor-pointer"
-              >
-                <div className="aspect-[3/4] overflow-hidden bg-[#F9F9F9] mb-6">
-                  <img 
-                    src={`https://picsum.photos/seed/venuea-${i}/800/1000`} 
-                    alt="Product" 
-                    className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700"
-                    referrerPolicy="no-referrer"
-                  />
-                </div>
-                <h4 className="text-lg font-bold text-venuea-dark mb-2 uppercase tracking-tight">아티저널 리빙 아이템 {i}</h4>
-                <p className="text-xs text-venuea-muted uppercase tracking-widest mb-2">리빙 / 데코</p>
-                <p className="text-venuea-gold font-bold">₩45,000</p>
-              </motion.div>
-            ))}
+            {realProducts.length > 0 ? (
+              realProducts.map((product) => (
+                <motion.div 
+                  key={product.id}
+                  whileHover={{ y: -10 }}
+                  className="group"
+                >
+                  <Link to={`/product/${product.id}`} className="block">
+                    <div className="aspect-[3/4] overflow-hidden bg-[#F9F9F9] mb-6">
+                      <img 
+                        src={product.image_url || `https://picsum.photos/seed/venuea-${product.id}/800/1000`} 
+                        alt={product.name} 
+                        className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700"
+                        referrerPolicy="no-referrer"
+                      />
+                    </div>
+                    <h4 className="text-lg font-bold text-venuea-dark mb-2 uppercase tracking-tight">{product.name}</h4>
+                    <p className="text-xs text-venuea-muted uppercase tracking-widest mb-2">{product.category}</p>
+                    <p className="text-venuea-gold font-bold">{formatPrice(product.price)}</p>
+                  </Link>
+                </motion.div>
+              ))
+            ) : (
+              [1, 2, 3].map((i) => (
+                <motion.div 
+                  key={i}
+                  whileHover={{ y: -10 }}
+                  className="group"
+                >
+                  <Link to="/shop" className="block">
+                    <div className="aspect-[3/4] overflow-hidden bg-[#F9F9F9] mb-6">
+                      <img 
+                        src={`https://picsum.photos/seed/venuea-${i}/800/1000`} 
+                        alt="Product" 
+                        className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700"
+                        referrerPolicy="no-referrer"
+                      />
+                    </div>
+                    <h4 className="text-lg font-bold text-venuea-dark mb-2 uppercase tracking-tight">아티저널 리빙 아이템 {i}</h4>
+                    <p className="text-xs text-venuea-muted uppercase tracking-widest mb-2">리빙 / 데코</p>
+                    <p className="text-venuea-gold font-bold">₩45,000</p>
+                  </Link>
+                </motion.div>
+              ))
+            )}
           </div>
         </div>
       </section>

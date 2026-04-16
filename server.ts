@@ -7,6 +7,8 @@ import crypto from "crypto";
 import jwt from "jsonwebtoken";
 import cookieParser from "cookie-parser";
 import dotenv from "dotenv";
+import multer from "multer";
+import fs from "fs";
 
 dotenv.config();
 
@@ -16,6 +18,25 @@ const __dirname = path.dirname(__filename);
 // Database setup
 const db = new Database("benua.db");
 
+// Ensure uploads directory exists
+const uploadsDir = path.join(process.cwd(), "uploads");
+if (!fs.existsSync(uploadsDir)) {
+  fs.mkdirSync(uploadsDir);
+}
+
+// Multer setup for file uploads
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    cb(null, "uploads/");
+  },
+  filename: (req, file, cb) => {
+    const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
+    cb(null, uniqueSuffix + path.extname(file.originalname));
+  },
+});
+
+const upload = multer({ storage });
+
 // Initialize tables
 db.exec(`
   CREATE TABLE IF NOT EXISTS products (
@@ -24,6 +45,7 @@ db.exec(`
     price INTEGER NOT NULL,
     description TEXT,
     image_url TEXT,
+    description_image_url TEXT,
     category TEXT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
@@ -53,6 +75,7 @@ async function startServer() {
 
   app.use(express.json());
   app.use(cookieParser());
+  app.use("/uploads", express.static(path.join(process.cwd(), "uploads")));
 
   // --- Auth Middleware ---
   const authenticateAdmin = (req: any, res: any, next: any) => {
@@ -124,12 +147,20 @@ async function startServer() {
     }
   });
 
-  app.post("/api/products", authenticateAdmin, (req, res) => {
-    const { name, price, description, image_url, category } = req.body;
+  app.post("/api/products", authenticateAdmin, upload.fields([
+    { name: "image", maxCount: 1 },
+    { name: "description_image", maxCount: 1 }
+  ]), (req: any, res) => {
+    const { name, price, description, category } = req.body;
+    const files = req.files as { [fieldname: string]: Express.Multer.File[] };
+    
+    const image_url = files["image"] ? `/uploads/${files["image"][0].filename}` : null;
+    const description_image_url = files["description_image"] ? `/uploads/${files["description_image"][0].filename}` : null;
+
     try {
       const info = db.prepare(
-        "INSERT INTO products (name, price, description, image_url, category) VALUES (?, ?, ?, ?, ?)"
-      ).run(name, price, description, image_url, category);
+        "INSERT INTO products (name, price, description, image_url, description_image_url, category) VALUES (?, ?, ?, ?, ?, ?)"
+      ).run(name, price, parseInt(price), description, image_url, description_image_url, category);
       res.json({ id: info.lastInsertRowid, success: true });
     } catch (err) {
       res.status(500).json({ error: "Failed to create product" });

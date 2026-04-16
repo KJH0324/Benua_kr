@@ -11,6 +11,10 @@ import Profile from "./pages/Profile";
 import Login from "./pages/Login";
 import AdminDashboard from "./pages/AdminDashboard";
 import AdminLogin from "./pages/AdminLogin";
+import About from "./pages/About";
+import Contact from "./pages/Contact";
+import Terms from "./pages/Terms";
+import Privacy from "./pages/Privacy";
 import { motion, AnimatePresence } from "motion/react";
 
 export default function App() {
@@ -24,6 +28,10 @@ export default function App() {
               <Route path="/" element={<Home />} />
               <Route path="/shop" element={<Shop />} />
               <Route path="/product/:id" element={<ProductDetail />} />
+              <Route path="/about" element={<About />} />
+              <Route path="/contact" element={<Contact />} />
+              <Route path="/terms" element={<Terms />} />
+              <Route path="/privacy" element={<Privacy />} />
               <Route path="/cart" element={<Cart />} />
               <Route path="/track" element={<TrackOrder />} />
               <Route path="/profile" element={<Profile />} />

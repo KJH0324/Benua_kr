@@ -1,0 +1,93 @@
+import React from "react";
+import { motion } from "motion/react";
+import { Mail, Phone, MapPin, Send } from "lucide-react";
+import { toast } from "sonner";
+
+export default function Contact() {
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    toast.success("메시지가 전송되었습니다. 곧 연락드리겠습니다.");
+  };
+
+  return (
+    <div className="pt-32 pb-20 px-8 md:px-[60px]">
+      <div className="max-w-7xl mx-auto">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-20">
+          <motion.div
+            initial={{ opacity: 0, x: -20 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ duration: 0.8 }}
+          >
+            <h1 className="text-4xl md:text-6xl font-bold text-venuea-dark mb-8 tracking-tight">문의하기</h1>
+            <p className="text-lg text-venuea-muted mb-12 font-light leading-relaxed">
+              베뉴아의 제품이나 서비스에 대해 궁금한 점이 있으신가요? <br />
+              아래 연락처나 폼을 통해 언제든 문의해 주세요.
+            </p>
+
+            <div className="space-y-8">
+              <div className="flex items-start space-x-6">
+                <div className="w-12 h-12 bg-venuea-dark text-venuea-gold flex items-center justify-center rounded-full shrink-0">
+                  <Mail size={20} />
+                </div>
+                <div>
+                  <h4 className="text-xs font-bold uppercase tracking-widest text-venuea-dark mb-1">이메일</h4>
+                  <p className="text-venuea-muted">support@benua.shop</p>
+                </div>
+              </div>
+              <div className="flex items-start space-x-6">
+                <div className="w-12 h-12 bg-venuea-dark text-venuea-gold flex items-center justify-center rounded-full shrink-0">
+                  <Phone size={20} />
+                </div>
+                <div>
+                  <h4 className="text-xs font-bold uppercase tracking-widest text-venuea-dark mb-1">전화</h4>
+                  <p className="text-venuea-muted">02-1234-5678</p>
+                </div>
+              </div>
+              <div className="flex items-start space-x-6">
+                <div className="w-12 h-12 bg-venuea-dark text-venuea-gold flex items-center justify-center rounded-full shrink-0">
+                  <MapPin size={20} />
+                </div>
+                <div>
+                  <h4 className="text-xs font-bold uppercase tracking-widest text-venuea-dark mb-1">주소</h4>
+                  <p className="text-venuea-muted">서울특별시 강남구 테헤란로 123 베뉴아 빌딩 5층</p>
+                </div>
+              </div>
+            </div>
+          </motion.div>
+
+          <motion.div
+            initial={{ opacity: 0, x: 20 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ duration: 0.8 }}
+            className="bg-white p-10 shadow-[0_40px_80px_rgba(0,0,0,0.05)] border border-venuea-dark/5"
+          >
+            <form onSubmit={handleSubmit} className="space-y-6">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="space-y-2">
+                  <label className="text-[10px] font-bold uppercase tracking-widest text-venuea-dark/40">성함</label>
+                  <input type="text" required className="w-full bg-[#F9F9F9] border border-venuea-dark/10 px-4 py-3 text-sm focus:outline-none focus:border-venuea-gold" />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-[10px] font-bold uppercase tracking-widest text-venuea-dark/40">이메일</label>
+                  <input type="email" required className="w-full bg-[#F9F9F9] border border-venuea-dark/10 px-4 py-3 text-sm focus:outline-none focus:border-venuea-gold" />
+                </div>
+              </div>
+              <div className="space-y-2">
+                <label className="text-[10px] font-bold uppercase tracking-widest text-venuea-dark/40">제목</label>
+                <input type="text" required className="w-full bg-[#F9F9F9] border border-venuea-dark/10 px-4 py-3 text-sm focus:outline-none focus:border-venuea-gold" />
+              </div>
+              <div className="space-y-2">
+                <label className="text-[10px] font-bold uppercase tracking-widest text-venuea-dark/40">메시지</label>
+                <textarea rows={5} required className="w-full bg-[#F9F9F9] border border-venuea-dark/10 px-4 py-3 text-sm focus:outline-none focus:border-venuea-gold resize-none" />
+              </div>
+              <button className="w-full bg-venuea-dark text-white py-4 font-bold uppercase tracking-widest hover:bg-venuea-gold transition-all flex items-center justify-center space-x-3 group">
+                <span>메시지 보내기</span>
+                <Send size={16} className="group-hover:translate-x-1 group-hover:-translate-y-1 transition-transform" />
+              </button>
+            </form>
+          </motion.div>
+        </div>
+      </div>
+    </div>
+  );
+}

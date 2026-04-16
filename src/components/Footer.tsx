@@ -49,22 +49,10 @@ export default function Footer() {
       
       <div className="max-w-[1440px] mx-auto mt-16 pt-8 border-t border-venuea-dark/5 flex flex-col md:flex-row justify-between items-center space-y-8 md:space-y-0">
         <div className="flex flex-wrap gap-8 items-center justify-center md:justify-start">
-          <span className="flex items-center gap-2 text-[10px] text-[#CCC] uppercase tracking-widest">
-            <div className="w-1 h-1 bg-venuea-gold rounded-full"></div>
-            AWS Lightsail 암호화 적용
-          </span>
-          <span className="flex items-center gap-2 text-[10px] text-[#CCC] uppercase tracking-widest">
-            <div className="w-1 h-1 bg-venuea-gold rounded-full"></div>
-            2FA 인증 관리자 시스템
-          </span>
-          <span className="flex items-center gap-2 text-[10px] text-[#CCC] uppercase tracking-widest">
-            <div className="w-1 h-1 bg-venuea-gold rounded-full"></div>
-            보안 결제 시스템 인증
-          </span>
         </div>
         
         <p className="text-[10px] text-venuea-muted uppercase tracking-widest">
-          © 2024 Benua. All rights reserved.
+          © 2026 Benua. All rights reserved.
         </p>
       </div>
     </footer>

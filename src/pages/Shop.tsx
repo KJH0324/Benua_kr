@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { motion } from "motion/react";
+import { Link } from "react-router-dom";
 import { Search, Filter, ChevronDown, Loader2 } from "lucide-react";
 import { formatPrice } from "../lib/utils";
 
@@ -91,27 +92,29 @@ export default function Shop() {
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: index * 0.1 }}
-                className="group cursor-pointer"
+                className="group"
               >
-                <div className="aspect-[3/4] overflow-hidden bg-[#F9F9F9] mb-6 relative">
-                  <img 
-                    src={product.image_url || "https://picsum.photos/seed/placeholder/800/1000"} 
-                    alt={product.name} 
-                    className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700"
-                    referrerPolicy="no-referrer"
-                  />
-                  <div className="absolute inset-0 bg-venuea-dark/0 group-hover:bg-venuea-dark/5 transition-colors duration-500" />
-                  <button className="absolute bottom-4 left-4 right-4 bg-venuea-dark text-white py-3 text-[10px] font-bold uppercase tracking-widest opacity-0 group-hover:opacity-100 translate-y-4 group-hover:translate-y-0 transition-all duration-500 hover:bg-venuea-gold">
-                    장바구니 담기
-                  </button>
-                </div>
-                <div className="flex justify-between items-start">
-                  <div>
-                    <h4 className="text-lg font-bold text-venuea-dark mb-1 uppercase tracking-tight">{product.name}</h4>
-                    <p className="text-[10px] text-venuea-muted uppercase tracking-widest">{product.category}</p>
+                <Link to={`/product/${product.id}`} className="block">
+                  <div className="aspect-[3/4] overflow-hidden bg-[#F9F9F9] mb-6 relative">
+                    <img 
+                      src={product.image_url || "https://picsum.photos/seed/placeholder/800/1000"} 
+                      alt={product.name} 
+                      className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700"
+                      referrerPolicy="no-referrer"
+                    />
+                    <div className="absolute inset-0 bg-venuea-dark/0 group-hover:bg-venuea-dark/5 transition-colors duration-500" />
+                    <div className="absolute bottom-4 left-4 right-4 bg-venuea-dark text-white py-3 text-[10px] font-bold uppercase tracking-widest opacity-0 group-hover:opacity-100 translate-y-4 group-hover:translate-y-0 transition-all duration-500 hover:bg-venuea-gold text-center">
+                      상세 보기
+                    </div>
                   </div>
-                  <p className="text-venuea-gold font-bold">{formatPrice(product.price)}</p>
-                </div>
+                  <div className="flex justify-between items-start">
+                    <div>
+                      <h4 className="text-lg font-bold text-venuea-dark mb-1 uppercase tracking-tight">{product.name}</h4>
+                      <p className="text-[10px] text-venuea-muted uppercase tracking-widest">{product.category}</p>
+                    </div>
+                    <p className="text-venuea-gold font-bold">{formatPrice(product.price)}</p>
+                  </div>
+                </Link>
               </motion.div>
             ))}
           </div>

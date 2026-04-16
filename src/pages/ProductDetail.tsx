@@ -1,34 +1,58 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useParams, Link } from "react-router-dom";
 import { motion } from "motion/react";
-import { ShoppingBag, Heart, Share2, ChevronRight, Truck, ShieldCheck, RotateCcw } from "lucide-react";
+import { ShoppingBag, Heart, ChevronRight, Truck, ShieldCheck, RotateCcw, Loader2 } from "lucide-react";
 import { formatPrice } from "../lib/utils";
+import { toast } from "sonner";
+
+interface Product {
+  id: number;
+  name: string;
+  price: number;
+  description: string;
+  image_url: string;
+  description_image_url: string;
+  category: string;
+}
 
 export default function ProductDetail() {
   const { id } = useParams();
   const [quantity, setQuantity] = useState(1);
-  const [activeImage, setActiveImage] = useState(0);
+  const [product, setProduct] = useState<Product | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
 
-  // Mock product data
-  const product = {
-    id,
-    name: "리넨 소파 커버",
-    price: 85000,
-    category: "리빙",
-    description: "베누아의 시그니처 리넨 소파 커버는 100% 유기농 유럽산 아마로 제작되었습니다. 가구 보호와 동시에 거실 공간에 부드럽고 자연스러운 분위기를 선사하도록 디자인되었습니다. 통기성이 뛰어난 소재는 세탁할수록 부드러워지며, 오랜 시간 지속되는 편안함과 스타일을 보장합니다.",
-    details: [
-      "100% 유기농 리넨",
-      "뛰어난 통기성과 내구성",
-      "세탁기 사용 가능",
-      "4가지 내추럴 톤 선택 가능",
-      "수공예 마감 처리"
-    ],
-    images: [
-      "https://picsum.photos/seed/sofa1/1200/1600",
-      "https://picsum.photos/seed/sofa2/1200/1600",
-      "https://picsum.photos/seed/sofa3/1200/1600",
-    ]
-  };
+  useEffect(() => {
+    const fetchProduct = async () => {
+      try {
+        const response = await fetch(`/api/products/${id}`);
+        if (!response.ok) throw new Error("상품을 찾을 수 없습니다.");
+        const data = await response.json();
+        setProduct(data);
+      } catch (error) {
+        toast.error("상품 정보를 불러오지 못했습니다.");
+      } finally {
+        setIsLoading(false);
+      }
+    };
+    fetchProduct();
+  }, [id]);
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <Loader2 className="animate-spin text-venuea-gold" size={48} />
+      </div>
+    );
+  }
+
+  if (!product) {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center space-y-4">
+        <h1 className="text-2xl font-bold">상품을 찾을 수 없습니다.</h1>
+        <Link to="/shop" className="text-venuea-gold underline">스토어로 돌아가기</Link>
+      </div>
+    );
+  }
 
   return (
     <div className="pt-32 pb-20 px-6">
@@ -50,25 +74,12 @@ export default function ProductDetail() {
               className="aspect-[3/4] bg-[#F9F9F9] overflow-hidden"
             >
               <img 
-                src={product.images[activeImage]} 
+                src={product.image_url || "https://picsum.photos/seed/placeholder/1200/1600"} 
                 alt={product.name} 
                 className="w-full h-full object-cover"
                 referrerPolicy="no-referrer"
               />
             </motion.div>
-            <div className="grid grid-cols-3 gap-4">
-              {product.images.map((img, idx) => (
-                <button 
-                  key={idx}
-                  onClick={() => setActiveImage(idx)}
-                  className={`aspect-square overflow-hidden border-2 transition-all ${
-                    activeImage === idx ? "border-venuea-gold" : "border-transparent opacity-60 hover:opacity-100"
-                  }`}
-                >
-                  <img src={img} alt="" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
-                </button>
-              ))}
-            </div>
           </div>
 
           {/* Product Info */}
@@ -79,21 +90,9 @@ export default function ProductDetail() {
               <p className="text-2xl font-bold text-venuea-dark">{formatPrice(product.price)}</p>
             </div>
 
-            <p className="text-venuea-muted leading-relaxed font-light text-lg">
+            <p className="text-venuea-muted leading-relaxed font-light text-lg whitespace-pre-wrap">
               {product.description}
             </p>
-
-            <div className="space-y-4">
-              <h4 className="text-xs font-bold uppercase tracking-widest text-venuea-dark">주요 특징</h4>
-              <ul className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                {product.details.map((detail, i) => (
-                  <li key={i} className="flex items-center space-x-3 text-sm text-venuea-muted">
-                    <div className="w-1.5 h-1.5 bg-venuea-gold rounded-full" />
-                    <span>{detail}</span>
-                  </li>
-                ))}
-              </ul>
-            </div>
 
             <div className="pt-8 border-t border-venuea-dark/10 space-y-6">
               <div className="flex items-center space-x-6">
@@ -138,6 +137,21 @@ export default function ProductDetail() {
             </div>
           </div>
         </div>
+
+        {/* Long Description Image */}
+        {product.description_image_url && (
+          <div className="mt-20 pt-20 border-t border-venuea-dark/5">
+            <div className="max-w-4xl mx-auto">
+              <h3 className="text-center text-xs font-bold uppercase tracking-[4px] text-venuea-gold mb-12">Product Details</h3>
+              <img 
+                src={product.description_image_url} 
+                alt="Product Details" 
+                className="w-full h-auto shadow-2xl"
+                referrerPolicy="no-referrer"
+              />
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
