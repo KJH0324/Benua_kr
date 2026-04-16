@@ -181,6 +181,10 @@ function AdminProducts() {
     price: 0,
     category: "리빙",
     description: "",
+    stock: 0,
+    material: "",
+    dimensions: "",
+    origin: ""
   });
   const [mainImage, setMainImage] = useState<File | null>(null);
   const [descImage, setDescImage] = useState<File | null>(null);
@@ -210,6 +214,10 @@ function AdminProducts() {
     formData.append("price", newProduct.price.toString());
     formData.append("category", newProduct.category);
     formData.append("description", newProduct.description);
+    formData.append("stock", newProduct.stock.toString());
+    formData.append("material", newProduct.material);
+    formData.append("dimensions", newProduct.dimensions);
+    formData.append("origin", newProduct.origin);
     if (mainImage) formData.append("image", mainImage);
     if (descImage) formData.append("description_image", descImage);
 
@@ -221,7 +229,7 @@ function AdminProducts() {
       if (response.ok) {
         toast.success("상품이 등록되었습니다.");
         setIsModalOpen(false);
-        setNewProduct({ name: "", price: 0, category: "리빙", description: "" });
+        setNewProduct({ name: "", price: 0, category: "리빙", description: "", stock: 0, material: "", dimensions: "", origin: "" });
         setMainImage(null);
         setDescImage(null);
         fetchProducts();
@@ -355,6 +363,49 @@ function AdminProducts() {
                     </select>
                   </div>
                 </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold text-gray-400 uppercase">재고 수량</label>
+                    <input 
+                      type="number" 
+                      value={newProduct.stock}
+                      onChange={e => setNewProduct({...newProduct, stock: parseInt(e.target.value)})}
+                      className="w-full border border-gray-200 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-venuea-dark/20"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold text-gray-400 uppercase">소재</label>
+                    <input 
+                      type="text" 
+                      value={newProduct.material}
+                      onChange={e => setNewProduct({...newProduct, material: e.target.value})}
+                      className="w-full border border-gray-200 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-venuea-dark/20"
+                      placeholder="예: 오크 원목, 린넨 100%"
+                    />
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold text-gray-400 uppercase">크기/치수</label>
+                    <input 
+                      type="text" 
+                      value={newProduct.dimensions}
+                      onChange={e => setNewProduct({...newProduct, dimensions: e.target.value})}
+                      className="w-full border border-gray-200 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-venuea-dark/20"
+                      placeholder="예: W1200 x D600 x H750"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold text-gray-400 uppercase">원산지</label>
+                    <input 
+                      type="text" 
+                      value={newProduct.origin}
+                      onChange={e => setNewProduct({...newProduct, origin: e.target.value})}
+                      className="w-full border border-gray-200 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-venuea-dark/20"
+                      placeholder="예: 대한민국"
+                    />
+                  </div>
+                </div>
                 <div className="space-y-1">
                   <label className="text-xs font-bold text-gray-400 uppercase">대표 이미지</label>
                   <input 
@@ -396,10 +447,31 @@ function AdminProducts() {
 }
 
 function AdminOrders() {
+  const handleClearTestOrders = async () => {
+    if (!confirm("테스트 과정에서 생성된 모든 주문을 삭제하시겠습니까? 이 작업은 되돌릴 수 없습니다.")) return;
+    try {
+      const response = await fetch("/api/admin/orders/test", { method: "DELETE" });
+      if (response.ok) {
+        toast.success("모든 테스트 주문이 삭제되었습니다.");
+      } else {
+        toast.error("삭제 실패");
+      }
+    } catch (error) {
+      toast.error("서버 오류");
+    }
+  };
+
   return (
     <div className="space-y-6">
       <header className="flex justify-between items-center">
         <h1 className="text-2xl font-serif font-bold text-gray-900">주문 관리</h1>
+        <button 
+          onClick={handleClearTestOrders}
+          className="bg-red-50 text-red-600 px-4 py-2 rounded-lg text-sm font-medium flex items-center space-x-2 hover:bg-red-100 transition-colors"
+        >
+          <Trash2 size={18} />
+          <span>테스트 주문 전체 삭제</span>
+        </button>
       </header>
       <div className="bg-white p-20 text-center rounded-xl border border-gray-200">
         <p className="text-gray-400">주문 내역이 없습니다.</p>

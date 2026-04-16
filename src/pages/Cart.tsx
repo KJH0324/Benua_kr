@@ -1,17 +1,30 @@
-import { useState } from "react";
-import { motion } from "motion/react";
-import { Trash2, Plus, Minus, ArrowRight, ShoppingBag } from "lucide-react";
-import { Link } from "react-router-dom";
+import { useState, useEffect } from "react";
+import { motion, AnimatePresence } from "motion/react";
+import { Trash2, Plus, Minus, ArrowRight, ShoppingBag, HelpCircle } from "lucide-react";
+import { Link, useNavigate } from "react-router-dom";
 import { formatPrice } from "../lib/utils";
+import { toast } from "sonner";
 
 export default function Cart() {
+  const navigate = useNavigate();
   const [items, setItems] = useState([
     { id: "1", name: "Linen Sofa Cover", price: 85000, quantity: 1, image: "https://picsum.photos/seed/sofa/800/1000" },
     { id: "2", name: "Ceramic Coffee Set", price: 42000, quantity: 2, image: "https://picsum.photos/seed/coffee/800/1000" },
   ]);
+  const [user, setUser] = useState<any>(null);
+  const [showShippingTooltip, setShowShippingTooltip] = useState(false);
+
+  useEffect(() => {
+    fetch("/api/auth/me")
+      .then(res => res.json())
+      .then(data => setUser(data.user));
+  }, []);
 
   const subtotal = items.reduce((acc, item) => acc + item.price * item.quantity, 0);
-  const shipping = 3000;
+  
+  // Shipping logic
+  const isJejuOrIsland = user?.address?.includes("제주") || user?.address?.includes("도서");
+  const shipping = isJejuOrIsland ? 5000 : 0;
   const total = subtotal + shipping;
 
   const updateQuantity = (id: string, delta: number) => {
@@ -22,6 +35,40 @@ export default function Cart() {
 
   const removeItem = (id: string) => {
     setItems(items.filter(item => item.id !== id));
+  };
+
+  const handleCheckout = async () => {
+    if (!user) {
+      toast.error("주문을 진행하려면 로그인이 필요합니다.");
+      navigate("/login");
+      return;
+    }
+
+    try {
+      const response = await fetch("/api/orders", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          user_id: user.id,
+          customer_name: user.name,
+          customer_email: user.email,
+          shipping_address: `${user.zipcode} ${user.address} ${user.detail_address}`,
+          total_amount: total,
+          shipping_fee: shipping
+        })
+      });
+
+      if (response.ok) {
+        toast.success("주문이 완료되었습니다.");
+        setItems([]);
+        // In a real app, redirect to an order success page
+        navigate("/shop");
+      } else {
+        toast.error("주문 처리 중 오류가 발생했습니다.");
+      }
+    } catch (error) {
+      toast.error("서버와 통신할 수 없습니다.");
+    }
   };
 
   if (items.length === 0) {
@@ -106,20 +153,50 @@ export default function Cart() {
               <h3 className="text-xl font-bold text-venuea-dark mb-8 border-b border-venuea-dark/10 pb-4 uppercase tracking-widest">주문 요약</h3>
               <div className="space-y-4 mb-8">
                 <div className="flex justify-between text-sm">
-                  <span className="text-venuea-muted">소계</span>
+                  <span className="text-venuea-muted">합계</span>
                   <span className="font-bold">{formatPrice(subtotal)}</span>
                 </div>
-                <div className="flex justify-between text-sm">
-                  <span className="text-venuea-muted">배송비</span>
-                  <span className="font-bold">{formatPrice(shipping)}</span>
+                <div className="flex justify-between text-sm relative">
+                  <div className="flex items-center space-x-1 text-venuea-muted">
+                    <span>배송비</span>
+                    <button 
+                      onMouseEnter={() => setShowShippingTooltip(true)}
+                      onMouseLeave={() => setShowShippingTooltip(false)}
+                      className="text-venuea-dark/40 hover:text-venuea-dark transition-colors"
+                    >
+                      <HelpCircle size={14} />
+                    </button>
+                    <AnimatePresence>
+                      {showShippingTooltip && (
+                        <motion.div 
+                          initial={{ opacity: 0, y: 5 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          exit={{ opacity: 0, y: 5 }}
+                          className="absolute left-0 top-6 w-48 bg-venuea-dark text-white text-[10px] p-3 rounded shadow-xl z-10"
+                        >
+                          기본 배송비는 무료입니다.<br/>
+                          제주 및 도서산간 지역은 5,000원의 추가 배송비가 부과됩니다.
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+                  </div>
+                  <span className="font-bold">{shipping === 0 ? "무료" : formatPrice(shipping)}</span>
                 </div>
+                {user?.address && (
+                  <div className="text-[10px] text-venuea-muted text-right">
+                    배송지: {user.address}
+                  </div>
+                )}
                 <div className="pt-4 border-t border-venuea-dark/10 flex justify-between items-end">
-                  <span className="text-lg font-bold text-venuea-dark uppercase tracking-widest">총 합계</span>
+                  <span className="text-lg font-bold text-venuea-dark uppercase tracking-widest">총 결제 금액</span>
                   <span className="text-2xl font-bold text-venuea-gold">{formatPrice(total)}</span>
                 </div>
               </div>
-              <button className="w-full bg-venuea-dark text-white py-4 font-bold uppercase tracking-widest hover:bg-venuea-gold transition-all flex items-center justify-center space-x-3 group">
-                <span>주문하기</span>
+              <button 
+                onClick={handleCheckout}
+                className="w-full bg-venuea-dark text-white py-4 font-bold uppercase tracking-widest hover:bg-venuea-gold transition-all flex items-center justify-center space-x-3 group"
+              >
+                <span>결제하기</span>
                 <ArrowRight size={18} className="group-hover:translate-x-1 transition-transform" />
               </button>
               <p className="text-[10px] text-center text-venuea-muted uppercase tracking-widest mt-6">

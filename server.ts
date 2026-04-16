@@ -39,6 +39,18 @@ const upload = multer({ storage });
 
 // Initialize tables
 db.exec(`
+  CREATE TABLE IF NOT EXISTS users (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    email TEXT UNIQUE,
+    password TEXT,
+    name TEXT,
+    phone TEXT,
+    zipcode TEXT,
+    address TEXT,
+    detail_address TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
   CREATE TABLE IF NOT EXISTS products (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL,
@@ -47,19 +59,32 @@ db.exec(`
     image_url TEXT,
     description_image_url TEXT,
     category TEXT,
+    stock INTEGER DEFAULT 0,
+    material TEXT,
+    dimensions TEXT,
+    origin TEXT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
 
   CREATE TABLE IF NOT EXISTS orders (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     order_number TEXT UNIQUE NOT NULL,
+    user_id INTEGER,
     customer_name TEXT,
     customer_email TEXT,
+    shipping_address TEXT,
     total_amount INTEGER,
+    shipping_fee INTEGER DEFAULT 0,
     status TEXT DEFAULT 'pending',
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
 `);
+
+// Add columns to existing products table if they don't exist (SQLite ALTER TABLE limitation workaround)
+try { db.exec(`ALTER TABLE products ADD COLUMN stock INTEGER DEFAULT 0`); } catch(e) {}
+try { db.exec(`ALTER TABLE products ADD COLUMN material TEXT`); } catch(e) {}
+try { db.exec(`ALTER TABLE products ADD COLUMN dimensions TEXT`); } catch(e) {}
+try { db.exec(`ALTER TABLE products ADD COLUMN origin TEXT`); } catch(e) {}
 
 const JWT_SECRET = process.env.JWT_SECRET || "benua-secret-key-2024";
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD; // Plain text password from .env
@@ -90,6 +115,59 @@ async function startServer() {
       res.status(401).json({ error: "Invalid token" });
     }
   };
+
+  // --- User Auth APIs ---
+  app.post("/api/auth/register", (req, res) => {
+    const { email, password, name, phone, zipcode, address, detail_address } = req.body;
+    try {
+      const hashedPassword = hashPassword(password);
+      const info = db.prepare(
+        "INSERT INTO users (email, password, name, phone, zipcode, address, detail_address) VALUES (?, ?, ?, ?, ?, ?, ?)"
+      ).run(email, hashedPassword, name, phone, zipcode, address, detail_address);
+      
+      const token = jwt.sign({ id: info.lastInsertRowid, role: "user" }, JWT_SECRET, { expiresIn: "24h" });
+      res.cookie("user_token", token, { httpOnly: true, secure: process.env.NODE_ENV === "production" });
+      res.json({ success: true });
+    } catch (err: any) {
+      if (err.code === "SQLITE_CONSTRAINT_UNIQUE") {
+        return res.status(400).json({ error: "이미 존재하는 이메일입니다." });
+      }
+      res.status(500).json({ error: "회원가입 실패" });
+    }
+  });
+
+  app.post("/api/auth/login", (req, res) => {
+    const { email, password } = req.body;
+    try {
+      const user = db.prepare("SELECT * FROM users WHERE email = ?").get(email) as any;
+      if (!user || user.password !== hashPassword(password)) {
+        return res.status(401).json({ error: "이메일 또는 비밀번호가 일치하지 않습니다." });
+      }
+      
+      const token = jwt.sign({ id: user.id, role: "user" }, JWT_SECRET, { expiresIn: "24h" });
+      res.cookie("user_token", token, { httpOnly: true, secure: process.env.NODE_ENV === "production" });
+      res.json({ success: true, user: { name: user.name, email: user.email, address: user.address } });
+    } catch (err) {
+      res.status(500).json({ error: "로그인 실패" });
+    }
+  });
+
+  app.get("/api/auth/me", (req, res) => {
+    const token = req.cookies.user_token;
+    if (!token) return res.json({ user: null });
+    try {
+      const decoded: any = jwt.verify(token, JWT_SECRET);
+      const user = db.prepare("SELECT id, name, email, phone, zipcode, address, detail_address FROM users WHERE id = ?").get(decoded.id);
+      res.json({ user });
+    } catch (err) {
+      res.json({ user: null });
+    }
+  });
+
+  app.post("/api/auth/logout", (req, res) => {
+    res.clearCookie("user_token");
+    res.json({ success: true });
+  });
 
   // --- API Routes ---
 
@@ -151,7 +229,7 @@ async function startServer() {
     { name: "image", maxCount: 1 },
     { name: "description_image", maxCount: 1 }
   ]), (req: any, res) => {
-    const { name, price, description, category } = req.body;
+    const { name, price, description, category, stock, material, dimensions, origin } = req.body;
     const files = req.files as { [fieldname: string]: Express.Multer.File[] };
     
     const image_url = files["image"] ? `/uploads/${files["image"][0].filename}` : null;
@@ -159,8 +237,8 @@ async function startServer() {
 
     try {
       const info = db.prepare(
-        "INSERT INTO products (name, price, description, image_url, description_image_url, category) VALUES (?, ?, ?, ?, ?, ?)"
-      ).run(name, price, parseInt(price), description, image_url, description_image_url, category);
+        "INSERT INTO products (name, price, description, image_url, description_image_url, category, stock, material, dimensions, origin) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+      ).run(name, price, parseInt(price), description, image_url, description_image_url, category, parseInt(stock) || 0, material, dimensions, origin);
       res.json({ id: info.lastInsertRowid, success: true });
     } catch (err) {
       res.status(500).json({ error: "Failed to create product" });
@@ -173,6 +251,31 @@ async function startServer() {
       res.json({ success: true });
     } catch (err) {
       res.status(500).json({ error: "Failed to delete product" });
+    }
+  });
+
+  // Orders
+  app.post("/api/orders", (req, res) => {
+    const { user_id, customer_name, customer_email, shipping_address, total_amount, shipping_fee } = req.body;
+    const order_number = `ORD-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+    
+    try {
+      const info = db.prepare(
+        "INSERT INTO orders (order_number, user_id, customer_name, customer_email, shipping_address, total_amount, shipping_fee) VALUES (?, ?, ?, ?, ?, ?, ?)"
+      ).run(order_number, user_id, customer_name, customer_email, shipping_address, total_amount, shipping_fee);
+      
+      res.json({ success: true, order_number });
+    } catch (err) {
+      res.status(500).json({ error: "주문 생성 실패" });
+    }
+  });
+
+  app.delete("/api/admin/orders/test", authenticateAdmin, (req, res) => {
+    try {
+      db.prepare("DELETE FROM orders").run();
+      res.json({ success: true });
+    } catch (err) {
+      res.status(500).json({ error: "테스트 주문 삭제 실패" });
     }
   });
 

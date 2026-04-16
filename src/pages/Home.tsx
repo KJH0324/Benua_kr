@@ -5,7 +5,6 @@ import { ArrowRight } from "lucide-react";
 import { cn, formatPrice } from "../lib/utils";
 
 export default function Home() {
-  const [isLoaded, setIsLoaded] = useState(false);
   const [activeFeatured, setActiveFeatured] = useState(0);
   const [realProducts, setRealProducts] = useState<any[]>([]);
 
@@ -47,11 +46,6 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
-    const timer = setTimeout(() => setIsLoaded(true), 1000);
-    return () => clearTimeout(timer);
-  }, []);
-
-  useEffect(() => {
     const interval = setInterval(() => {
       setActiveFeatured((prev) => (prev + 1) % featuredProducts.length);
     }, 5000);
@@ -60,32 +54,6 @@ export default function Home() {
 
   return (
     <div className="relative">
-      {/* Entrance Animation Overlay */}
-      <AnimatePresence>
-        {!isLoaded && (
-          <motion.div 
-            initial={{ opacity: 1 }}
-            exit={{ opacity: 0, transition: { duration: 1.5, ease: [0.16, 1, 0.3, 1] } }}
-            className="fixed inset-0 z-[100] bg-venuea-dark flex items-center justify-center"
-          >
-            <motion.div
-              initial={{ scale: 0.8, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              transition={{ duration: 1, ease: "easeOut" }}
-              className="text-center"
-            >
-              <h1 className="text-6xl md:text-9xl font-bold text-white tracking-tighter uppercase">
-                Benua
-              </h1>
-              <div className="mt-4 h-[1px] bg-venuea-gold/40 w-0 mx-auto animate-[width_1s_ease-in-out_forwards]" style={{ width: '100%' }}></div>
-              <p className="mt-4 text-xs font-bold uppercase tracking-[0.5em] text-venuea-gold">
-                Premium Commerce
-              </p>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
       {/* Hero Section - Split Layout */}
       <section className="relative h-screen grid grid-cols-1 lg:grid-cols-2 overflow-hidden bg-white pt-[100px]">
         <div className="flex flex-col justify-center px-8 md:px-[60px] py-12">
