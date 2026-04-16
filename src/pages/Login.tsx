@@ -114,7 +114,11 @@ export default function Login() {
   React.useEffect(() => {
     const handleMessage = (event: MessageEvent) => {
       const origin = event.origin;
-      if (!origin.endsWith('.run.app') && !origin.includes('localhost')) {
+      const currentOrigin = window.location.origin;
+      
+      // Allow current origin (including custom domains like benua.shop)
+      // and standard AI Studio preview domains
+      if (origin !== currentOrigin && !origin.endsWith('.run.app') && !origin.includes('localhost')) {
         return;
       }
       

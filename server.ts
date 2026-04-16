@@ -111,6 +111,17 @@ try { db.exec(`ALTER TABLE products ADD COLUMN stock INTEGER DEFAULT 0`); } catc
 try { db.exec(`ALTER TABLE products ADD COLUMN material TEXT`); } catch(e) {}
 try { db.exec(`ALTER TABLE products ADD COLUMN dimensions TEXT`); } catch(e) {}
 try { db.exec(`ALTER TABLE products ADD COLUMN origin TEXT`); } catch(e) {}
+try { db.exec(`ALTER TABLE products ADD COLUMN description_image_url TEXT`); } catch(e) {}
+try { db.exec(`ALTER TABLE products ADD COLUMN category TEXT`); } catch(e) {}
+
+// Defensive ALTER TABLE for inquiries
+try { db.exec(`ALTER TABLE inquiries ADD COLUMN status TEXT DEFAULT 'pending'`); } catch(e) {}
+try { db.exec(`ALTER TABLE inquiries ADD COLUMN reply_message TEXT`); } catch(e) {}
+try { db.exec(`ALTER TABLE inquiries ADD COLUMN replied_at DATETIME`); } catch(e) {}
+
+// Defensive ALTER TABLE for orders
+try { db.exec(`ALTER TABLE orders ADD COLUMN shipping_fee INTEGER DEFAULT 0`); } catch(e) {}
+try { db.exec(`ALTER TABLE orders ADD COLUMN status TEXT DEFAULT 'pending'`); } catch(e) {}
 
 // Add columns to users table for social linkage
 try { db.exec(`ALTER TABLE users ADD COLUMN google_id TEXT`); } catch(e) {}
@@ -232,16 +243,17 @@ async function startServer() {
 
   // --- OAuth APIs ---
   const getRedirectUri = (req: express.Request, provider: string) => {
-    // In many proxy environments, the protocol might be incorrectly reported as http.
-    // We force https if the host is a .run.app domain (AI Studio environment).
-    let protocol = req.headers["x-forwarded-proto"] || req.protocol;
-    let host = req.headers["x-forwarded-host"] || req.get("host") || "";
+    let protocol = (req.headers["x-forwarded-proto"] as string) || req.protocol;
+    let host = (req.headers["x-forwarded-host"] as string) || req.get("host") || "";
     
-    if (host.includes(".run.app")) {
+    // Google sets redirect_uri strictly. If the user uses benua.shop, we must match it exactly.
+    if (host.includes("benua.shop")) {
+      protocol = "https";
+      host = "benua.shop";
+    } else if (host.includes(".run.app")) {
       protocol = "https";
     }
     
-    // Ensure no trailing slash issues or unexpected double slashes
     return `${protocol}://${host}/api/auth/${provider}/callback`;
   };
 
@@ -279,16 +291,29 @@ async function startServer() {
           grant_type: "authorization_code"
         })
       });
+      
+      if (!tokenRes.ok) {
+        const errText = await tokenRes.text();
+        console.error("Google Token Exchange Error:", errText);
+        throw new Error("Failed to exchange Google token");
+      }
+      
       const tokenData = await tokenRes.json();
       
       if (!tokenData.access_token) {
-        console.error("Google Token Exchange Failed:", tokenData);
-        throw new Error("No access token");
+        throw new Error("No access token from Google");
       }
 
       const userRes = await fetch("https://www.googleapis.com/oauth2/v2/userinfo", {
         headers: { Authorization: `Bearer ${tokenData.access_token}` }
       });
+      
+      if (!userRes.ok) {
+        const errText = await userRes.text();
+        console.error("Google User Info Error:", errText);
+        throw new Error("Failed to get Google user info");
+      }
+      
       const userData = await userRes.json();
       
       // Handle linking if logged in
@@ -383,16 +408,30 @@ async function startServer() {
     
     try {
       const tokenRes = await fetch(`https://nid.naver.com/oauth2.0/token?grant_type=authorization_code&client_id=${process.env.NAVER_CLIENT_ID}&client_secret=${process.env.NAVER_CLIENT_SECRET}&code=${code as string}&state=${state as string}&redirect_uri=${encodeURIComponent(redirectUri)}`);
+      
+      if (!tokenRes.ok) {
+        const errText = await tokenRes.text();
+        console.error("Naver Token Exchange Error:", errText);
+        throw new Error("Failed to exchange Naver token");
+      }
+      
       const tokenData = await tokenRes.json();
       
       if (!tokenData.access_token) {
-        console.error("Naver Token Exchange Failed:", tokenData);
-        throw new Error("No access token");
+        console.error("Naver Token Data Error:", tokenData);
+        throw new Error("No access token from Naver");
       }
 
       const userRes = await fetch("https://openapi.naver.com/v1/nid/me", {
         headers: { Authorization: `Bearer ${tokenData.access_token}` }
       });
+      
+      if (!userRes.ok) {
+        const errText = await userRes.text();
+        console.error("Naver User Info Error:", errText);
+        throw new Error("Failed to get Naver user info");
+      }
+      
       const userData = await userRes.json();
       
       if (userData.resultcode !== "00") throw new Error("Failed to get user profile");
