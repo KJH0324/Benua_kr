@@ -11,6 +11,7 @@ interface Product {
   name: string;
   category: string;
   price: number;
+  discount_rate?: number;
   image_url: string;
 }
 
@@ -102,6 +103,11 @@ export default function Shop() {
                       className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700"
                       referrerPolicy="no-referrer"
                     />
+                    {product.discount_rate && product.discount_rate > 0 && (
+                      <div className="absolute top-4 left-4 bg-red-600 text-white px-2 py-1 text-[10px] font-bold uppercase tracking-widest">
+                        {product.discount_rate}% OFF
+                      </div>
+                    )}
                     <div className="absolute inset-0 bg-venuea-dark/0 group-hover:bg-venuea-dark/5 transition-colors duration-500" />
                     <div className="absolute bottom-4 left-4 right-4 bg-venuea-dark text-white py-3 text-[10px] font-bold uppercase tracking-widest opacity-0 group-hover:opacity-100 translate-y-4 group-hover:translate-y-0 transition-all duration-500 hover:bg-venuea-gold text-center">
                       상세 보기
@@ -112,7 +118,16 @@ export default function Shop() {
                       <h4 className="text-lg font-bold text-venuea-dark mb-1 uppercase tracking-tight">{product.name}</h4>
                       <p className="text-[10px] text-venuea-muted uppercase tracking-widest">{product.category}</p>
                     </div>
-                    <p className="text-venuea-gold font-bold">{formatPrice(product.price)}</p>
+                    <div className="text-right">
+                      {product.discount_rate && product.discount_rate > 0 ? (
+                        <>
+                          <p className="text-venuea-gold font-bold">{formatPrice(product.price * (1 - product.discount_rate / 100))}</p>
+                          <p className="text-venuea-muted text-[10px] line-through">{formatPrice(product.price)}</p>
+                        </>
+                      ) : (
+                        <p className="text-venuea-gold font-bold">{formatPrice(product.price)}</p>
+                      )}
+                    </div>
                   </div>
                 </Link>
               </motion.div>

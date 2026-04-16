@@ -27,12 +27,18 @@ import { cn, formatPrice } from "../lib/utils";
 import { toast } from "sonner";
 
 interface Product {
-  id: string;
+  id: number;
   name: string;
   category: string;
   price: number;
+  discount_rate?: number;
+  show_on_main?: number;
   image_url: string;
   description: string;
+  stock?: number;
+  material?: string;
+  dimensions?: string;
+  origin?: string;
 }
 
 export default function AdminDashboard() {
@@ -259,9 +265,12 @@ function AdminProducts() {
   const [products, setProducts] = useState<Product[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [editingId, setEditingId] = useState<number | null>(null);
   const [newProduct, setNewProduct] = useState({
     name: "",
     price: 0,
+    discount_rate: 0,
+    show_on_main: 0,
     category: "리빙",
     description: "",
     stock: 0,
@@ -295,6 +304,8 @@ function AdminProducts() {
     const formData = new FormData();
     formData.append("name", newProduct.name);
     formData.append("price", newProduct.price.toString());
+    formData.append("discount_rate", newProduct.discount_rate.toString());
+    formData.append("show_on_main", newProduct.show_on_main.toString());
     formData.append("category", newProduct.category);
     formData.append("description", newProduct.description);
     formData.append("stock", newProduct.stock.toString());
@@ -305,27 +316,48 @@ function AdminProducts() {
     if (descImage) formData.append("description_image", descImage);
 
     try {
-      const response = await fetch("/api/products", {
-        method: "POST",
+      const url = editingId ? `/api/products/${editingId}` : "/api/products";
+      const method = editingId ? "PUT" : "POST";
+
+      const response = await fetch(url, {
+        method: method,
         body: formData,
       });
       const data = await response.json();
       if (response.ok) {
-        toast.success("상품이 등록되었습니다.");
+        toast.success(editingId ? "상품이 수정되었습니다." : "상품이 등록되었습니다.");
         setIsModalOpen(false);
-        setNewProduct({ name: "", price: 0, category: "리빙", description: "", stock: 0, material: "", dimensions: "", origin: "" });
+        setEditingId(null);
+        setNewProduct({ name: "", price: 0, discount_rate: 0, show_on_main: 0, category: "리빙", description: "", stock: 0, material: "", dimensions: "", origin: "" });
         setMainImage(null);
         setDescImage(null);
         fetchProducts();
       } else {
-        toast.error(data.error || "상품 등록 실패");
+        toast.error(data.error || "상품 처리 실패");
       }
     } catch (error) {
       toast.error("서버 오류");
     }
   };
 
-  const handleDeleteProduct = async (id: string) => {
+  const handleEditClick = (product: Product) => {
+    setEditingId(product.id);
+    setNewProduct({
+      name: product.name,
+      price: product.price,
+      discount_rate: product.discount_rate || 0,
+      show_on_main: product.show_on_main || 0,
+      category: product.category,
+      description: product.description,
+      stock: product.stock || 0,
+      material: product.material || "",
+      dimensions: product.dimensions || "",
+      origin: product.origin || ""
+    });
+    setIsModalOpen(true);
+  };
+
+  const handleDeleteProduct = async (id: number) => {
     if (!confirm("정말 삭제하시겠습니까?")) return;
     try {
       const response = await fetch(`/api/products/${id}`, { method: "DELETE" });
@@ -344,7 +376,11 @@ function AdminProducts() {
         <h1 className="text-2xl font-serif font-bold text-gray-900">상품 관리</h1>
         <div className="flex space-x-4">
           <button 
-            onClick={() => setIsModalOpen(true)}
+            onClick={() => {
+              setEditingId(null);
+              setNewProduct({ name: "", price: 0, discount_rate: 0, show_on_main: 0, category: "리빙", description: "", stock: 0, material: "", dimensions: "", origin: "" });
+              setIsModalOpen(true);
+            }}
             className="bg-venuea-dark text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center space-x-2"
           >
             <Plus size={18} />
@@ -378,19 +414,43 @@ function AdminProducts() {
                       <img src={product.image_url || "https://picsum.photos/seed/placeholder/100/100"} alt="Product" className="w-full h-full object-cover" />
                     </div>
                     <div>
-                      <p className="text-sm font-bold text-gray-900">{product.name}</p>
+                      <div className="flex items-center space-x-2">
+                        <p className="text-sm font-bold text-gray-900">{product.name}</p>
+                        {product.show_on_main === 1 && (
+                          <span className="text-[9px] bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded font-bold uppercase tracking-widest border border-blue-100 italic">Main</span>
+                        )}
+                      </div>
+                      <p className="text-[10px] text-gray-400">Stock: {product.stock}</p>
                     </div>
                   </div>
                 </td>
                 <td className="px-6 py-4 text-sm text-gray-600 font-medium">{product.category}</td>
-                <td className="px-6 py-4 text-sm text-gray-900 font-bold">{formatPrice(product.price)}</td>
+                <td className="px-6 py-4 text-sm text-gray-900 font-bold">
+                  {product.discount_rate && product.discount_rate > 0 ? (
+                    <div className="flex flex-col">
+                      <span className="text-red-500 text-[10px]">{product.discount_rate}% OFF</span>
+                      <span>{formatPrice(product.price * (1 - product.discount_rate / 100))}</span>
+                      <span className="text-gray-300 line-through text-[10px]">{formatPrice(product.price)}</span>
+                    </div>
+                  ) : (
+                    formatPrice(product.price)
+                  )}
+                </td>
                 <td className="px-6 py-4 text-right">
-                  <button 
-                    onClick={() => handleDeleteProduct(product.id)}
-                    className="text-red-400 hover:text-red-600"
-                  >
-                    <Trash2 size={18} />
-                  </button>
+                  <div className="flex justify-end space-x-2">
+                    <button 
+                      onClick={() => handleEditClick(product)}
+                      className="text-venuea-dark hover:text-venuea-gold p-1"
+                    >
+                      <Settings size={18} />
+                    </button>
+                    <button 
+                      onClick={() => handleDeleteProduct(product.id)}
+                      className="text-red-400 hover:text-red-600 p-1"
+                    >
+                      <Trash2 size={18} />
+                    </button>
+                  </div>
                 </td>
               </tr>
             ))}
@@ -409,12 +469,12 @@ function AdminProducts() {
               className="bg-white rounded-2xl w-full max-w-lg overflow-hidden shadow-2xl"
             >
               <div className="p-6 border-b border-gray-100 flex justify-between items-center">
-                <h2 className="text-xl font-bold">새 상품 등록</h2>
+                <h2 className="text-xl font-bold">{editingId ? "상품 수정" : "새 상품 등록"}</h2>
                 <button onClick={() => setIsModalOpen(false)} className="text-gray-400 hover:text-gray-600">
                   <X size={24} />
                 </button>
               </div>
-              <form onSubmit={handleAddProduct} className="p-6 space-y-4">
+              <form onSubmit={handleAddProduct} className="p-6 space-y-4 max-h-[70vh] overflow-y-auto">
                 <div className="space-y-1">
                   <label className="text-xs font-bold text-gray-400 uppercase">상품명</label>
                   <input 
@@ -427,7 +487,7 @@ function AdminProducts() {
                 </div>
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-1">
-                    <label className="text-xs font-bold text-gray-400 uppercase">가격</label>
+                    <label className="text-xs font-bold text-gray-400 uppercase">기본 가격 (원)</label>
                     <input 
                       type="number" 
                       required
@@ -437,6 +497,19 @@ function AdminProducts() {
                     />
                   </div>
                   <div className="space-y-1">
+                    <label className="text-xs font-bold text-gray-400 uppercase">할인율 (%)</label>
+                    <input 
+                      type="number" 
+                      min="0"
+                      max="99"
+                      value={newProduct.discount_rate}
+                      onChange={e => setNewProduct({...newProduct, discount_rate: parseInt(e.target.value)})}
+                      className="w-full border border-gray-200 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-venuea-dark/20"
+                    />
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-1">
                     <label className="text-xs font-bold text-gray-400 uppercase">카테고리</label>
                     <select 
                       value={newProduct.category}
@@ -445,6 +518,15 @@ function AdminProducts() {
                     >
                       {["리빙", "키친", "데코", "침구", "욕실"].map(c => <option key={c} value={c}>{c}</option>)}
                     </select>
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold text-gray-400 uppercase">재고 수량</label>
+                    <input 
+                      type="number" 
+                      value={newProduct.stock}
+                      onChange={e => setNewProduct({...newProduct, stock: parseInt(e.target.value)})}
+                      className="w-full border border-gray-200 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-venuea-dark/20"
+                    />
                   </div>
                 </div>
                 <div className="grid grid-cols-2 gap-4">
@@ -467,6 +549,18 @@ function AdminProducts() {
                       placeholder="예: 오크 원목, 린넨 100%"
                     />
                   </div>
+                </div>
+                <div className="flex items-center space-x-3 p-4 bg-gray-50 rounded-xl border border-gray-100">
+                  <input 
+                    type="checkbox" 
+                    id="show_on_main"
+                    checked={newProduct.show_on_main === 1}
+                    onChange={e => setNewProduct({...newProduct, show_on_main: e.target.checked ? 1 : 0})}
+                    className="w-5 h-5 rounded border-gray-300 text-venuea-gold focus:ring-venuea-gold"
+                  />
+                  <label htmlFor="show_on_main" className="text-sm font-bold text-venuea-dark cursor-pointer">
+                    메인 페이지 추천 상품으로 표시
+                  </label>
                 </div>
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-1">
@@ -519,7 +613,7 @@ function AdminProducts() {
                   />
                 </div>
                 <button className="w-full bg-venuea-dark text-white py-3 rounded-lg font-bold hover:bg-venuea-gold transition-colors mt-4">
-                  상품 등록하기
+                  {editingId ? "상품 수정 완료" : "상품 등록하기"}
                 </button>
               </form>
             </motion.div>

@@ -37,7 +37,9 @@ export default function Home() {
       try {
         const response = await fetch("/api/products");
         const data = await response.json();
-        setRealProducts(data.slice(0, 3));
+        // Filter by show_on_main and take top 3
+        const mainProducts = data.filter((p: any) => p.show_on_main === 1).slice(0, 3);
+        setRealProducts(mainProducts);
       } catch (error) {
         console.error(error);
       }

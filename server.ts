@@ -70,6 +70,8 @@ db.exec(`
     material TEXT,
     dimensions TEXT,
     origin TEXT,
+    discount_rate INTEGER DEFAULT 0,
+    show_on_main INTEGER DEFAULT 0,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
 
@@ -113,6 +115,8 @@ try { db.exec(`ALTER TABLE products ADD COLUMN dimensions TEXT`); } catch(e) {}
 try { db.exec(`ALTER TABLE products ADD COLUMN origin TEXT`); } catch(e) {}
 try { db.exec(`ALTER TABLE products ADD COLUMN description_image_url TEXT`); } catch(e) {}
 try { db.exec(`ALTER TABLE products ADD COLUMN category TEXT`); } catch(e) {}
+try { db.exec(`ALTER TABLE products ADD COLUMN discount_rate INTEGER DEFAULT 0`); } catch(e) {}
+try { db.exec(`ALTER TABLE products ADD COLUMN show_on_main INTEGER DEFAULT 0`); } catch(e) {}
 
 // Defensive ALTER TABLE for inquiries
 try { db.exec(`ALTER TABLE inquiries ADD COLUMN status TEXT DEFAULT 'pending'`); } catch(e) {}
@@ -120,6 +124,11 @@ try { db.exec(`ALTER TABLE inquiries ADD COLUMN reply_message TEXT`); } catch(e)
 try { db.exec(`ALTER TABLE inquiries ADD COLUMN replied_at DATETIME`); } catch(e) {}
 
 // Defensive ALTER TABLE for orders
+try { db.exec(`ALTER TABLE orders ADD COLUMN user_id INTEGER`); } catch(e) {}
+try { db.exec(`ALTER TABLE orders ADD COLUMN customer_name TEXT`); } catch(e) {}
+try { db.exec(`ALTER TABLE orders ADD COLUMN customer_email TEXT`); } catch(e) {}
+try { db.exec(`ALTER TABLE orders ADD COLUMN shipping_address TEXT`); } catch(e) {}
+try { db.exec(`ALTER TABLE orders ADD COLUMN total_amount INTEGER`); } catch(e) {}
 try { db.exec(`ALTER TABLE orders ADD COLUMN shipping_fee INTEGER DEFAULT 0`); } catch(e) {}
 try { db.exec(`ALTER TABLE orders ADD COLUMN status TEXT DEFAULT 'pending'`); } catch(e) {}
 
@@ -622,7 +631,7 @@ async function startServer() {
     { name: "image", maxCount: 1 },
     { name: "description_image", maxCount: 1 }
   ]), (req: any, res) => {
-    const { name, price, description, category, stock, material, dimensions, origin } = req.body;
+    const { name, price, description, category, stock, material, dimensions, origin, discount_rate, show_on_main } = req.body;
     const files = req.files as { [fieldname: string]: Express.Multer.File[] };
     
     // Validate required fields
@@ -636,16 +645,49 @@ async function startServer() {
     try {
       const parsedPrice = parseInt(price);
       const parsedStock = parseInt(stock) || 0;
+      const parsedDiscount = parseInt(discount_rate) || 0;
+      const parsedShowOnMain = show_on_main === "true" || show_on_main === "1" ? 1 : 0;
 
       const info = db.prepare(
-        "INSERT INTO products (name, price, description, image_url, description_image_url, category, stock, material, dimensions, origin) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
-      ).run(name, parsedPrice, description, image_url, description_image_url, category, parsedStock, material, dimensions, origin);
+        "INSERT INTO products (name, price, description, image_url, description_image_url, category, stock, material, dimensions, origin, discount_rate, show_on_main) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+      ).run(name, parsedPrice, description, image_url, description_image_url, category, parsedStock, material, dimensions, origin, parsedDiscount, parsedShowOnMain);
       
       console.log("Product created successfully:", name, "ID:", info.lastInsertRowid);
       res.json({ id: info.lastInsertRowid, success: true });
     } catch (err: any) {
       console.error("Failed to create product:", err);
       res.status(500).json({ error: "상품 등록에 실패했습니다: " + err.message });
+    }
+  });
+
+  app.put("/api/products/:id", authenticateAdmin, upload.fields([
+    { name: "image", maxCount: 1 },
+    { name: "description_image", maxCount: 1 }
+  ]), (req: any, res) => {
+    const { id } = req.params;
+    const { name, price, description, category, stock, material, dimensions, origin, discount_rate, show_on_main } = req.body;
+    const files = req.files as { [fieldname: string]: Express.Multer.File[] };
+    
+    try {
+      const product = db.prepare("SELECT * FROM products WHERE id = ?").get(id) as any;
+      if (!product) return res.status(404).json({ error: "Product not found" });
+
+      const image_url = files["image"] ? `/uploads/${files["image"][0].filename}` : product.image_url;
+      const description_image_url = files["description_image"] ? `/uploads/${files["description_image"][0].filename}` : product.description_image_url;
+      
+      const parsedPrice = parseInt(price);
+      const parsedStock = parseInt(stock) || 0;
+      const parsedDiscount = parseInt(discount_rate) || 0;
+      const parsedShowOnMain = show_on_main === "true" || show_on_main === "1" ? 1 : 0;
+
+      db.prepare(
+        "UPDATE products SET name = ?, price = ?, description = ?, image_url = ?, description_image_url = ?, category = ?, stock = ?, material = ?, dimensions = ?, origin = ?, discount_rate = ?, show_on_main = ? WHERE id = ?"
+      ).run(name, parsedPrice, description, image_url, description_image_url, category, parsedStock, material, dimensions, origin, parsedDiscount, parsedShowOnMain, id);
+      
+      res.json({ success: true });
+    } catch (err: any) {
+      console.error("Failed to update product:", err);
+      res.status(500).json({ error: "상품 수정 실패" });
     }
   });
 

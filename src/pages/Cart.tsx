@@ -7,18 +7,30 @@ import { toast } from "sonner";
 
 export default function Cart() {
   const navigate = useNavigate();
-  const [items, setItems] = useState([
-    { id: "1", name: "Linen Sofa Cover", price: 85000, quantity: 1, image: "https://picsum.photos/seed/sofa/800/1000" },
-    { id: "2", name: "Ceramic Coffee Set", price: 42000, quantity: 2, image: "https://picsum.photos/seed/coffee/800/1000" },
-  ]);
+  const [items, setItems] = useState<any[]>([]);
   const [user, setUser] = useState<any>(null);
   const [showShippingTooltip, setShowShippingTooltip] = useState(false);
 
   useEffect(() => {
+    // Load from localStorage
+    const savedCart = localStorage.getItem("venuea-cart");
+    if (savedCart) {
+      try {
+        setItems(JSON.parse(savedCart));
+      } catch (e) {
+        console.error("Failed to parse cart", e);
+      }
+    }
+
     fetch("/api/auth/me")
       .then(res => res.json())
       .then(data => setUser(data.user));
   }, []);
+
+  // Save to localStorage whenever items change
+  useEffect(() => {
+    localStorage.setItem("venuea-cart", JSON.stringify(items));
+  }, [items]);
 
   const subtotal = items.reduce((acc, item) => acc + item.price * item.quantity, 0);
   

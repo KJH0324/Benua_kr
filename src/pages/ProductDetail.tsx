@@ -2,17 +2,19 @@ import { useState, useEffect } from "react";
 import { useParams, Link } from "react-router-dom";
 import { motion } from "motion/react";
 import { ShoppingBag, Heart, ChevronRight, Truck, ShieldCheck, RotateCcw, Loader2 } from "lucide-react";
-import { formatPrice } from "../lib/utils";
+import { formatPrice, cn } from "../lib/utils";
 import { toast } from "sonner";
 
 interface Product {
   id: number;
   name: string;
   price: number;
+  discount_rate?: number;
   description: string;
   image_url: string;
   description_image_url: string;
   category: string;
+  stock?: number;
 }
 
 export default function ProductDetail() {
@@ -54,6 +56,51 @@ export default function ProductDetail() {
     );
   }
 
+  const addToCart = () => {
+    if (!product) return;
+    
+    try {
+      const savedCart = localStorage.getItem("venuea-cart");
+      const currentCart = savedCart ? JSON.parse(savedCart) : [];
+      
+      const productId = Number(product.id);
+      const existingItemIndex = currentCart.findIndex((item: any) => Number(item.id) === productId);
+      
+      const finalPrice = product.discount_rate && product.discount_rate > 0 
+        ? product.price * (1 - product.discount_rate / 100)
+        : product.price;
+
+      if (existingItemIndex > -1) {
+        const totalQuantity = currentCart[existingItemIndex].quantity + quantity;
+        if (product.stock !== undefined && totalQuantity > product.stock) {
+          toast.error(`재고가 부족합니다. (최대 ${product.stock}개)`);
+          return;
+        }
+        currentCart[existingItemIndex].quantity = totalQuantity;
+      } else {
+        if (product.stock !== undefined && quantity > product.stock) {
+          toast.error(`재고가 부족합니다. (최대 ${product.stock}개)`);
+          return;
+        }
+        currentCart.push({
+          id: product.id,
+          name: product.name,
+          price: finalPrice,
+          original_price: product.price,
+          discount_rate: product.discount_rate || 0,
+          quantity: quantity,
+          image: product.image_url || "https://picsum.photos/seed/placeholder/800/1000"
+        });
+      }
+      
+      localStorage.setItem("venuea-cart", JSON.stringify(currentCart));
+      toast.success("장바구니에 담겼습니다.");
+    } catch (e) {
+      console.error(e);
+      toast.error("장바구니 담기 실패");
+    }
+  };
+
   return (
     <div className="pt-32 pb-20 px-6">
       <div className="max-w-7xl mx-auto">
@@ -87,7 +134,23 @@ export default function ProductDetail() {
             <div>
               <p className="text-xs font-bold uppercase tracking-[0.3em] text-venuea-gold mb-4">{product.category}</p>
               <h1 className="text-4xl md:text-5xl font-bold text-venuea-dark mb-4 leading-tight uppercase tracking-tight">{product.name}</h1>
-              <p className="text-2xl font-bold text-venuea-dark">{formatPrice(product.price)}</p>
+              {product.discount_rate && product.discount_rate > 0 ? (
+                <div className="flex items-end space-x-4">
+                  <p className="text-3xl font-bold text-red-600">{product.discount_rate}%</p>
+                  <p className="text-2xl font-bold text-venuea-dark">{formatPrice(product.price * (1 - product.discount_rate / 100))}</p>
+                  <p className="text-lg text-venuea-muted line-through mb-1">{formatPrice(product.price)}</p>
+                </div>
+              ) : (
+                <p className="text-2xl font-bold text-venuea-dark">{formatPrice(product.price)}</p>
+              )}
+              {product.stock !== undefined && (
+                <p className={cn(
+                  "text-[10px] font-bold uppercase tracking-widest mt-4",
+                  product.stock > 0 ? "text-green-600" : "text-red-600"
+                )}>
+                  {product.stock > 0 ? `재고 있음: ${product.stock}개` : "품절"}
+                </p>
+              )}
             </div>
 
             <p className="text-venuea-muted leading-relaxed font-light text-lg whitespace-pre-wrap">
@@ -105,15 +168,30 @@ export default function ProductDetail() {
                   </button>
                   <span className="w-12 text-center font-bold">{quantity}</span>
                   <button 
-                    onClick={() => setQuantity(quantity + 1)}
+                    onClick={() => {
+                      if (product.stock !== undefined && quantity >= product.stock) {
+                        toast.error(`재고 이상 선택할 수 없습니다. (남은 재고: ${product.stock}개)`);
+                        return;
+                      }
+                      setQuantity(quantity + 1);
+                    }}
                     className="w-10 h-10 flex items-center justify-center hover:bg-[#F9F9F9] transition-colors text-venuea-dark"
                   >
                     +
                   </button>
                 </div>
-                <button className="flex-grow bg-venuea-dark text-white py-4 font-bold uppercase tracking-widest hover:bg-venuea-gold transition-all flex items-center justify-center space-x-3 group">
+                <button 
+                  onClick={addToCart}
+                  disabled={product.stock !== undefined && product.stock <= 0}
+                  className={cn(
+                    "flex-grow py-4 font-bold uppercase tracking-widest transition-all flex items-center justify-center space-x-3 group",
+                    product.stock !== undefined && product.stock <= 0
+                      ? "bg-gray-200 text-gray-400 cursor-not-allowed"
+                      : "bg-venuea-dark text-white hover:bg-venuea-gold"
+                  )}
+                >
                   <ShoppingBag size={18} />
-                  <span>장바구니 담기</span>
+                  <span>{product.stock !== undefined && product.stock <= 0 ? "품절" : "장바구니 담기"}</span>
                 </button>
                 <button className="w-14 h-14 border border-venuea-dark/20 flex items-center justify-center text-venuea-dark hover:bg-[#F9F9F9] transition-colors">
                   <Heart size={20} />

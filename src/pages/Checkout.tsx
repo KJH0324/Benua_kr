@@ -83,6 +83,7 @@ export default function Checkout() {
       });
 
       if (response.ok) {
+        localStorage.removeItem("venuea-cart");
         setIsOrderComplete(true);
       } else {
         toast.error("주문 처리 중 오류가 발생했습니다.");
