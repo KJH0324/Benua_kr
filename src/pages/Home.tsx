@@ -55,32 +55,32 @@ export default function Home() {
   return (
     <div className="relative">
       {/* Hero Section - Split Layout */}
-      <section className="relative h-screen grid grid-cols-1 lg:grid-cols-2 overflow-hidden bg-white pt-[100px]">
-        <div className="flex flex-col justify-center px-8 md:px-[60px] py-12">
+      <section className="relative min-h-screen grid grid-cols-1 lg:grid-cols-2 overflow-hidden bg-white pt-[80px] md:pt-[100px]">
+        <div className="flex flex-col justify-center px-6 md:px-[60px] py-16 md:py-12">
           <motion.div
             initial={{ x: -100, opacity: 0 }}
             animate={{ x: 0, opacity: 1 }}
             transition={{ duration: 1.2, ease: [0.16, 1, 0.3, 1] }}
           >
-            <span className="text-xs font-bold uppercase tracking-[3px] text-venuea-gold mb-6 block">
+            <span className="text-[10px] md:text-xs font-bold uppercase tracking-[3px] text-venuea-gold mb-4 md:mb-6 block">
               럭셔리의 새로운 기준
             </span>
-            <h1 className="text-5xl md:text-[64px] font-bold text-venuea-dark mb-8 leading-[1.1] tracking-[-2px]">
-              순수한 우아함을<br />경험하세요.
+            <h1 className="text-4xl sm:text-5xl md:text-[64px] font-bold text-venuea-dark mb-6 md:mb-8 leading-[1.1] tracking-[-1px] md:tracking-[-2px]">
+              순수한 우아함을<br className="hidden sm:block" /> 경험하세요.
             </h1>
-            <p className="text-base md:text-[16px] text-venuea-muted max-w-[400px] mb-12 leading-[1.6]">
+            <p className="text-sm md:text-[16px] text-venuea-muted max-w-[400px] mb-10 md:mb-12 leading-[1.6]">
               베누아는 미니멀리즘 공예의 정점을 상징합니다. 독자적인 컬렉션을 탐색하고 완벽한 쇼핑 경험을 즐겨보세요.
             </p>
-            <div className="flex flex-col sm:flex-row gap-5">
+            <div className="flex flex-col sm:flex-row gap-4 sm:gap-5">
               <Link 
                 to="/shop" 
-                className="bg-venuea-dark text-white px-10 py-5 text-sm font-bold uppercase tracking-widest hover:bg-venuea-gold transition-all duration-500 text-center"
+                className="bg-venuea-dark text-white px-8 md:px-10 py-4 md:py-5 text-[13px] md:text-sm font-bold uppercase tracking-widest hover:bg-venuea-gold transition-all duration-500 text-center"
               >
                 컬렉션 쇼핑하기
               </Link>
               <Link 
                 to="/about" 
-                className="bg-transparent border border-venuea-dark text-venuea-dark px-10 py-5 text-sm font-bold uppercase tracking-widest hover:bg-venuea-dark hover:text-white transition-all duration-500 text-center"
+                className="bg-transparent border border-venuea-dark text-venuea-dark px-8 md:px-10 py-4 md:py-5 text-[13px] md:text-sm font-bold uppercase tracking-widest hover:bg-venuea-dark hover:text-white transition-all duration-500 text-center"
               >
                 브랜드 스토리
               </Link>
@@ -88,24 +88,24 @@ export default function Home() {
           </motion.div>
         </div>
 
-        <div className="relative bg-[#F9F9F9] flex items-center justify-center overflow-hidden">
-          {/* Decorative Circles */}
-          <div className="absolute w-[500px] h-[500px] border border-venuea-gold/20 rounded-full" />
-          <div className="absolute w-[600px] h-[600px] border border-venuea-gold/10 rounded-full" />
+        <div className="relative bg-[#F9F9F9] flex items-center justify-center overflow-hidden min-h-[400px] md:min-h-0">
+          {/* Decorative Circles - Hidden on small mobile to reduce clutter */}
+          <div className="absolute w-[300px] md:w-[500px] h-[300px] md:h-[500px] border border-venuea-gold/20 rounded-full" />
+          <div className="absolute w-[400px] md:w-[600px] h-[400px] md:h-[600px] border border-venuea-gold/10 rounded-full" />
           
           <motion.div
             initial={{ scale: 0.9, opacity: 0 }}
             animate={{ scale: 1, opacity: 1 }}
             transition={{ duration: 1.5, delay: 0.5 }}
-            className="relative w-[320px] h-[440px] bg-white shadow-[0_40px_80px_rgba(0,0,0,0.08)] p-10 flex flex-col justify-between z-10"
+            className="relative w-[260px] md:w-[320px] h-[380px] md:h-[440px] bg-white shadow-[0_40px_80px_rgba(0,0,0,0.08)] p-8 md:p-10 flex flex-col justify-between z-10"
           >
-            <div className="w-full h-[240px] bg-gradient-to-br from-[#F5F5F5] to-[#EAEAEA] flex items-center justify-center text-[12px] text-[#CCC] tracking-[2px] uppercase">
+            <div className="w-full h-[200px] md:h-[240px] bg-gradient-to-br from-[#F5F5F5] to-[#EAEAEA] flex items-center justify-center text-[10px] md:text-[12px] text-[#CCC] tracking-[2px] uppercase">
               Benua Item 01
             </div>
             <div className="product-info">
-              <h3 className="text-[18px] font-bold mb-2">시그니처 에센스</h3>
-              <p className="text-venuea-gold font-bold text-[20px]">₩184,000</p>
-              <div className="text-[11px] mt-4 uppercase tracking-[1px] text-[#AAA]">
+              <h3 className="text-[16px] md:text-[18px] font-bold mb-1 md:mb-2">시그니처 에센스</h3>
+              <p className="text-venuea-gold font-bold text-[18px] md:text-[20px]">₩184,000</p>
+              <div className="text-[10px] md:text-[11px] mt-3 md:mt-4 uppercase tracking-[1px] text-[#AAA]">
                 무료 특급 배송
               </div>
             </div>
@@ -114,40 +114,40 @@ export default function Home() {
       </section>
 
       {/* Dynamic Featured Section */}
-      <section className="relative py-32 bg-[#F9F9F9] overflow-hidden">
-        <div className="max-w-[1440px] mx-auto px-8 md:px-[60px]">
-          <div className="mb-16">
-            <h2 className="text-xs font-bold uppercase tracking-[3px] text-venuea-gold mb-4">Featured Selection</h2>
-            <h3 className="text-4xl md:text-5xl font-bold text-venuea-dark">이달의 추천 컬렉션</h3>
+      <section className="relative py-20 md:py-32 bg-[#F9F9F9] overflow-hidden">
+        <div className="max-w-[1440px] mx-auto px-6 md:px-[60px]">
+          <div className="mb-12 md:mb-16">
+            <h2 className="text-[10px] md:text-xs font-bold uppercase tracking-[3px] text-venuea-gold mb-3 md:mb-4">Featured Selection</h2>
+            <h3 className="text-3xl md:text-5xl font-bold text-venuea-dark">이달의 추천 컬렉션</h3>
           </div>
 
-          <div className="relative h-[600px] md:h-[500px]">
+          <div className="relative min-h-[500px] md:h-[500px]">
             <AnimatePresence mode="wait">
               <motion.div
                 key={activeFeatured}
-                initial={{ opacity: 0, x: 50 }}
+                initial={{ opacity: 0, x: 20 }}
                 animate={{ opacity: 1, x: 0 }}
-                exit={{ opacity: 0, x: -50 }}
-                transition={{ duration: 0.8, ease: [0.16, 1, 0.3, 1] }}
-                className="absolute inset-0 grid grid-cols-1 md:grid-cols-2 gap-12 items-center"
+                exit={{ opacity: 0, x: -20 }}
+                transition={{ duration: 0.8 }}
+                className="grid grid-cols-1 md:grid-cols-2 gap-8 md:gap-12 items-center"
               >
                 <div className="relative aspect-[4/3] overflow-hidden shadow-2xl">
                   <motion.img
-                    initial={{ scale: 1.2 }}
+                    initial={{ scale: 1.1 }}
                     animate={{ scale: 1 }}
-                    transition={{ duration: 1.5 }}
+                    transition={{ duration: 1.2 }}
                     src={featuredProducts[activeFeatured].image}
                     alt={featuredProducts[activeFeatured].name}
                     className="w-full h-full object-cover"
                     referrerPolicy="no-referrer"
                   />
                 </div>
-                <div className="space-y-6">
+                <div className="space-y-4 md:space-y-6">
                   <motion.h4 
                     initial={{ y: 20, opacity: 0 }}
                     animate={{ y: 0, opacity: 1 }}
                     transition={{ delay: 0.2 }}
-                    className="text-3xl md:text-4xl font-bold text-venuea-dark"
+                    className="text-2xl md:text-4xl font-bold text-venuea-dark"
                   >
                     {featuredProducts[activeFeatured].name}
                   </motion.h4>
@@ -155,7 +155,7 @@ export default function Home() {
                     initial={{ y: 20, opacity: 0 }}
                     animate={{ y: 0, opacity: 1 }}
                     transition={{ delay: 0.3 }}
-                    className="text-lg text-venuea-muted leading-relaxed"
+                    className="text-base md:text-lg text-venuea-muted leading-relaxed"
                   >
                     {featuredProducts[activeFeatured].description}
                   </motion.p>
@@ -163,9 +163,9 @@ export default function Home() {
                     initial={{ y: 20, opacity: 0 }}
                     animate={{ y: 0, opacity: 1 }}
                     transition={{ delay: 0.4 }}
-                    className="flex items-center space-x-8"
+                    className="flex flex-wrap items-center gap-6"
                   >
-                    <span className="text-2xl font-bold text-venuea-gold">{featuredProducts[activeFeatured].price}</span>
+                    <span className="text-xl md:text-2xl font-bold text-venuea-gold">{featuredProducts[activeFeatured].price}</span>
                     <Link to="/shop" className="text-sm font-bold uppercase tracking-widest text-venuea-dark border-b-2 border-venuea-dark pb-1 hover:text-venuea-gold hover:border-venuea-gold transition-all">
                       자세히 보기
                     </Link>
@@ -192,18 +192,18 @@ export default function Home() {
       </section>
 
       {/* Featured Grid Section */}
-      <section className="py-32 px-8 md:px-[60px] bg-white">
+      <section className="py-20 md:py-32 px-6 md:px-[60px] bg-white">
         <div className="max-w-[1440px] mx-auto">
-          <div className="flex flex-col md:flex-row justify-between items-end mb-16 space-y-6 md:space-y-0">
+          <div className="flex flex-col md:flex-row justify-between items-start md:items-end mb-12 md:index-16 space-y-6 md:space-y-0">
             <div className="max-w-xl">
-              <h3 className="text-3xl md:text-5xl font-bold text-venuea-dark mb-6">
+              <h3 className="text-3xl md:text-5xl font-bold text-venuea-dark mb-4 md:mb-6">
                 편안함을 위한 공예
               </h3>
-              <p className="text-venuea-muted leading-relaxed">
+              <p className="text-sm md:text-base text-venuea-muted leading-relaxed">
                 저희 컬렉션의 모든 제품은 품질, 지속 가능성, 그리고 집에 평온함을 가져다주는 능력을 기준으로 엄선되었습니다.
               </p>
             </div>
-            <Link to="/shop" className="text-sm font-bold uppercase tracking-widest text-venuea-dark border-b border-venuea-dark pb-1 hover:text-venuea-gold hover:border-venuea-gold transition-all">
+            <Link to="/shop" className="text-xs md:text-sm font-bold uppercase tracking-widest text-venuea-dark border-b border-venuea-dark pb-1 hover:text-venuea-gold hover:border-venuea-gold transition-all">
               모든 제품 보기
             </Link>
           </div>
@@ -259,14 +259,14 @@ export default function Home() {
       </section>
 
       {/* Philosophy Section */}
-      <section className="py-32 bg-venuea-dark text-white overflow-hidden">
-        <div className="max-w-[1440px] mx-auto px-8 md:px-[60px] grid grid-cols-1 md:grid-cols-2 gap-20 items-center">
-          <div className="relative">
+      <section className="py-20 md:py-32 bg-venuea-dark text-white overflow-hidden">
+        <div className="max-w-[1440px] mx-auto px-6 md:px-[60px] grid grid-cols-1 md:grid-cols-2 gap-12 md:gap-20 items-center">
+          <div className="relative order-2 md:order-1">
             <motion.div 
               initial={{ scale: 0.8, opacity: 0 }}
               whileInView={{ scale: 1, opacity: 1 }}
               transition={{ duration: 1 }}
-              className="aspect-square bg-venuea-gold/10 rounded-full absolute -top-10 -left-10 w-full h-full z-0"
+              className="aspect-square bg-venuea-gold/10 rounded-full absolute -top-5 -left-5 md:-top-10 md:-left-10 w-full h-full z-0"
             />
             <img 
               src="https://images.unsplash.com/photo-1494438639946-1ebd1d20bf85?auto=format&fit=crop&q=80&w=1000" 
@@ -275,21 +275,21 @@ export default function Home() {
               referrerPolicy="no-referrer"
             />
           </div>
-          <div className="space-y-8">
-            <h3 className="text-4xl md:text-6xl font-bold leading-tight tracking-tight">
+          <div className="space-y-6 md:space-y-8 order-1 md:order-2">
+            <h3 className="text-3xl md:text-6xl font-bold leading-tight tracking-tight">
               슬로우 리빙의 철학
             </h3>
-            <p className="text-white/60 text-lg leading-relaxed font-light">
+            <p className="text-white/60 text-base md:text-lg leading-relaxed font-light">
               우리는 집이 안식처가 되어야 한다고 믿습니다. 멈추지 않는 세상 속에서, 베누아는 당신이 속도를 늦추고, 숨을 쉬며, 주변의 단순한 아름다움을 감상할 수 있도록 돕는 필수 아이템을 제공합니다.
             </p>
-            <div className="grid grid-cols-2 gap-8 pt-8">
+            <div className="grid grid-cols-2 gap-4 md:gap-8 pt-4 md:pt-8">
               <div>
-                <h5 className="text-2xl font-bold mb-2 text-venuea-gold">내추럴</h5>
-                <p className="text-sm text-white/40">지속 가능한 소재의 사용.</p>
+                <h5 className="text-xl md:text-2xl font-bold mb-1 md:mb-2 text-venuea-gold">내추럴</h5>
+                <p className="text-[11px] md:text-sm text-white/40 uppercase tracking-wider">지속 가능한 소재의 사용.</p>
               </div>
               <div>
-                <h5 className="text-2xl font-bold mb-2 text-venuea-gold">코지</h5>
-                <p className="text-sm text-white/40">최상의 편안함을 위한 디자인.</p>
+                <h5 className="text-xl md:text-2xl font-bold mb-1 md:mb-2 text-venuea-gold">코지</h5>
+                <p className="text-[11px] md:text-sm text-white/40 uppercase tracking-wider">최상의 편안함을 위한 디자인.</p>
               </div>
             </div>
           </div>

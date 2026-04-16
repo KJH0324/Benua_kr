@@ -143,7 +143,7 @@ export default function Profile() {
   );
 
   return (
-    <div className="pt-32 pb-20 px-6">
+    <div className="pt-[120px] md:pt-32 pb-20 px-6">
       <div className="max-w-5xl mx-auto">
         <header className="flex flex-col md:flex-row md:items-end justify-between gap-6 mb-12">
           <div>
@@ -181,34 +181,36 @@ export default function Profile() {
               
               <div className="mt-8 space-y-3">
                 <p className="text-[10px] font-bold uppercase tracking-widest text-venuea-dark/30 mb-2">Social Linkage</p>
-                <div className="flex flex-col gap-2">
+                <div className="grid grid-cols-2 lg:grid-cols-1 gap-2">
                   <button 
                     onClick={() => !user.google_id && handleOAuthLink('google')}
                     disabled={!!user.google_id}
                     className={cn(
-                      "flex items-center justify-center space-x-2 py-2 px-4 text-[10px] font-bold uppercase tracking-widest border transition-all",
+                      "flex flex-col items-center justify-center space-y-2 py-4 px-2 text-[10px] font-bold uppercase tracking-widest border transition-all",
                       user.google_id 
                         ? "bg-blue-50 border-blue-100 text-blue-600 cursor-default" 
                         : "bg-white border-venuea-dark/10 text-venuea-dark hover:border-venuea-gold"
                     )}
                   >
-                    {googleIcon}
+                    <div className="w-8 h-8 rounded-full border border-gray-100 flex items-center justify-center bg-white shadow-sm">
+                      {googleIcon}
+                    </div>
                     <span>{user.google_id ? "Google 연동됨" : "Google 연동하기"}</span>
-                    {user.google_id && <Check size={12} />}
+                    {user.google_id && <Check size={12} className="mt-1" />}
                   </button>
                   <button 
                     onClick={() => !user.naver_id && handleOAuthLink('naver')}
                     disabled={!!user.naver_id}
                     className={cn(
-                      "flex items-center justify-center space-x-2 py-2 px-4 text-[10px] font-bold uppercase tracking-widest border transition-all",
+                      "flex flex-col items-center justify-center space-y-2 py-4 px-2 text-[10px] font-bold uppercase tracking-widest border transition-all",
                       user.naver_id 
                         ? "bg-green-50 border-green-100 text-green-600 cursor-default" 
                         : "bg-white border-venuea-dark/10 text-venuea-dark hover:border-venuea-gold"
                     )}
                   >
-                    <div className="w-4 h-4 bg-[#03C75A] text-white flex items-center justify-center text-[8px] font-bold rounded-sm">N</div>
+                    <div className="w-8 h-8 rounded-full border border-gray-100 flex items-center justify-center bg-white shadow-sm text-[12px] font-bold text-[#03C75A]">N</div>
                     <span>{user.naver_id ? "Naver 연동됨" : "Naver 연동하기"}</span>
-                    {user.naver_id && <Check size={12} />}
+                    {user.naver_id && <Check size={12} className="mt-1" />}
                   </button>
                 </div>
               </div>

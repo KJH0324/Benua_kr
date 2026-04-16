@@ -135,7 +135,7 @@ export default function Checkout() {
             <section>
               <h2 className="text-lg font-bold text-venuea-dark mb-6 border-b border-venuea-dark/10 pb-2">배송지 정보</h2>
               <div className="space-y-4">
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div className="space-y-2">
                     <label className="text-[10px] font-bold uppercase tracking-[2px] text-venuea-dark/60">받는 사람</label>
                     <input 
@@ -195,7 +195,7 @@ export default function Checkout() {
             {/* Payment Method */}
             <section>
               <h2 className="text-lg font-bold text-venuea-dark mb-6 border-b border-venuea-dark/10 pb-2">결제 수단</h2>
-              <div className="grid grid-cols-3 gap-4">
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 md:gap-4">
                 <button 
                   onClick={() => setPaymentMethod("card")}
                   className={`p-4 border flex flex-col items-center justify-center space-y-2 transition-colors ${paymentMethod === "card" ? "border-venuea-gold bg-venuea-gold/5 text-venuea-gold" : "border-venuea-dark/10 text-venuea-dark/60 hover:border-venuea-dark/30"}`}

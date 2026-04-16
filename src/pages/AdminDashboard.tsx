@@ -18,7 +18,9 @@ import {
   X,
   AlertCircle,
   MessageSquare,
-  Reply
+  Reply,
+  LogOut,
+  ShoppingCart
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { cn, formatPrice } from "../lib/utils";
@@ -37,6 +39,7 @@ export default function AdminDashboard() {
   const location = useLocation();
   const navigate = useNavigate();
   const [isCheckingAuth, setIsCheckingAuth] = useState(true);
+  const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
 
   useEffect(() => {
     const checkAuth = async () => {
@@ -77,8 +80,81 @@ export default function AdminDashboard() {
   };
 
   return (
-    <div className="flex min-h-screen bg-gray-50 pt-20">
-      {/* Sidebar */}
+    <div className="flex min-h-screen bg-gray-50 pt-[140px] md:pt-20">
+      {/* Mobile Header */}
+      <div className="fixed top-20 left-0 right-0 h-[60px] bg-white border-b border-gray-200 z-30 flex items-center justify-between px-6 md:hidden">
+        <h2 className="text-sm font-bold uppercase tracking-widest text-venuea-dark">Admin Console</h2>
+        <button 
+          onClick={() => setIsMobileSidebarOpen(true)}
+          className="p-2 text-venuea-dark hover:bg-gray-100 rounded-lg"
+        >
+          <MoreVertical size={20} />
+        </button>
+      </div>
+
+      {/* Mobile Sidebar Overlay */}
+      <AnimatePresence>
+        {isMobileSidebarOpen && (
+          <>
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setIsMobileSidebarOpen(false)}
+              className="fixed inset-0 bg-black/40 backdrop-blur-sm z-40 md:hidden"
+            />
+            <motion.aside
+              initial={{ x: -280 }}
+              animate={{ x: 0 }}
+              exit={{ x: -280 }}
+              transition={{ type: "spring", damping: 25, stiffness: 200 }}
+              className="fixed top-0 left-0 bottom-0 w-[280px] bg-white z-50 md:hidden p-6 flex flex-col shadow-2xl"
+            >
+              <div className="flex justify-between items-center mb-10">
+                <h2 className="text-xs font-bold uppercase tracking-widest text-gray-400">관리자 콘솔</h2>
+                <button onClick={() => setIsMobileSidebarOpen(false)} className="p-2 text-gray-400 hover:text-gray-900">
+                  <X size={20} />
+                </button>
+              </div>
+              
+              <nav className="space-y-1 flex-grow">
+                {sidebarLinks.map((link) => {
+                  const Icon = link.icon;
+                  const isActive = location.pathname === link.path;
+                  return (
+                    <Link
+                      key={link.path}
+                      to={link.path}
+                      onClick={() => setIsMobileSidebarOpen(false)}
+                      className={cn(
+                        "flex items-center space-x-3 px-4 py-4 rounded-lg text-base font-medium transition-all",
+                        isActive 
+                          ? "bg-venuea-dark text-white shadow-lg shadow-venuea-dark/20" 
+                          : "text-gray-500 hover:bg-gray-100 hover:text-gray-900"
+                      )}
+                    >
+                      <Icon size={20} />
+                      <span>{link.name}</span>
+                    </Link>
+                  );
+                })}
+              </nav>
+
+              <div className="pt-6 border-t border-gray-100">
+                <button 
+                  onClick={handleLogout}
+                  className="w-full text-left px-4 py-4 text-sm font-bold uppercase tracking-widest text-red-500 hover:bg-red-50 rounded-lg transition-colors flex items-center space-x-3"
+                >
+                  <LogOut size={18} />
+                  <span>로그아웃</span>
+                </button>
+              </div>
+            </motion.aside>
+          </>
+        )}
+      </AnimatePresence>
+
+      {/* Desktop Sidebar */}
       <aside className="w-64 bg-white border-r border-gray-200 hidden md:block">
         <div className="p-6">
           <h2 className="text-xs font-bold uppercase tracking-widest text-gray-400 mb-8">관리자 콘솔</h2>
@@ -106,16 +182,17 @@ export default function AdminDashboard() {
           <div className="mt-10 pt-10 border-t border-gray-100">
             <button 
               onClick={handleLogout}
-              className="w-full text-left px-4 py-3 text-sm font-medium text-red-500 hover:bg-red-50 rounded-lg transition-colors"
+              className="w-full text-left px-4 py-3 text-sm font-medium text-red-500 hover:bg-red-50 rounded-lg transition-colors flex items-center space-x-3"
             >
-              로그아웃
+              <LogOut size={18} />
+              <span>로그아웃</span>
             </button>
           </div>
         </div>
       </aside>
 
       {/* Main Content */}
-      <main className="flex-grow p-8">
+      <main className="flex-grow p-4 md:p-8 overflow-x-hidden">
         <Routes>
           <Route path="/" element={<AdminOverview />} />
           <Route path="/products" element={<AdminProducts />} />

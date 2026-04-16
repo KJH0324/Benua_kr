@@ -87,39 +87,75 @@ export default function Navbar() {
       <AnimatePresence>
         {isMobileMenuOpen && (
           <motion.div
-            initial={{ opacity: 0, y: -20 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -20 }}
-            className="absolute top-full left-0 right-0 bg-white border-b border-venuea-brown/10 p-6 md:hidden"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-white z-[60] md:hidden p-8 flex flex-col"
           >
-            <div className="flex flex-col space-y-4">
-              {navLinks.map((link) => (
-                <Link
+            <div className="flex justify-between items-center mb-16">
+              <Link to="/" onClick={() => setIsMobileMenuOpen(false)} className="text-2xl font-bold tracking-[4px] uppercase text-venuea-dark">
+                Benua
+              </Link>
+              <button
+                className="text-venuea-dark p-2"
+                onClick={() => setIsMobileMenuOpen(false)}
+              >
+                <X size={32} />
+              </button>
+            </div>
+
+            <div className="flex flex-col space-y-8 flex-grow">
+              {navLinks.map((link, i) => (
+                <motion.div
                   key={link.path}
-                  to={link.path}
-                  onClick={() => setIsMobileMenuOpen(false)}
-                  className="text-lg font-medium text-venuea-brown"
+                  initial={{ opacity: 0, x: -20 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  transition={{ delay: i * 0.1 }}
                 >
-                  {link.name}
-                </Link>
+                  <Link
+                    to={link.path}
+                    onClick={() => setIsMobileMenuOpen(false)}
+                    className="text-4xl font-bold text-venuea-dark tracking-tighter hover:text-venuea-gold transition-colors"
+                  >
+                    {link.name}
+                  </Link>
+                </motion.div>
               ))}
-              {user ? (
+            </div>
+
+            <div className="mt-auto pt-8 border-t border-venuea-dark/5 space-y-6">
+              <div className="flex gap-8">
+                {user ? (
+                  <Link
+                    to="/profile"
+                    onClick={() => setIsMobileMenuOpen(false)}
+                    className="text-lg font-bold uppercase tracking-widest text-venuea-dark flex items-center gap-2"
+                  >
+                    <User size={20} />
+                    마이페이지
+                  </Link>
+                ) : (
+                  <Link
+                    to="/login"
+                    onClick={() => setIsMobileMenuOpen(false)}
+                    className="text-lg font-bold uppercase tracking-widest text-venuea-dark flex items-center gap-2"
+                  >
+                    <User size={20} />
+                    로그인
+                  </Link>
+                )}
                 <Link
-                  to="/profile"
+                  to="/cart"
                   onClick={() => setIsMobileMenuOpen(false)}
-                  className="text-lg font-medium text-venuea-brown"
+                  className="text-lg font-bold uppercase tracking-widest text-venuea-dark flex items-center gap-2"
                 >
-                  마이페이지
+                  <ShoppingCart size={20} />
+                  장바구니
                 </Link>
-              ) : (
-                <Link
-                  to="/login"
-                  onClick={() => setIsMobileMenuOpen(false)}
-                  className="text-lg font-medium text-venuea-brown"
-                >
-                  로그인
-                </Link>
-              )}
+              </div>
+              <p className="text-[10px] uppercase tracking-[2px] text-venuea-dark/40">
+                &copy; 베누아 컬렉션. ALL RIGHTS RESERVED.
+              </p>
             </div>
           </motion.div>
         )}

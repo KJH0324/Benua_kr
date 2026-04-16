@@ -84,12 +84,12 @@ export default function Cart() {
                 exit={{ opacity: 0, scale: 0.95 }}
                 className="flex items-center space-x-6 pb-8 border-b border-venuea-dark/5"
               >
-                <div className="w-24 h-32 bg-[#F9F9F9] overflow-hidden flex-shrink-0">
+                <div className="w-20 sm:w-24 h-28 sm:h-32 bg-[#F9F9F9] overflow-hidden flex-shrink-0">
                   <img src={item.image} alt={item.name} className="w-full h-full object-cover" />
                 </div>
-                <div className="flex-grow">
-                  <div className="flex justify-between items-start mb-2">
-                    <h3 className="text-lg font-bold text-venuea-dark uppercase tracking-tight">{item.name}</h3>
+                <div className="flex-grow min-w-0">
+                  <div className="flex justify-between items-start mb-1 md:mb-2">
+                    <h3 className="text-sm md:text-lg font-bold text-venuea-dark uppercase tracking-tight truncate">{item.name}</h3>
                     <button 
                       onClick={() => removeItem(item.id)}
                       className="text-venuea-dark/30 hover:text-red-500 transition-colors"

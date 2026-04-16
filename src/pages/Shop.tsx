@@ -85,7 +85,7 @@ export default function Shop() {
             <Loader2 className="animate-spin text-venuea-gold" size={40} />
           </div>
         ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-12 gap-y-16">
+          <div className="grid grid-cols-2 lg:grid-cols-3 gap-x-4 md:gap-x-12 gap-y-12 md:gap-y-16">
             {filteredProducts.map((product, index) => (
               <motion.div
                 key={product.id}

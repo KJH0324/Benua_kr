@@ -144,11 +144,11 @@ export default function Login() {
   }, [navigate]);
 
   return (
-    <div className="min-h-screen pt-32 pb-20 px-8 md:px-[60px] flex items-center justify-center bg-[#F9F9F9]">
+    <div className="min-h-screen pt-[100px] md:pt-32 pb-20 px-6 md:px-[60px] flex items-center justify-center bg-[#F9F9F9]">
       <motion.div 
         initial={{ opacity: 0, scale: 0.95 }}
         animate={{ opacity: 1, scale: 1 }}
-        className="bg-white w-full max-w-md p-10 shadow-[0_40px_80px_rgba(0,0,0,0.08)] border border-venuea-dark/5"
+        className="bg-white w-full max-w-md p-6 md:p-10 shadow-[0_40px_80px_rgba(0,0,0,0.08)] border border-venuea-dark/5"
       >
         <div className="text-center mb-10">
           <h1 className="text-3xl font-bold text-venuea-dark mb-2 tracking-tight uppercase">
