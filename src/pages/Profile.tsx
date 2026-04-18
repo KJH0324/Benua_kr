@@ -555,6 +555,30 @@ export default function Profile() {
                   exit={{ opacity: 0 }}
                   className="space-y-12"
                 >
+                  {/* Latest 3 Orders Preview */}
+                  <div className="bg-white p-8 border border-venuea-dark/5 shadow-[0_20px_40px_rgba(0,0,0,0.03)]">
+                    <header className="flex justify-between items-center mb-8">
+                      <h3 className="text-lg font-bold text-venuea-dark uppercase tracking-widest flex items-center space-x-3">
+                        <div className="w-1.5 h-6 bg-venuea-gold" />
+                        <span>최근 주문 (최대 3건)</span>
+                      </h3>
+                      <button onClick={() => setActiveTab('orders')} className="text-[10px] font-bold uppercase tracking-widest text-venuea-gold hover:underline">전체 주문 내역</button>
+                    </header>
+                    {orders.length === 0 ? (
+                      <p className="text-xs text-venuea-muted uppercase tracking-widest">주문 내역이 없습니다.</p>
+                    ) : (
+                      <div className="space-y-4">
+                        {orders.slice(0, 3).map((order) => (
+                          <div key={order.id} className="flex justify-between items-center bg-[#F9F9F9] p-4 text-xs font-bold text-venuea-dark">
+                            <span className="font-mono">#{order.order_number}</span>
+                            <span className="text-venuea-gold">{formatPrice(order.total_amount)}</span>
+                            <span className={cn("px-2 py-1 uppercase tracking-widest", getStatusInfo(order.status).color)}>{getStatusInfo(order.status).label}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
                   <div className="bg-white p-8 border border-venuea-dark/5 shadow-[0_20px_40px_rgba(0,0,0,0.03)]">
                     <header className="flex justify-between items-center mb-8">
                       <h3 className="text-lg font-bold text-venuea-dark uppercase tracking-widest flex items-center space-x-3">
@@ -588,7 +612,11 @@ export default function Profile() {
                       </div>
                       <div className="p-6 bg-venuea-dark text-white shadow-xl shadow-venuea-dark/20">
                         <p className="text-[10px] font-bold uppercase tracking-widest text-white/30 mb-2">멤버십 등급</p>
-                        <p className="text-2xl font-serif font-bold text-venuea-gold">{user.grade}</p>
+                        <p className="text-2xl font-serif font-bold text-venuea-gold">
+                          {user.tier === 'THE_BLACK' ? 'The Black' : 
+                           user.tier === 'BLACK' ? 'Black' : 
+                           user.tier === 'GREEN' ? 'Green' : 'Beige'}
+                        </p>
                       </div>
                     </div>
                   </div>

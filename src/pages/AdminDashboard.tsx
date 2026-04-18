@@ -30,6 +30,7 @@ import {
   Shield,
   Activity
 } from "lucide-react";
+import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
 import { motion, AnimatePresence } from "motion/react";
 import { cn, formatPrice } from "../lib/utils";
 import { toast } from "sonner";
@@ -96,9 +97,13 @@ export default function AdminDashboard() {
   }
   
   const sidebarLinks = [
-    { name: "개요", path: `${adminPathBase}/`, icon: LayoutDashboard },
+    { name: "대시보드", path: `${adminPathBase}/`, icon: LayoutDashboard },
     { name: "상품 관리", path: `${adminPathBase}/products`, icon: Package },
-    { name: "주문 내역", path: `${adminPathBase}/orders`, icon: ShoppingBag },
+    { name: "주문 관리", path: `${adminPathBase}/orders`, icon: ShoppingBag },
+    { name: "정산 관리", path: `${adminPathBase}/settlement`, icon: FileText },
+    { name: "물류/배송", path: `${adminPathBase}/fulfillment`, icon: Truck },
+    { name: "리뷰 관리", path: `${adminPathBase}/reviews`, icon: MessageSquare },
+    { name: "전시/진열", path: `${adminPathBase}/display`, icon: LayoutDashboard },
     { name: "고객 문의", path: `${adminPathBase}/inquiries`, icon: MessageSquare },
     { name: "고객 관리", path: `${adminPathBase}/customers`, icon: Users },
     { name: "쿠폰 관리", path: `${adminPathBase}/coupons`, icon: Ticket },
@@ -262,6 +267,10 @@ export default function AdminDashboard() {
           <Route path="/" element={<AdminOverview />} />
           <Route path="/products" element={<AdminProducts />} />
           <Route path="/orders" element={<AdminOrders />} />
+          <Route path="/settlement" element={<AdminSettlement />} />
+          <Route path="/fulfillment" element={<AdminFulfillment />} />
+          <Route path="/reviews" element={<AdminReviews />} />
+          <Route path="/display" element={<AdminDisplay />} />
           <Route path="/customers" element={<AdminUserPoints />} />
           <Route path="/coupons" element={<AdminCoupons />} />
           <Route path="/inquiries" element={<AdminInquiries />} />
@@ -665,70 +674,194 @@ function AdminCoupons() {
 }
 
 function AdminOverview() {
-  const [products, setProducts] = useState<Product[]>([]);
-  const [orders, setOrders] = useState<any[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const [stats, setStats] = useState({ dailySales: 0, weeklySales: 0, pendingOrders: 0, lowStockProducts: 0 });
+  const [chartData, setChartData] = useState<any[]>([]);
 
   useEffect(() => {
-    const fetchData = async () => {
-      try {
-        const [prodRes, orderRes] = await Promise.all([
-          fetch("/api/products"),
-          fetch("/api/admin/orders")
-        ]);
-        if (prodRes.ok) setProducts(await prodRes.json());
-        if (orderRes.ok) setOrders(await orderRes.json());
-      } catch (err) {
-        console.error(err);
-      } finally {
-        setIsLoading(false);
-      }
-    };
-    fetchData();
+    fetch("/api/admin/dashboard/stats").then(r => r.json()).then(setStats);
+    fetch("/api/admin/dashboard/chart-data").then(r => r.json()).then(setChartData);
   }, []);
 
-  const totalRevenue = orders.reduce((acc, order) => acc + (order.status === 'completed' ? order.total_amount : 0), 0);
-  const activeOrders = orders.filter(o => o.status !== 'completed' && o.status !== 'refunded').length;
+  return (
+    <div className="space-y-8 animate-in fade-in">
+        <header>
+          <h1 className="text-2xl font-serif font-bold text-gray-900">대시보드</h1>
+        </header>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+            <div className="bg-white p-6 rounded-xl border border-gray-100 shadow-sm">
+                <h3 className="text-xs font-bold text-gray-400 uppercase tracking-widest">일일 매출</h3>
+                <p className="text-2xl font-bold mt-2">{formatPrice(stats.dailySales)}</p>
+            </div>
+            <div className="bg-white p-6 rounded-xl border border-gray-100 shadow-sm">
+                <h3 className="text-xs font-bold text-gray-400 uppercase tracking-widest">주간 매출</h3>
+                <p className="text-2xl font-bold mt-2">{formatPrice(stats.weeklySales)}</p>
+            </div>
+            <div className="bg-white p-6 rounded-xl border border-gray-100 shadow-sm">
+                <h3 className="text-xs font-bold text-gray-400 uppercase tracking-widest">처리 대기 주문</h3>
+                <p className="text-2xl font-bold mt-2">{stats.pendingOrders}</p>
+            </div>
+            <div className="bg-white p-6 rounded-xl border border-gray-100 shadow-sm">
+                <h3 className="text-xs font-bold text-gray-400 uppercase tracking-widest">재고 부족 상품</h3>
+                <p className="text-2xl font-bold mt-2">{stats.lowStockProducts}</p>
+            </div>
+        </div>
+        <div className="bg-white p-6 rounded-xl border border-gray-100 shadow-sm">
+            <h3 className="text-sm font-bold text-gray-900 mb-6">최근 30일 매출 추이</h3>
+            <div className="h-[300px]">
+                <ResponsiveContainer width="100%" height="100%">
+                    <LineChart data={chartData}>
+                        <XAxis dataKey="date" />
+                        <YAxis />
+                        <Tooltip />
+                        <Line type="monotone" dataKey="amount" stroke="#B29141" strokeWidth={2} />
+                    </LineChart>
+                </ResponsiveContainer>
+            </div>
+        </div>
+    </div>
+  );
+}
 
-  const stats = [
-    { name: "누적 매출 (확정)", value: formatPrice(totalRevenue), change: "구매확정 건 기준", icon: ShoppingBag },
-    { name: "활성 주문", value: activeOrders.toString(), change: "배송중/결제완료 건", icon: Clock },
-    { name: "전체 상품", value: products.length.toString(), change: "판매 중인 상품 수", icon: Package },
-    { name: "전체 주문", value: orders.length.toString(), change: "누적 주문 횟수", icon: Users },
-  ];
+
+function AdminSettlement() {
+  const [report, setReport] = useState<any[]>([]);
+  const [dates, setDates] = useState({ startDate: '2026-04-01', endDate: new Date().toISOString().split('T')[0] });
+
+  const fetchSettlement = async () => {
+    const res = await fetch(`/api/admin/settlement?startDate=${dates.startDate}&endDate=${dates.endDate}`);
+    if (res.ok) setReport(await res.json());
+  };
+
+  useEffect(() => { fetchSettlement(); }, [dates]);
 
   return (
-    <div className="space-y-8">
-      <header className="flex justify-between items-center">
-        <div>
-          <h1 className="text-2xl font-serif font-bold text-gray-900">대시보드 개요</h1>
-          <p className="text-sm text-gray-500">환영합니다, 관리자님.</p>
+    <div className="bg-white p-8 rounded-2xl shadow-sm border border-gray-100 animate-in fade-in">
+        <h2 className="text-xl font-bold font-serif mb-6">정산 리포트</h2>
+        <div className="flex gap-4 mb-4">
+            <input type="date" value={dates.startDate} onChange={e => setDates({...dates, startDate: e.target.value})} className="border p-2 rounded" />
+            <input type="date" value={dates.endDate} onChange={e => setDates({...dates, endDate: e.target.value})} className="border p-2 rounded" />
         </div>
-        <Link to="/admin/products" className="bg-venuea-dark text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center space-x-2 hover:bg-venuea-gold transition-colors">
-          <Plus size={18} />
-          <span>상품 관리로 이동</span>
-        </Link>
-      </header>
+        <table className="w-full">
+            <thead>
+                <tr>
+                    <th className="text-left p-3">결제 수단</th>
+                    <th className="text-right p-3">매출액</th>
+                    <th className="text-right p-3">수수료</th>
+                    <th className="text-right p-3">실입금액</th>
+                </tr>
+            </thead>
+            <tbody>
+                {report.map(r => (
+                    <tr key={r.payment_method}>
+                        <td className="p-3">{r.payment_method}</td>
+                        <td className="text-right p-3">{formatPrice(r.total_amount)}</td>
+                        <td className="text-right p-3">{formatPrice(r.commission)}</td>
+                        <td className="text-right p-3 font-bold">{formatPrice(r.net_amount)}</td>
+                    </tr>
+                ))}
+            </tbody>
+        </table>
+    </div>
+  );
+}
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        {stats.map((stat) => {
-          const Icon = stat.icon;
-          return (
-            <div key={stat.name} className="bg-white p-6 rounded-xl border border-gray-100 shadow-sm">
-              <div className="flex justify-between items-start mb-4">
-                <div className="p-2 bg-gray-50 rounded-lg text-venuea-brown">
-                  <Icon size={20} />
-                </div>
-                <span className="text-xs font-bold text-green-600 bg-green-50 px-2 py-1 rounded">
-                  {stat.change}
-                </span>
-              </div>
-              <h3 className="text-sm font-medium text-gray-500">{stat.name}</h3>
-              <p className="text-2xl font-bold text-gray-900 mt-1">{stat.value}</p>
-            </div>
-          );
-        })}
-      </div>
+function AdminFulfillment() {
+  const [file, setFile] = useState<File | null>(null);
+
+  const handleUpload = async () => {
+    if (!file) return;
+    const formData = new FormData();
+    formData.append("csv", file);
+    const res = await fetch("/api/admin/fulfillment/tracking-bulk", { method: "POST", body: formData });
+    if (res.ok) toast.success("송장 정보가 일괄 업데이트되었습니다.");
+    else toast.error("업데이트 실패");
+  };
+
+  return (
+    <div className="bg-white p-8 rounded-2xl shadow-sm border border-gray-100 animate-in fade-in">
+        <h2 className="text-xl font-bold font-serif mb-6">송장 일괄 등록</h2>
+        <input type="file" onChange={e => setFile(e.target.files?.[0] || null)} className="mb-4" />
+        <button onClick={handleUpload} className="bg-venuea-dark text-white px-6 py-2 rounded-lg">업로드</button>
+    </div>
+  );
+}
+
+function AdminReviews() {
+  const [reviews, setReviews] = useState<any[]>([]);
+
+  useEffect(() => {
+    fetch("/api/admin/reviews").then(r => r.json()).then(setReviews);
+  }, []);
+
+  const toggleBest = async (id: number, isBest: boolean) => {
+    const res = await fetch(`/api/admin/reviews/${id}/best`, {
+      method: "POST",
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ isBest: !isBest })
+    });
+    if (res.ok) {
+        setReviews(prev => prev.map(r => r.id === id ? {...r, is_best: !isBest ? 1 : 0} : r));
+        toast.success("베스트 리뷰 설정이 변경되었습니다.");
+    }
+  };
+
+  return (
+    <div className="bg-white p-8 rounded-2xl shadow-sm border border-gray-100 animate-in fade-in">
+        <h2 className="text-xl font-bold font-serif mb-6">리뷰 관리</h2>
+        <table className="w-full">
+            <thead>
+                <tr>
+                    <th className="text-left p-3">상품명</th>
+                    <th className="text-left p-3">내용</th>
+                    <th className="text-right p-3">평점</th>
+                    <th className="text-right p-3">베스트</th>
+                </tr>
+            </thead>
+            <tbody>
+                {reviews.map(r => (
+                    <tr key={r.id}>
+                        <td className="p-3">{r.product_name}</td>
+                        <td className="p-3">{r.content}</td>
+                        <td className="text-right p-3">{r.rating}</td>
+                        <td className="text-right p-3">
+                            <button 
+                                onClick={() => toggleBest(r.id, !!r.is_best)}
+                                className={cn("px-3 py-1 rounded text-xs", r.is_best ? "bg-yellow-400 text-black" : "bg-gray-200")}
+                            >
+                                {r.is_best ? "베스트" : "설정"}
+                            </button>
+                        </td>
+                    </tr>
+                ))}
+            </tbody>
+        </table>
+    </div>
+  );
+}
+
+function AdminDisplay() {
+  const [settings, setSettings] = useState<any[]>([]);
+
+  useEffect(() => {
+    fetch("/api/admin/display").then(r => r.json()).then(setSettings);
+  }, []);
+
+  return (
+    <div className="bg-white p-8 rounded-2xl shadow-sm border border-gray-100 animate-in fade-in">
+        <h2 className="text-xl font-bold font-serif mb-6">전시/진열 관리</h2>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            {['main-banner', 'promo-section', 'popup'].map(id => {
+                const setting = settings.find(s => s.id === id) || {};
+                return (
+                    <div key={id} className="border p-4 rounded-lg">
+                        <h3 className="font-bold mb-2">{id}</h3>
+                        <input placeholder="이미지 URL" defaultValue={setting.image_url} className="w-full border p-2 mb-2"/>
+                        <input placeholder="링크 URL" defaultValue={setting.link_url} className="w-full border p-2 mb-2"/>
+                        <button className="bg-venuea-gold text-white px-4 py-2 rounded">저장</button>
+                    </div>
+                );
+            })}
+        </div>
     </div>
   );
 }
@@ -1076,16 +1209,6 @@ function AdminProducts() {
                 </div>
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-1">
-                    <label className="text-xs font-bold text-gray-400 uppercase">크기/치수</label>
-                    <input 
-                      type="text" 
-                      value={newProduct.dimensions}
-                      onChange={e => setNewProduct({...newProduct, dimensions: e.target.value})}
-                      className="w-full border border-gray-200 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-venuea-dark/20"
-                      placeholder="예: W1200 x D600 x H750"
-                    />
-                  </div>
-                  <div className="space-y-1">
                     <label className="text-xs font-bold text-gray-400 uppercase">원산지</label>
                     <input 
                       type="text" 
@@ -1093,6 +1216,16 @@ function AdminProducts() {
                       onChange={e => setNewProduct({...newProduct, origin: e.target.value})}
                       className="w-full border border-gray-200 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-venuea-dark/20"
                       placeholder="예: 대한민국"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold text-gray-400 uppercase">제조사</label>
+                    <input 
+                      type="text" 
+                      value={newProduct.manufacturer || ""}
+                      onChange={e => setNewProduct({...newProduct, manufacturer: e.target.value})}
+                      className="w-full border border-gray-200 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-venuea-dark/20"
+                      placeholder="예: 베누아 스튜디오"
                     />
                   </div>
                 </div>
@@ -1180,6 +1313,22 @@ function AdminOrders() {
       toast.success("주문 내역이 내보내기 되었습니다.");
     } catch (error) {
       toast.error("내보내기 실패");
+    }
+  };
+
+  const handleClaim = async (id: number, action: 'approve' | 'reject') => {
+    try {
+      const res = await fetch(`/api/admin/orders/${id}/claim`, {
+        method: "POST",
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action })
+      });
+      if (res.ok) {
+        toast.success(`클레임이 ${action === 'approve' ? '승인' : '거절'}되었습니다.`);
+        fetchOrders(); // Refresh
+      } else throw new Error();
+    } catch {
+      toast.error("클레임 처리 실패");
     }
   };
 

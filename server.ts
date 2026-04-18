@@ -114,6 +114,23 @@ db.exec(`
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
 
+  CREATE TABLE IF NOT EXISTS admin_logs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    admin_id INTEGER,
+    action TEXT NOT NULL,
+    target_type TEXT,
+    target_id INTEGER,
+    details TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(admin_id) REFERENCES users(id)
+  );
+
+  CREATE TABLE IF NOT EXISTS email_verification_codes (
+    email TEXT PRIMARY KEY,
+    code TEXT NOT NULL,
+    expires_at DATETIME NOT NULL
+  );
+
   CREATE TABLE IF NOT EXISTS point_history (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER,
@@ -159,6 +176,7 @@ db.exec(`
     content TEXT,
     image_url TEXT,
     type TEXT, -- TEXT, PHOTO
+    is_best INTEGER DEFAULT 0,
     points_earned INTEGER DEFAULT 0,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY(product_id) REFERENCES products(id),
@@ -233,6 +251,14 @@ db.exec(`
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     replied_at DATETIME
   );
+
+  CREATE TABLE IF NOT EXISTS display_settings (
+    id TEXT PRIMARY KEY,
+    type TEXT,
+    image_url TEXT,
+    link_url TEXT,
+    is_active INTEGER DEFAULT 1
+  );
 `);
 
 // Explicit schema check and migration for users table
@@ -288,6 +314,10 @@ const checkAndMigrateUsers = () => {
     if (!columns.includes('newsletter_subscribed')) {
       db.exec(`ALTER TABLE users ADD COLUMN newsletter_subscribed INTEGER DEFAULT 1`);
       console.log("[DEBUG][DB] Added newsletter_subscribed column");
+    }
+    if (!columns.includes('role')) {
+      db.exec(`ALTER TABLE users ADD COLUMN role TEXT DEFAULT 'USER'`);
+      console.log("[DEBUG][DB] Added role column");
     }
 
     // Ensure no NULL values for new mandatory fields
@@ -374,6 +404,9 @@ const migrate = (sql: string) => {
   }
 };
 
+migrate(`ALTER TABLE reviews ADD COLUMN is_best INTEGER DEFAULT 0`);
+migrate(`ALTER TABLE inquiries ADD COLUMN status TEXT DEFAULT 'pending'`);
+
 migrate(`ALTER TABLE inquiries ADD COLUMN status TEXT DEFAULT 'pending'`);
 migrate(`ALTER TABLE inquiries ADD COLUMN reply_message TEXT`);
 migrate(`ALTER TABLE inquiries ADD COLUMN replied_at DATETIME`);
@@ -418,18 +451,29 @@ async function startServer() {
   });
 
   // --- Auth Middleware ---
-  const authenticateAdmin = (req: any, res: any, next: any) => {
+  const authorize = (allowedRoles: string[]) => (req: any, res: any, next: any) => {
     const token = req.cookies.admin_token;
     if (!token) return res.status(401).json({ error: "Unauthorized" });
 
     try {
-      const decoded = jwt.verify(token, JWT_SECRET);
+      const decoded = jwt.verify(token, JWT_SECRET) as any;
+      const user = db.prepare("SELECT role FROM users WHERE id = ?").get(decoded.id) as any;
+      
+      if (!user || !allowedRoles.includes(user.role)) {
+        return res.status(403).json({ error: "Forbidden: Insufficient permissions" });
+      }
+      
       req.admin = decoded;
+      req.admin.role = user.role;
       next();
     } catch (err) {
       res.status(401).json({ error: "Invalid token" });
     }
   };
+
+  const authenticateAdmin = authorize(["MASTER", "ADMIN"]);
+  const authenticateOperator = authorize(["MASTER", "ADMIN", "OPERATOR"]);
+  const authenticateCS = authorize(["MASTER", "ADMIN", "OPERATOR", "CS"]);
 
   const authenticateUser = (req: any, res: any, next: any) => {
     const token = req.cookies.user_token;
@@ -767,7 +811,7 @@ async function startServer() {
   });
 
   // Export Orders
-  app.get("/api/admin/orders/export", authenticateAdmin, (req, res) => {
+  app.get("/api/admin/orders/export", authenticateOperator, (req, res) => {
     try {
       const orders = db.prepare(`
         SELECT o.order_number, o.customer_name, o.customer_email, o.total_amount, o.status, o.created_at, o.tracking_number, o.shipping_company
@@ -781,7 +825,7 @@ async function startServer() {
   });
 
   // Admin: Tracking Number Update with Auto-Status Change
-  app.post("/api/admin/orders/:id/tracking", authenticateAdmin, (req, res) => {
+  app.post("/api/admin/orders/:id/tracking", authenticateOperator, (req, res) => {
     const { id } = req.params;
     const { tracking_number, shipping_company } = req.body;
     console.log(`[ADMIN] Updating tracking for order ${id}: ${shipping_company} ${tracking_number}`);
@@ -1120,7 +1164,7 @@ async function startServer() {
     res.json({ success: true });
   });
 
-  app.get("/api/admin/check", authenticateAdmin, (req, res) => {
+  app.get("/api/admin/check", authenticateCS, (req, res) => {
     res.json({ authenticated: true });
   });
 
@@ -1146,7 +1190,7 @@ async function startServer() {
   });
 
   // --- Coupon Management (Admin) ---
-  app.get("/api/admin/coupons", authenticateAdmin, (req, res) => {
+  app.get("/api/admin/coupons", authenticateCS, (req, res) => {
     try {
       const coupons = db.prepare("SELECT * FROM coupons ORDER BY created_at DESC").all();
       res.json(coupons);
@@ -1177,7 +1221,7 @@ async function startServer() {
   });
 
   // Give coupon to users
-  app.post("/api/admin/coupons/:id/give", authenticateAdmin, (req, res) => {
+  app.post("/api/admin/coupons/:id/give", authenticateOperator, (req, res) => {
     const { id } = req.params;
     const { target } = req.body; // 'all' or specific user email
     
@@ -1345,8 +1389,8 @@ async function startServer() {
       const parsedShowOnMain = show_on_main === "true" || show_on_main === "1" ? 1 : 0;
 
       const info = db.prepare(
-        "INSERT INTO products (name, price, description, image_url, description_image_url, category, stock, material, dimensions, origin, discount_rate, show_on_main) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
-      ).run(name, parsedPrice, description, image_url, description_image_url, category, parsedStock, material, dimensions, origin, parsedDiscount, parsedShowOnMain);
+        "INSERT INTO products (name, price, description, image_url, description_image_url, category, stock, material, dimensions, origin, manufacturer, discount_rate, show_on_main) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+      ).run(name, parsedPrice, description, image_url, description_image_url, category, parsedStock, material, dimensions, origin, manufacturer, parsedDiscount, parsedShowOnMain);
       
       console.log("Product created successfully:", name, "ID:", info.lastInsertRowid);
       res.json({ id: info.lastInsertRowid, success: true });
@@ -1361,7 +1405,7 @@ async function startServer() {
     { name: "description_image", maxCount: 1 }
   ]), (req: any, res) => {
     const { id } = req.params;
-    const { name, price, description, category, stock, material, dimensions, origin, discount_rate, show_on_main } = req.body;
+    const { name, price, description, category, stock, material, dimensions, origin, manufacturer, discount_rate, show_on_main } = req.body;
     const files = req.files as { [fieldname: string]: Express.Multer.File[] };
     
     try {
@@ -1377,8 +1421,8 @@ async function startServer() {
       const parsedShowOnMain = show_on_main === "true" || show_on_main === "1" ? 1 : 0;
 
       db.prepare(
-        "UPDATE products SET name = ?, price = ?, description = ?, image_url = ?, description_image_url = ?, category = ?, stock = ?, material = ?, dimensions = ?, origin = ?, discount_rate = ?, show_on_main = ? WHERE id = ?"
-      ).run(name, parsedPrice, description, image_url, description_image_url, category, parsedStock, material, dimensions, origin, parsedDiscount, parsedShowOnMain, id);
+        "UPDATE products SET name = ?, price = ?, description = ?, image_url = ?, description_image_url = ?, category = ?, stock = ?, material = ?, dimensions = ?, origin = ?, manufacturer = ?, discount_rate = ?, show_on_main = ? WHERE id = ?"
+      ).run(name, parsedPrice, description, image_url, description_image_url, category, parsedStock, material, dimensions, origin, manufacturer, parsedDiscount, parsedShowOnMain, id);
       
       res.json({ success: true });
     } catch (err: any) {
@@ -1533,7 +1577,7 @@ async function startServer() {
     }
   });
 
-  app.get("/api/admin/orders", authenticateAdmin, (req, res) => {
+  app.get("/api/admin/orders", authenticateOperator, (req, res) => {
     try {
       const orders = db.prepare("SELECT * FROM orders ORDER BY created_at DESC").all();
       for (const order of orders as any) {
@@ -1546,7 +1590,7 @@ async function startServer() {
     }
   });
 
-  app.post("/api/admin/orders/:id/status", authenticateAdmin, async (req, res) => {
+  app.post("/api/admin/orders/:id/status", authenticateOperator, async (req, res) => {
     const { status } = req.body;
     const { id } = req.params;
     try {
@@ -1657,7 +1701,7 @@ async function startServer() {
   });
 
   // Coupons
-  app.get("/api/admin/coupons", authenticateAdmin, (req, res) => {
+  app.get("/api/admin/coupons", authenticateCS, (req, res) => {
     const coupons = db.prepare("SELECT * FROM coupons ORDER BY created_at DESC").all();
     res.json(coupons);
   });
@@ -1920,20 +1964,183 @@ async function startServer() {
     }
   });
 
-  // Inquiries
-  app.post("/api/inquiries", (req, res) => {
-    const { name, email, subject, message } = req.body;
+  // --- Admin Audit Logging ---
+  const logAdminAction = (adminId: string, action: string, targetTable: string, targetId: string | number, details: string) => {
+    db.prepare("INSERT INTO admin_logs (admin_id, action, target_table, target_id, details) VALUES (?, ?, ?, ?, ?)").run(
+      adminId, action, targetTable, targetId, details
+    );
+  };
+
+  // --- Admin Role Assignment API ---
+  app.post("/api/admin/users/:id/role", authenticateAdmin, (req: any, res) => {
+    const { role } = req.body;
+    const targetUserId = req.params.id;
+    const adminId = req.admin.id;
+
+    if (!["ADMIN", "OPERATOR", "CS", "USER"].includes(role)) {
+      return res.status(400).json({ error: "유효하지 않은 역할입니다." });
+    }
+
+    // Role hierarchy enforcement
+    if (req.admin.role !== "MASTER" && role === "MASTER") {
+      return res.status(403).json({ error: "MASTER 역할을 부여할 수 없습니다." });
+    }
+
     try {
-      db.prepare(
-        "INSERT INTO inquiries (name, email, subject, message) VALUES (?, ?, ?, ?)"
-      ).run(name, email, subject, message);
+      db.prepare("UPDATE users SET role = ? WHERE id = ?").run(role, targetUserId);
+      logAdminAction(adminId, "UPDATE_ROLE", "users", targetUserId, `Role set to ${role}`);
       res.json({ success: true });
     } catch (err) {
-      res.status(500).json({ error: "Inquiry submission failed" });
+      res.status(500).json({ error: "역할 변경 실패" });
     }
   });
 
-  app.get("/api/admin/inquiries", authenticateAdmin, (req, res) => {
+  // --- Admin Dashboard API ---
+  app.get("/api/admin/dashboard/stats", authenticateOperator, (req, res) => {
+    try {
+      // 1. Daily Sales
+      const dailySales = db.prepare("SELECT SUM(total_amount) as amount FROM orders WHERE date(created_at) = date('now') AND status != 'refunded'").get() as any;
+      
+      // 2. Weekly Sales
+      const weeklySales = db.prepare("SELECT SUM(total_amount) as amount FROM orders WHERE created_at > date('now', '-7 days') AND status != 'refunded'").get() as any;
+      
+      // 3. Pending Orders Count
+      const pendingCount = db.prepare("SELECT COUNT(*) as count FROM orders WHERE status = 'pending'").get() as any;
+      
+      // 4. Products Low Stock
+      const lowStockProducts = db.prepare("SELECT COUNT(*) as count FROM products WHERE stock < 10").get() as any;
+
+      res.json({
+        dailySales: dailySales.amount || 0,
+        weeklySales: weeklySales.amount || 0,
+        pendingOrders: pendingCount.count || 0,
+        lowStockProducts: lowStockProducts.count || 0
+      });
+    } catch (err) {
+      res.status(500).json({ error: "Failed to fetch dashboard stats" });
+    }
+  });
+
+  app.get("/api/admin/dashboard/chart-data", authenticateOperator, (req, res) => {
+    try {
+      const salesData = db.prepare(`
+        SELECT date(created_at) as date, SUM(total_amount) as amount 
+        FROM orders 
+        WHERE created_at > date('now', '-30 days') AND status != 'refunded'
+        GROUP BY date
+        ORDER BY date ASC
+      `).all();
+
+      res.json(salesData);
+    } catch (err) {
+      res.status(500).json({ error: "Failed to fetch chart data" });
+    }
+  });
+
+  // --- Fulfillment Management API ---
+  app.post("/api/admin/fulfillment/tracking-bulk", authenticateOperator, upload.single("csv"), (req: any, res) => {
+    // 단순 파싱 예시 (실제 구현 시 papaparse 필요)
+    if (!req.file) return res.status(400).json({ error: "CSV 파일이 필요합니다." });
+    
+    try {
+      const content = fs.readFileSync(req.file.path, "utf-8");
+      const lines = content.split("\n");
+      
+      const transaction = db.transaction((rows) => {
+        for (const row of rows) {
+          const [order_number, tracking_number, shipping_company] = row.split(",");
+          if (order_number && tracking_number) {
+            db.prepare("UPDATE orders SET tracking_number = ?, shipping_company = ?, status = 'shipping' WHERE order_number = ?").run(
+                tracking_number, shipping_company || 'CJS', order_number
+            );
+          }
+        }
+      });
+      transaction(lines.slice(1)); // 헤더 제외
+      res.json({ success: true });
+    } catch (err) {
+      res.status(500).json({ error: "송장 일괄 등록 실패" });
+    }
+  });
+
+  // --- Review Management API ---
+  app.get("/api/admin/reviews", authenticateCS, (req, res) => {
+    try {
+      const reviews = db.prepare(`SELECT r.*, p.name as product_name FROM reviews r JOIN products p ON r.product_id = p.id ORDER BY r.created_at DESC`).all();
+      res.json(reviews);
+    } catch (err) {
+      res.status(500).json({ error: "리뷰 목록 조회 실패" });
+    }
+  });
+
+  app.get("/api/admin/settlement", authenticateAdmin, (req, res) => {
+    const { startDate, endDate } = req.query;
+    try {
+      const query = `
+        SELECT payment_method, SUM(total_amount) as total_amount, COUNT(*) as order_count
+        FROM orders 
+        WHERE status = 'completed' AND date(created_at) >= date(?) AND date(created_at) <= date(?)
+        GROUP BY payment_method
+      `;
+      const settlements = db.prepare(query).all(startDate, endDate) as any[];
+      
+      const commissionRates: { [key: string]: number } = {
+        card: 0.02,
+        naver_pay: 0.03,
+        kakao_pay: 0.03,
+        vbank: 0.01 
+      };
+
+      const report = settlements.map(s => {
+        const rate = commissionRates[s.payment_method as string] || 0.02;
+        const commission = Math.floor(s.total_amount * rate);
+        return {
+            payment_method: s.payment_method,
+            total_amount: s.total_amount,
+            commission: commission,
+            net_amount: s.total_amount - commission,
+            order_count: s.order_count
+        };
+      });
+
+      res.json(report);
+    } catch (err) {
+      res.status(500).json({ error: "정산 리포트 생성 실패" });
+    }
+  });
+
+  // --- Display Management API ---
+  app.get("/api/admin/display", authenticateAdmin, (req, res) => {
+    try {
+      const items = db.prepare("SELECT * FROM display_settings").all();
+      res.json(items);
+    } catch (err) {
+      res.status(500).json({ error: "전시 설정 조회 실패" });
+    }
+  });
+
+  app.post("/api/admin/display", authenticateAdmin, upload.single("image"), (req: any, res) => {
+    const { id, type, link_url, is_active } = req.body;
+    const image_url = req.file ? `/uploads/${req.file.filename}` : req.body.image_url;
+    
+    try {
+      db.prepare(`
+        INSERT INTO display_settings (id, type, image_url, link_url, is_active)
+        VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET
+          type = excluded.type,
+          image_url = excluded.image_url,
+          link_url = excluded.link_url,
+          is_active = excluded.is_active
+      `).run(id, type, image_url, link_url, is_active ? 1 : 0);
+      
+      res.json({ success: true });
+    } catch (err) {
+      res.status(500).json({ error: "전시 설정 저장 실패" });
+    }
+  });
+
+  app.get("/api/admin/inquiries", authenticateCS, (req, res) => {
     try {
       const inquiries = db.prepare("SELECT * FROM inquiries ORDER BY created_at DESC").all();
       res.json(inquiries);
@@ -1942,7 +2149,7 @@ async function startServer() {
     }
   });
 
-  app.post("/api/admin/inquiries/:id/reply", authenticateAdmin, async (req, res) => {
+  app.post("/api/admin/inquiries/:id/reply", authenticateCS, async (req, res) => {
     const { replyMessage } = req.body;
     const { id } = req.params;
     try {
@@ -2140,6 +2347,31 @@ async function startServer() {
       res.json({ success: true });
     } catch (err) {
       res.status(500).json({ error: "Failed to verify email" });
+    }
+  });
+
+  // --- Best Review API ---
+  app.post("/api/admin/reviews/:id/best", authenticateCS, (req, res) => {
+    const { isBest } = req.body;
+    try {
+      db.prepare("UPDATE reviews SET is_best = ? WHERE id = ?").run(isBest ? 1 : 0, req.params.id);
+      res.json({ success: true });
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ error: "베스트 리뷰 설정 실패" });
+    }
+  });
+
+  // --- Order Claim (Return/Exchange) API ---
+  app.post("/api/admin/orders/:id/claim", authenticateOperator, (req, res) => {
+    const { action } = req.body; // 'approve' | 'reject'
+    try {
+      const status = action === 'approve' ? 'refunded' : 'completed';
+      db.prepare("UPDATE orders SET status = ? WHERE id = ?").run(status, req.params.id);
+      res.json({ success: true });
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ error: "클레임 처리 실패" });
     }
   });
 

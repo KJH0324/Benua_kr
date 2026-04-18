@@ -14,6 +14,10 @@ interface Product {
   image_url: string;
   description_image_url: string;
   category: string;
+  material?: string;
+  dimensions?: string;
+  origin?: string;
+  manufacturer?: string;
   stock?: number;
 }
 
@@ -165,6 +169,27 @@ export default function ProductDetail() {
               {product.description}
             </p>
 
+            {/* Product Details (Material, Origin, etc) */}
+            <div className="grid grid-cols-2 gap-4 pt-4 text-xs">
+              {product.material && <div className="border border-gray-100 p-3"><span className="text-gray-400 block mb-1">소재</span>{product.material}</div>}
+              {product.origin && <div className="border border-gray-100 p-3"><span className="text-gray-400 block mb-1">원산지</span>{product.origin}</div>}
+              {product.manufacturer && <div className="border border-gray-100 p-3"><span className="text-gray-400 block mb-1">제조사</span>{product.manufacturer}</div>}
+              {product.dimensions && <div className="border border-gray-100 p-3"><span className="text-gray-400 block mb-1">크기</span>{product.dimensions}</div>}
+            </div>
+
+            {/* Benefits & Points */}
+            <div className="bg-[#F9F9F9] p-4 text-xs space-y-2">
+              <div className="flex justify-between">
+                <span className="text-venuea-dark font-bold">적립 예정 포인트</span>
+                <span className="font-mono">{Math.floor(product.price * 0.03)} P</span>
+              </div>
+              <div className="flex justify-between text-venuea-gold">
+                <span className="font-bold">회원 추가 혜택</span>
+                <span>신규 등급 기준 적용</span>
+              </div>
+              <p className="text-[10px] text-gray-400 pt-2 border-t border-gray-200">* 구매 확정 시 포인트가 적립됩니다.</p>
+            </div>
+
             <div className="pt-8 border-t border-venuea-dark/10 space-y-6">
               <div className="flex items-center space-x-6">
                 <div className="flex items-center border border-venuea-dark/20 p-1">
@@ -188,7 +213,7 @@ export default function ProductDetail() {
                     +
                   </button>
                 </div>
-                <button 
+                 <button 
                   onClick={addToCart}
                   disabled={product.stock !== undefined && product.stock <= 0}
                   className={cn(
@@ -201,7 +226,10 @@ export default function ProductDetail() {
                   <ShoppingBag size={18} />
                   <span>{product.stock !== undefined && product.stock <= 0 ? "품절" : "장바구니 담기"}</span>
                 </button>
-                <button className="w-14 h-14 border border-venuea-dark/20 flex items-center justify-center text-venuea-dark hover:bg-[#F9F9F9] transition-colors">
+                <button 
+                  onClick={() => toast.success("찜 목록에 추가되었습니다. (기능 구현 예정)")}
+                  className="w-14 h-14 border border-venuea-dark/20 flex items-center justify-center text-venuea-dark hover:bg-[#F9F9F9] transition-colors"
+                >
                   <Heart size={20} />
                 </button>
               </div>
