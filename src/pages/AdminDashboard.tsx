@@ -1,5 +1,6 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { Routes, Route, Link, useLocation, useNavigate } from "react-router-dom";
+import Papa from "papaparse";
 import { 
   LayoutDashboard, 
   Package, 
@@ -21,7 +22,10 @@ import {
   Reply,
   LogOut,
   ShoppingCart,
-  Ticket
+  Ticket,
+  Download,
+  Upload,
+  FileText
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { cn, formatPrice } from "../lib/utils";
@@ -566,6 +570,33 @@ function AdminProducts() {
     }
   };
 
+  const handleBulkUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    Papa.parse(file, {
+      header: true,
+      skipEmptyLines: true,
+      complete: async (results) => {
+        try {
+          const response = await fetch("/api/admin/products/bulk", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ products: results.data })
+          });
+          if (response.ok) {
+            toast.success(`${results.data.length}개의 상품이 등록되었습니다.`);
+            fetchProducts();
+          } else {
+            toast.error("대량 등록 실패");
+          }
+        } catch (error) {
+          toast.error("서버 오류");
+        }
+      }
+    });
+  };
+
   useEffect(() => {
     fetchProducts();
   }, []);
@@ -646,17 +677,22 @@ function AdminProducts() {
     <div className="space-y-6">
       <header className="flex justify-between items-center">
         <h1 className="text-2xl font-serif font-bold text-gray-900">상품 관리</h1>
-        <div className="flex space-x-4">
+        <div className="flex space-x-3">
+          <label className="bg-white border border-gray-200 text-gray-600 px-4 py-2 rounded-lg text-sm font-medium flex items-center space-x-2 cursor-pointer hover:bg-gray-50 transition-colors">
+            <Upload size={18} />
+            <span>CSV 대량 등록</span>
+            <input type="file" accept=".csv" onChange={handleBulkUpload} className="hidden" />
+          </label>
           <button 
             onClick={() => {
               setEditingId(null);
               setNewProduct({ name: "", price: 0, discount_rate: 0, show_on_main: 0, category: "리빙", description: "", stock: 0, material: "", dimensions: "", origin: "" });
               setIsModalOpen(true);
             }}
-            className="bg-venuea-dark text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center space-x-2"
+            className="bg-venuea-dark text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center space-x-2-lg shadow-lg shadow-venuea-dark/20 hover:bg-venuea-gold transition-all"
           >
             <Plus size={18} />
-            <span>새 상품</span>
+            <span>새 상품 등록</span>
           </button>
         </div>
       </header>
@@ -697,16 +733,24 @@ function AdminProducts() {
                   </div>
                 </td>
                 <td className="px-6 py-4 text-sm text-gray-600 font-medium">{product.category}</td>
-                <td className="px-6 py-4 text-sm text-gray-900 font-bold">
-                  {product.discount_rate && product.discount_rate > 0 ? (
-                    <div className="flex flex-col">
-                      <span className="text-red-500 text-[10px]">{product.discount_rate}% OFF</span>
-                      <span>{formatPrice(product.price * (1 - product.discount_rate / 100))}</span>
-                      <span className="text-gray-300 line-through text-[10px]">{formatPrice(product.price)}</span>
-                    </div>
-                  ) : (
-                    formatPrice(product.price)
-                  )}
+                <td className="px-6 py-4">
+                  <div className="flex flex-col">
+                    <span className={cn(
+                      "inline-block px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider mb-2 w-fit",
+                      (product.stock || 0) < 5 ? "bg-red-50 text-red-600 animate-pulse" : "bg-gray-50 text-gray-500"
+                    )}>
+                      재고: {product.stock || 0}
+                    </span>
+                    {product.discount_rate && product.discount_rate > 0 ? (
+                      <div className="flex flex-col">
+                        <span className="text-red-500 text-[10px] font-bold">{product.discount_rate}% OFF</span>
+                        <span className="font-bold text-gray-900">{formatPrice(product.price * (1 - product.discount_rate / 100))}</span>
+                        <span className="text-gray-300 line-through text-[10px]">{formatPrice(product.price)}</span>
+                      </div>
+                    ) : (
+                      <span className="font-bold text-gray-900">{formatPrice(product.price)}</span>
+                    )}
+                  </div>
                 </td>
                 <td className="px-6 py-4 text-right">
                   <div className="flex justify-end space-x-2">
@@ -900,19 +944,21 @@ function AdminProducts() {
 function AdminOrders() {
   const [orders, setOrders] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [selectedOrder, setSelectedOrder] = useState<any>(null);
+  const [isTrackingModalOpen, setIsTrackingModalOpen] = useState(false);
+  const [trackingForm, setTrackingForm] = useState({
+    number: "",
+    company: "CJ대한통운"
+  });
 
   const fetchOrders = async () => {
     setIsLoading(true);
     try {
       const res = await fetch("/api/admin/orders");
-      if (!res.ok) {
-        const errorData = await res.json().catch(() => ({}));
-        throw new Error(errorData.error || `서버 오류 (${res.status})`);
-      }
+      if (!res.ok) throw new Error("Fetch failed");
       setOrders(await res.json());
     } catch (err: any) {
-      toast.error(`주문 목록을 가져오지 못했습니다: ${err.message}`);
-      console.error("Fetch orders error:", err);
+      toast.error("주문 목록을 가져오지 못했습니다.");
     } finally {
       setIsLoading(false);
     }
@@ -922,6 +968,24 @@ function AdminOrders() {
     fetchOrders();
   }, []);
 
+  const handleExport = async () => {
+    try {
+      const res = await fetch("/api/admin/orders/export");
+      const data = await res.json();
+      const csv = Papa.unparse(data);
+      const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+      const link = document.createElement("a");
+      link.href = URL.createObjectURL(blob);
+      link.setAttribute("download", `venuea_orders_${new Date().toLocaleDateString()}.csv`);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      toast.success("주문 내역이 내보내기 되었습니다.");
+    } catch (error) {
+      toast.error("내보내기 실패");
+    }
+  };
+
   const updateStatus = async (id: number, status: string) => {
     try {
       const res = await fetch(`/api/admin/orders/${id}/status`, {
@@ -930,13 +994,33 @@ function AdminOrders() {
         body: JSON.stringify({ status })
       });
       if (res.ok) {
-        toast.success("주문 상태가 변경되었습니다.");
+        toast.success("상태가 변경되었습니다.");
         fetchOrders();
-      } else {
-        toast.error("변경 실패");
       }
     } catch {
-      toast.error("서버 오류");
+      toast.error("변경 실패");
+    }
+  };
+
+  const handleTrackingSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      const res = await fetch(`/api/admin/orders/${selectedOrder.id}/tracking`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ 
+          tracking_number: trackingForm.number, 
+          shipping_company: trackingForm.company 
+        })
+      });
+      if (res.ok) {
+        toast.success("운송장이 등록되고 배송중 상태로 변경되었습니다.");
+        setIsTrackingModalOpen(false);
+        setTrackingForm({ number: "", company: "CJ대한통운" });
+        fetchOrders();
+      }
+    } catch {
+      toast.error("운송장 등록 실패");
     }
   };
 
@@ -959,13 +1043,22 @@ function AdminOrders() {
     <div className="space-y-6">
       <header className="flex justify-between items-center">
         <h1 className="text-2xl font-serif font-bold text-gray-900">주문 관리</h1>
-        <button 
-          onClick={handleClearTestOrders}
-          className="bg-red-50 text-red-600 px-4 py-2 rounded-lg text-sm font-medium flex items-center space-x-2 hover:bg-red-100 transition-colors"
-        >
-          <Trash2 size={18} />
-          <span>테스트 주문 전체 삭제</span>
-        </button>
+        <div className="flex space-x-3">
+          <button 
+            onClick={handleExport}
+            className="bg-white border border-gray-200 text-gray-600 px-4 py-2 rounded-lg text-sm font-medium flex items-center space-x-2 hover:bg-gray-50 transition-colors"
+          >
+            <Download size={18} />
+            <span>엑셀 내보내기</span>
+          </button>
+          <button 
+            onClick={handleClearTestOrders}
+            className="bg-red-50 text-red-600 px-4 py-2 rounded-lg text-sm font-medium flex items-center space-x-2 hover:bg-red-100 transition-colors"
+          >
+            <Trash2 size={18} />
+            <span>테스트 주문 전체 삭제</span>
+          </button>
+        </div>
       </header>
 
       <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
@@ -1022,30 +1115,32 @@ function AdminOrders() {
                     onChange={(e) => updateStatus(order.id, e.target.value)}
                     className="w-full border border-gray-200 rounded p-1 text-xs focus:outline-none focus:border-venuea-gold mb-2"
                   >
-                    <option value="pending">Pending</option>
-                    <option value="paid">Paid</option>
-                    <option value="shipping">Shipping</option>
-                    <option value="delivered">Delivered</option>
-                    <option value="completed">Completed (Confirmed)</option>
-                    <option value="refund_requested">Refund Requested</option>
-                    <option value="refunded">Refunded</option>
+                    <option value="pending">결제대기</option>
+                    <option value="paid">결제완료</option>
+                    <option value="shipping">배송중</option>
+                    <option value="delivered">배송완료</option>
+                    <option value="completed">구매확정</option>
+                    <option value="refund_requested">환불요청</option>
+                    <option value="refunded">환불완료</option>
                   </select>
-                  {order.status === 'shipping' && (
-                    <div className="flex gap-1">
-                      <input 
-                        type="text" 
-                        placeholder="송장번호"
-                        className="w-24 text-[10px] border p-1 rounded"
-                        onBlur={(e) => {
-                          if (e.target.value) {
-                             fetch(`/api/admin/orders/${order.id}/tracking`, {
-                               method: 'POST',
-                               headers: {'Content-Type': 'application/json'},
-                               body: JSON.stringify({ tracking_number: e.target.value, shipping_company: 'CJ대한통운' })
-                             }).then(() => toast.success("송장 저장됨"));
-                          }
-                        }}
-                      />
+                  
+                  {order.status === 'paid' && (
+                    <button 
+                      onClick={() => {
+                        setSelectedOrder(order);
+                        setIsTrackingModalOpen(true);
+                      }}
+                      className="w-full bg-venuea-dark text-white text-[10px] font-bold py-2 rounded-lg hover:bg-venuea-gold transition-colors flex items-center justify-center gap-1.5"
+                    >
+                      <Truck size={12} />
+                      운송장 등록
+                    </button>
+                  )}
+                  
+                  {order.tracking_number && (
+                    <div className="bg-gray-50 p-2 rounded-lg border border-gray-100">
+                      <p className="text-[10px] text-gray-400 font-bold uppercase tracking-wider mb-0.5">{order.shipping_company}</p>
+                      <p className="text-[11px] font-mono font-bold text-venuea-dark">{order.tracking_number}</p>
                     </div>
                   )}
                 </td>
@@ -1057,6 +1152,68 @@ function AdminOrders() {
           <div className="p-20 text-center text-gray-400">주문 내역이 없습니다.</div>
         )}
       </div>
+
+      <AnimatePresence>
+        {isTrackingModalOpen && (
+          <div className="fixed inset-0 bg-black/60 z-[110] flex items-center justify-center p-4">
+            <motion.div 
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 20 }}
+              className="bg-white rounded-2xl w-full max-w-sm overflow-hidden shadow-2xl"
+            >
+              <div className="p-6 border-b border-gray-100 flex justify-between items-center bg-gray-50">
+                <h2 className="font-bold flex items-center gap-2">
+                  <Truck size={20} className="text-venuea-dark" />
+                  <span>운송장 번호 입력</span>
+                </h2>
+                <button onClick={() => setIsTrackingModalOpen(false)} className="text-gray-400 hover:text-gray-900 transition-colors">
+                  <X size={20} />
+                </button>
+              </div>
+              <form onSubmit={handleTrackingSubmit} className="p-6 space-y-5">
+                <div className="space-y-2">
+                  <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">배송사 선택</label>
+                  <select 
+                    value={trackingForm.company}
+                    onChange={e => setTrackingForm({...trackingForm, company: e.target.value})}
+                    className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-venuea-dark/5"
+                  >
+                    <option value="CJ대한통운">CJ대한통운</option>
+                    <option value="한진택배">한진택배</option>
+                    <option value="롯데택배">롯데택배</option>
+                    <option value="우체국택배">우체국택배</option>
+                    <option value="로젠택배">로젠택배</option>
+                  </select>
+                </div>
+                <div className="space-y-2">
+                  <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">운송장 번호</label>
+                  <input 
+                    type="text" 
+                    required
+                    autoFocus
+                    value={trackingForm.number}
+                    onChange={e => setTrackingForm({...trackingForm, number: e.target.value})}
+                    placeholder="숫자만 입력해 주세요"
+                    className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-venuea-dark/5 font-mono"
+                  />
+                </div>
+                <div className="pt-2">
+                  <button 
+                    type="submit"
+                    className="w-full bg-venuea-dark text-white py-4 rounded-xl font-bold uppercase tracking-widest hover:bg-venuea-gold transition-all shadow-lg shadow-venuea-dark/10"
+                  >
+                    배송 시작 처리
+                  </button>
+                  <p className="text-center text-[10px] text-gray-400 mt-4 leading-relaxed">
+                    운송장을 등록하면 주문 상태가 즉시 <span className="text-blue-600 font-bold">'배송중'</span>으로 변경됩니다.
+                  </p>
+                </div>
+              </form>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

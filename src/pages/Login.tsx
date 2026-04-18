@@ -81,8 +81,10 @@ export default function Login() {
       if (response.ok) {
         toast.success(isLogin ? "로그인되었습니다." : "회원가입이 완료되었습니다.");
         navigate("/profile");
-        // Reload to update auth state globally if needed
-        window.location.reload();
+        // Reload to update auth state globally if needed, with a small delay for cookie processing
+        setTimeout(() => {
+          window.location.reload();
+        }, 100);
       } else {
         toast.error(data.error || "오류가 발생했습니다.");
       }

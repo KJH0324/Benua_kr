@@ -40,7 +40,7 @@ export default function Profile() {
 
   const fetchData = async () => {
     try {
-      const userRes = await fetch("/api/auth/me");
+      const userRes = await fetch("/api/auth/me", { credentials: 'include' });
       const userData = await userRes.json();
       
       if (!userData.user) {

@@ -25,6 +25,10 @@ export default function ProductDetail() {
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
+    window.scrollTo(0, 0);
+  }, [id]);
+
+  useEffect(() => {
     const fetchProduct = async () => {
       try {
         const response = await fetch(`/api/products/${id}`);
@@ -120,17 +124,14 @@ export default function ProductDetail() {
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-16">
           {/* Image Gallery */}
           <div className="space-y-4">
-            <motion.div 
-              layoutId={`product-image-${id}`}
-              className="aspect-[3/4] bg-[#F9F9F9] overflow-hidden"
-            >
+            <div className="aspect-[3/4] bg-[#F9F9F9] overflow-hidden">
               <img 
                 src={product.image_url || "https://picsum.photos/seed/placeholder/1200/1600"} 
                 alt={product.name} 
                 className="w-full h-full object-cover"
                 referrerPolicy="no-referrer"
               />
-            </motion.div>
+            </div>
           </div>
 
           {/* Product Info */}

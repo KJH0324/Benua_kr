@@ -358,7 +358,8 @@ async function startServer() {
         httpOnly: true,
         secure: true,
         sameSite: "none",
-        maxAge: 24 * 60 * 60 * 1000
+        maxAge: 24 * 60 * 60 * 1000,
+        path: "/"
       });
       res.json({ success: true });
     } catch (err: any) {
@@ -382,7 +383,8 @@ async function startServer() {
         httpOnly: true,
         secure: true,
         sameSite: "none",
-        maxAge: 24 * 60 * 60 * 1000
+        maxAge: 24 * 60 * 60 * 1000,
+        path: "/"
       });
       res.json({ success: true, user: { name: user.name, email: user.email, address: user.address } });
     } catch (err) {
@@ -431,19 +433,71 @@ async function startServer() {
 
   // --- OAuth APIs ---
   const getRedirectUri = (req: express.Request, provider: string) => {
-    let protocol = (req.headers["x-forwarded-proto"] as string) || req.protocol;
-    let host = (req.headers["x-forwarded-host"] as string) || req.get("host") || "";
-    
-    // Google sets redirect_uri strictly. If the user uses benua.shop, we must match it exactly.
-    if (host.includes("benua.shop")) {
-      protocol = "https";
-      host = "benua.shop";
-    } else if (host.includes(".run.app")) {
-      protocol = "https";
-    }
-    
-    return `${protocol}://${host}/api/auth/${provider}/callback`;
+    // User requested to force production URI for standalone server usage
+    return `https://benua.shop/api/auth/${provider}/callback`;
   };
+
+  // Bulk Product Processing
+  app.post("/api/admin/products/bulk", authenticateAdmin, (req, res) => {
+    const { products } = req.body;
+    if (!Array.isArray(products)) return res.status(400).json({ error: "Invalid data format" });
+
+    try {
+      const insert = db.prepare(
+        "INSERT INTO products (name, price, description, category, stock, material, dimensions, origin, discount_rate, show_on_main) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+      );
+
+      const transaction = db.transaction((items) => {
+        for (const item of items) {
+          insert.run(
+            item.name,
+            item.price || 0,
+            item.description || "",
+            item.category || "기반",
+            item.stock || 0,
+            item.material || "",
+            item.dimensions || "",
+            item.origin || "",
+            item.discount_rate || 0,
+            item.show_on_main ? 1 : 0
+          );
+        }
+      });
+
+      transaction(products);
+      res.json({ success: true, count: products.length });
+    } catch (err: any) {
+      res.status(500).json({ error: "Bulk insert failed: " + err.message });
+    }
+  });
+
+  // Export Orders
+  app.get("/api/admin/orders/export", authenticateAdmin, (req, res) => {
+    try {
+      const orders = db.prepare(`
+        SELECT o.order_number, o.customer_name, o.customer_email, o.total_amount, o.status, o.created_at, o.tracking_number, o.shipping_company
+        FROM orders o
+        ORDER BY o.created_at DESC
+      `).all();
+      res.json(orders);
+    } catch (err) {
+      res.status(500).json({ error: "Export failed" });
+    }
+  });
+
+  // Tracking Number Update with Auto-Status Change
+  app.post("/api/admin/orders/:id/tracking", authenticateAdmin, (req, res) => {
+    const { id } = req.params;
+    const { tracking_number, shipping_company } = req.body;
+    try {
+      db.prepare(
+        "UPDATE orders SET tracking_number = ?, shipping_company = ?, status = 'shipping' WHERE id = ?"
+      ).run(tracking_number, shipping_company, id);
+      res.json({ success: true });
+    } catch (err) {
+      res.status(500).json({ error: "Tracking update failed" });
+    }
+  });
 
   app.get("/api/auth/google/url", (req, res) => {
     const clientId = process.env.GOOGLE_CLIENT_ID;
@@ -545,7 +599,8 @@ async function startServer() {
         httpOnly: true,
         secure: true,
         sameSite: "none",
-        maxAge: 24 * 60 * 60 * 1000
+        maxAge: 24 * 60 * 60 * 1000,
+        path: "/"
       });
 
       res.send(`
@@ -668,7 +723,8 @@ async function startServer() {
         httpOnly: true,
         secure: true,
         sameSite: "none",
-        maxAge: 24 * 60 * 60 * 1000
+        maxAge: 24 * 60 * 60 * 1000,
+        path: "/"
       });
 
       res.send(`
@@ -744,6 +800,7 @@ async function startServer() {
       secure: true,
       sameSite: "none",
       maxAge: 24 * 60 * 60 * 1000,
+      path: "/"
     });
     res.json({ success: true });
   });
