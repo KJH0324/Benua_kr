@@ -382,23 +382,27 @@ async function startServer() {
 
   app.post("/api/auth/login", (req, res) => {
     const { email, password } = req.body;
-    console.log(`[AUTH] Login attempt - Email: ${email}`);
+    const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
+    console.log(`[DEBUG][AUTH/LOGIN] Start - IP: ${ip}, Email: ${email}`);
     try {
       const user = db.prepare("SELECT * FROM users WHERE email = ?").get(email) as any;
       if (!user) {
-        console.log(`[AUTH] Login Failed: User not found for ${email}`);
+        console.log(`[DEBUG][AUTH/LOGIN] Fail - User not found: ${email}`);
         return res.status(401).json({ error: "이메일 또는 비밀번호가 일치하지 않습니다." });
       }
 
       const inputHash = hashPassword(password);
       if (user.password !== inputHash) {
-        console.log(`[AUTH] Login Failed: Password mismatch for ${email}`);
+        console.log(`[DEBUG][AUTH/LOGIN] Fail - Password mismatch for: ${email}`);
         return res.status(401).json({ error: "이메일 또는 비밀번호가 일치하지 않습니다." });
       }
       
-      console.log(`[AUTH] Login Success: User ID ${user.id} (${user.name})`);
       const token = jwt.sign({ id: user.id, role: "user" }, JWT_SECRET, { expiresIn: "24h" });
       const isProduction = process.env.NODE_ENV === "production";
+      
+      console.log(`[DEBUG][AUTH/LOGIN] Success - User: ${user.name} (${user.id}), Env: ${process.env.NODE_ENV}`);
+      console.log(`[DEBUG][AUTH/LOGIN] Cookie Config - Secure: ${isProduction}, SameSite: ${isProduction ? "none" : "lax"}`);
+
       res.cookie("user_token", token, {
         httpOnly: true,
         secure: isProduction,
@@ -408,38 +412,48 @@ async function startServer() {
       });
       res.json({ success: true, user: { name: user.name, email: user.email, address: user.address } });
     } catch (err) {
-      console.error("[AUTH] Login Exception:", err);
+      console.error("[DEBUG][AUTH/LOGIN] Exception:", err);
       res.status(500).json({ error: "로그인 실패" });
     }
   });
 
   app.get("/api/auth/me", (req, res) => {
+    const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
+    const token = req.cookies.user_token;
+    
+    console.log(`[DEBUG][AUTH/ME] Request from IP: ${ip}`);
+    console.log(`[DEBUG][AUTH/ME] Cookie present: ${!!token}`);
+    if (token) {
+      console.log(`[DEBUG][AUTH/ME] Token preview: ${token.substring(0, 15)}...`);
+    } else {
+      console.log(`[DEBUG][AUTH/ME] ALL COOKIES:`, req.cookies);
+    }
+
     // Prevent caching of auth status
     res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
     res.setHeader("Pragma", "no-cache");
     res.setHeader("Expires", "0");
     res.setHeader("Surrogate-Control", "no-store");
 
-    const token = req.cookies.user_token;
     if (!token) {
-      console.log("[AUTH/ME] No token cookie found.");
       return res.json({ user: null });
     }
     try {
       const decoded: any = jwt.verify(token, JWT_SECRET);
-      console.log(`[AUTH/ME] Verifying token for user ID: ${decoded.id}`);
+      console.log(`[DEBUG][AUTH/ME] JWT Validated - User ID: ${decoded.id}`);
       
       // Keep tier status fresh
       const status = updateUserTierStatus(decoded.id);
       
       const user = db.prepare("SELECT id, name, email, phone, zipcode, address, detail_address, google_id, naver_id, points, tier, tier_updated_at FROM users WHERE id = ?").get(decoded.id) as any;
       if (!user) {
-        console.log(`[AUTH/ME] User not found in DB for ID: ${decoded.id}`);
+        console.log(`[DEBUG][AUTH/ME] Fail - User not found in DB for ID: ${decoded.id}`);
         return res.json({ user: null });
       }
+      console.log(`[DEBUG][AUTH/ME] Success - Returning profile for ${user.name}`);
       res.json({ user: { ...user, ...status, tier_config: TIER_CONFIG } });
-    } catch (err) {
-      console.error("[AUTH/ME] Token verification failed:", err);
+    } catch (err: any) {
+      console.error("[DEBUG][AUTH/ME] Token verification failed:", err.message);
       res.json({ user: null });
     }
   });
