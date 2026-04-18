@@ -459,15 +459,6 @@ async function startServer() {
     }
   }
 
-  app.get("/api/admin/logs", authenticateAdmin, (req: any, res) => {
-    try {
-      const logs = db.prepare("SELECT * FROM admin_logs ORDER BY created_at DESC").all();
-      res.json(logs);
-    } catch (err) {
-      res.status(500).json({ error: "로그 조회 실패" });
-    }
-  });
-
   // --- Auth Middleware ---
   const authorize = (allowedRoles: string[]) => (req: any, res: any, next: any) => {
     const token = req.cookies.admin_token;
@@ -498,6 +489,15 @@ async function startServer() {
   const authenticateAdmin = authorize(["MASTER", "ADMIN"]);
   const authenticateOperator = authorize(["MASTER", "ADMIN", "OPERATOR"]);
   const authenticateCS = authorize(["MASTER", "ADMIN", "OPERATOR", "CS"]);
+
+  app.get("/api/admin/logs", authenticateAdmin, (req: any, res) => {
+    try {
+      const logs = db.prepare("SELECT * FROM admin_logs ORDER BY created_at DESC").all();
+      res.json(logs);
+    } catch (err) {
+      res.status(500).json({ error: "로그 조회 실패" });
+    }
+  });
 
   const authenticateUser = (req: any, res: any, next: any) => {
     const token = req.cookies.user_token;
@@ -1989,12 +1989,12 @@ async function startServer() {
   });
 
   // --- Admin Role Assignment API ---
-  app.post("/api/admin/users/:id/role", authenticateAdmin, (req: any, res) => {
+  app.post("/api/admin/users/:emailOrId/role", authenticateAdmin, (req: any, res) => {
     const { role } = req.body;
-    const targetUserId = req.params.id;
+    const targetUserIdOrEmail = req.params.emailOrId;
     const adminId = req.admin.id;
 
-    if (!["ADMIN", "OPERATOR", "CS", "USER"].includes(role)) {
+    if (!["MASTER", "ADMIN", "OPERATOR", "CS", "USER"].includes(role)) {
       return res.status(400).json({ error: "유효하지 않은 역할입니다." });
     }
 
@@ -2004,10 +2004,22 @@ async function startServer() {
     }
 
     try {
-      db.prepare("UPDATE users SET role = ? WHERE id = ?").run(role, targetUserId);
-      logAdminAction(adminId, "UPDATE_ROLE", "users", targetUserId, `Role set to ${role}`);
+      let targetUser;
+      if (targetUserIdOrEmail.includes('@')) {
+        targetUser = db.prepare("SELECT id FROM users WHERE email = ?").get(targetUserIdOrEmail) as any;
+      } else {
+        targetUser = db.prepare("SELECT id FROM users WHERE id = ?").get(targetUserIdOrEmail) as any;
+      }
+
+      if (!targetUser) {
+        return res.status(404).json({ error: "사용자를 찾을 수 없습니다." });
+      }
+
+      db.prepare("UPDATE users SET role = ? WHERE id = ?").run(role, targetUser.id);
+      logAdminAction(adminId, "UPDATE_ROLE", "users", targetUser.id, `Role set to ${role}`);
       res.json({ success: true });
     } catch (err) {
+      console.error(err);
       res.status(500).json({ error: "역할 변경 실패" });
     }
   });
