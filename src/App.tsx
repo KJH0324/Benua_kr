@@ -18,6 +18,8 @@ import Contact from "./pages/Contact";
 import Terms from "./pages/Terms";
 import Privacy from "./pages/Privacy";
 import Checkout from "./pages/Checkout";
+import VerifyEmail from "./pages/VerifyEmail";
+import Unsubscribe from "./pages/Unsubscribe";
 import { motion, AnimatePresence } from "motion/react";
 import ErrorBoundary from "./components/ErrorBoundary";
 import CouponPopup from "./components/CouponPopup";
@@ -97,6 +99,8 @@ export default function App() {
                 <Route path="/track" element={<TrackOrder />} />
                 <Route path="/profile" element={<Profile />} />
                 <Route path="/login" element={<Login />} />
+                <Route path="/verify-email" element={<VerifyEmail />} />
+                <Route path="/unsubscribe" element={<Unsubscribe />} />
                 {/* Legacy redirect for /admin */}
                 <Route path="/admin/*" element={<Navigate to={`https://dash.benua.shop${window.location.pathname.replace('/admin', '')}`} replace />} />
               </Routes>

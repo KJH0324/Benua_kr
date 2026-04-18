@@ -73,12 +73,17 @@ export default function AdminDashboard() {
   const isAdminSub = isAdminSubdomain();
   const adminPathBase = isAdminSub ? "" : "/admin";
 
+  const [adminRole, setAdminRole] = useState<string>("MASTER");
+
   useEffect(() => {
     const checkAuth = async () => {
       try {
         const response = await fetch("/api/admin/check");
         if (!response.ok) {
           navigate(isAdminSub ? "/login" : "/admin/login");
+        } else {
+          const data = await response.json();
+          setAdminRole(data.role || "MASTER");
         }
       } catch (error) {
         navigate(isAdminSub ? "/login" : "/admin/login");
@@ -97,7 +102,7 @@ export default function AdminDashboard() {
     );
   }
   
-  const sidebarLinks = [
+  const allSidebarLinks = [
     { name: "대시보드", path: `${adminPathBase}/`, icon: LayoutDashboard },
     { name: "상품 관리", path: `${adminPathBase}/products`, icon: Package },
     { name: "주문 관리", path: `${adminPathBase}/orders`, icon: ShoppingBag },
@@ -109,9 +114,16 @@ export default function AdminDashboard() {
     { name: "고객 관리", path: `${adminPathBase}/customers`, icon: Users },
     { name: "쿠폰 관리", path: `${adminPathBase}/coupons`, icon: Ticket },
     { name: "뉴스레터", path: `${adminPathBase}/newsletter`, icon: FileText },
-    { name: "관리자 로그", path: `${adminPathBase}/logs`, icon: Activity },
-    { name: "관리자 키", path: `${adminPathBase}/keys`, icon: Settings },
+    { name: "관리자 로그", path: `${adminPathBase}/logs`, icon: Activity, requiresAdmin: true },
+    { name: "관리자 키", path: `${adminPathBase}/keys`, icon: Settings, requiresAdmin: true },
   ];
+
+  const sidebarLinks = allSidebarLinks.filter(link => {
+    if (link.requiresAdmin && (adminRole === "OPERATOR" || adminRole === "CS")) {
+      return false;
+    }
+    return true;
+  });
 
   const handleLogout = async () => {
     await fetch("/api/admin/logout", { method: "POST" });
@@ -273,12 +285,16 @@ export default function AdminDashboard() {
           <Route path="/fulfillment" element={<AdminFulfillment />} />
           <Route path="/reviews" element={<AdminReviews />} />
           <Route path="/display" element={<AdminDisplay />} />
-          <Route path="/customers" element={<AdminUserPoints />} />
+          <Route path="/customers" element={<AdminUserPoints adminRole={adminRole} />} />
           <Route path="/coupons" element={<AdminCoupons />} />
           <Route path="/inquiries" element={<AdminInquiries />} />
           <Route path="/newsletter" element={<AdminNewsletter />} />
-          <Route path="/logs" element={<AdminLogs />} />
-          <Route path="/keys" element={<AdminKeys />} />
+          {(adminRole === "MASTER" || adminRole === "ADMIN") && (
+            <>
+              <Route path="/logs" element={<AdminLogs />} />
+          <Route path="/keys" element={<AdminKeys adminRole={adminRole} />} />
+            </>
+          )}
         </Routes>
       </main>
     </div>
@@ -333,7 +349,29 @@ function AdminNewsletter() {
     }
   };
 
+  const handleDeleteSubscriber = async (email: string) => {
+    if (!confirm(`${email} 님의 뉴스레터 구독을 강제로 취소하시겠습니까?`)) return;
+    try {
+      const res = await fetch(`/api/admin/newsletter/subscribers/${encodeURIComponent(email)}`, {
+        method: 'DELETE'
+      });
+      if (res.ok) {
+        toast.success("구독이 취소되었습니다.");
+        fetchSubscribers();
+      } else {
+        toast.error("취소 실패");
+      }
+    } catch {
+      toast.error("서버 에러");
+    }
+  };
+
   if (isLoading) return <div className="flex justify-center p-10"><Loader2 className="animate-spin" /></div>;
+
+  const allSubscribers = [
+    ...subscribers.userSubscribers.map((s: any) => ({ ...s, sourceType: 'USER' })),
+    ...subscribers.guestSubscribers.map((s: any) => ({ ...s, sourceType: 'GUEST' }))
+  ];
 
   return (
     <div className="space-y-8 animate-in fade-in duration-500">
@@ -393,18 +431,31 @@ function AdminNewsletter() {
 
           <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
             <div className="px-6 py-4 border-b border-gray-50 bg-gray-50/50">
-              <h4 className="text-xs font-bold uppercase tracking-widest text-gray-500">최근 구독자 (비회원)</h4>
+              <h4 className="text-xs font-bold uppercase tracking-widest text-gray-500">전체 구독자</h4>
             </div>
             <div className="max-h-[400px] overflow-y-auto">
               <table className="w-full">
                 <tbody className="divide-y divide-gray-50">
-                  {subscribers.guestSubscribers.map((s: any) => (
-                    <tr key={s.id} className="hover:bg-gray-50 transition-colors">
-                      <td className="px-6 py-4 text-sm text-gray-600">{s.email}</td>
-                      <td className="px-6 py-4 text-[10px] text-gray-400 text-right">{new Date(s.created_at).toLocaleDateString()}</td>
+                  {allSubscribers.map((s: any, idx: number) => (
+                    <tr key={`${s.email}-${idx}`} className="hover:bg-gray-50 transition-colors group">
+                      <td className="px-6 py-4">
+                        <div className="text-sm font-medium text-gray-700">{s.email}</div>
+                        <div className="text-[10px] text-gray-400 mt-1 uppercase">
+                          {s.sourceType === 'USER' ? '가입 회원' : '비회원 구독'} 
+                          {s.created_at && ` • ${new Date(s.created_at).toLocaleDateString()}`}
+                        </div>
+                      </td>
+                      <td className="px-6 py-4 text-right opacity-0 group-hover:opacity-100 transition-opacity">
+                        <button 
+                          onClick={() => handleDeleteSubscriber(s.email)}
+                          className="text-[10px] uppercase font-bold text-red-500 bg-red-50 px-2 py-1 rounded hover:bg-red-100 transition-colors"
+                        >
+                          수신거부 처리
+                        </button>
+                      </td>
                     </tr>
                   ))}
-                  {subscribers.guestSubscribers.length === 0 && (
+                  {allSubscribers.length === 0 && (
                     <tr>
                       <td colSpan={2} className="px-6 py-10 text-center text-sm text-gray-400">구독자가 없습니다.</td>
                     </tr>
@@ -1765,8 +1816,10 @@ function AdminOrders() {
   );
 }
 
-function AdminUserPoints() {
+function AdminUserPoints({ adminRole }: { adminRole?: string }) {
   const [pointData, setPointData] = useState({ email: "", amount: 0 });
+
+  const [roleData, setRoleData] = useState({ email: "", role: "USER" });
 
   const handleGrantPoints = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -1786,39 +1839,93 @@ function AdminUserPoints() {
     } catch { toast.error("서버 오류"); }
   };
 
+  const handleUpdateRole = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      const res = await fetch(`/api/admin/users/${roleData.email}/role`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ role: roleData.role })
+      });
+      if (res.ok) {
+        toast.success(`${roleData.email}님의 권한이 ${roleData.role}(으)로 변경되었습니다.`);
+        setRoleData({ email: "", role: "USER" });
+      } else {
+        const d = await res.json();
+        toast.error(d.error || "권한 변경 실패");
+      }
+    } catch { toast.error("서버 오류"); }
+  };
+
   return (
     <div className="space-y-12">
-      <h1 className="text-2xl font-serif font-bold text-gray-900">회원/포인트 관리</h1>
+      <h1 className="text-2xl font-serif font-bold text-gray-900">회원 관리</h1>
       
-      <div className="bg-white p-8 rounded-xl border border-gray-200 shadow-sm max-w-xl">
-        <h2 className="text-sm font-bold uppercase tracking-widest text-gray-400 mb-6">임의 포인트 지급</h2>
-        <form onSubmit={handleGrantPoints} className="space-y-6">
-          <div className="space-y-1">
-            <label className="text-[10px] font-bold text-gray-400 uppercase">사용자 이메일</label>
-            <input 
-              type="email" 
-              value={pointData.email}
-              onChange={e => setPointData({...pointData, email: e.target.value})}
-              className="w-full border-b border-gray-200 py-3 text-lg font-bold focus:outline-none focus:border-venuea-gold transition-colors"
-              placeholder="example@benua.shop"
-              required
-            />
-          </div>
-          <div className="space-y-1">
-            <label className="text-[10px] font-bold text-gray-400 uppercase">지급 포인트 (차감 시 마이너스 입력)</label>
-            <div className="relative">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-8 max-w-5xl">
+        {/* Point Grant Form */}
+        <div className="bg-white p-8 rounded-xl border border-gray-200 shadow-sm">
+          <h2 className="text-sm font-bold uppercase tracking-widest text-gray-400 mb-6">임의 포인트 지급</h2>
+          <form onSubmit={handleGrantPoints} className="space-y-6">
+            <div className="space-y-1">
+              <label className="text-[10px] font-bold text-gray-400 uppercase">사용자 이메일</label>
               <input 
-                type="number" 
-                value={pointData.amount}
-                onChange={e => setPointData({...pointData, amount: parseInt(e.target.value)})}
-                className="w-full border-b border-gray-200 py-3 text-lg font-bold pr-12 focus:outline-none focus:border-venuea-gold transition-colors"
+                type="email" 
+                value={pointData.email}
+                onChange={e => setPointData({...pointData, email: e.target.value})}
+                className="w-full border-b border-gray-200 py-3 text-lg font-bold focus:outline-none focus:border-venuea-gold transition-colors"
+                placeholder="example@benua.shop"
                 required
               />
-              <span className="absolute right-0 bottom-3 font-bold text-gray-400">P</span>
             </div>
-          </div>
-          <button className="w-full bg-venuea-dark text-white py-4 rounded-xl font-bold hover:bg-venuea-gold transition-all shadow-lg hover:shadow-venuea-gold/20 mt-4">포인트 적용하기</button>
-        </form>
+            <div className="space-y-1">
+              <label className="text-[10px] font-bold text-gray-400 uppercase">지급 포인트 (차감 시 마이너스 입력)</label>
+              <div className="relative">
+                <input 
+                  type="number" 
+                  value={pointData.amount}
+                  onChange={e => setPointData({...pointData, amount: parseInt(e.target.value)})}
+                  className="w-full border-b border-gray-200 py-3 text-lg font-bold pr-12 focus:outline-none focus:border-venuea-gold transition-colors"
+                  required
+                />
+                <span className="absolute right-0 bottom-3 font-bold text-gray-400">P</span>
+              </div>
+            </div>
+            <button className="w-full bg-venuea-dark text-white py-4 rounded-xl font-bold hover:bg-venuea-gold transition-all shadow-lg hover:shadow-venuea-gold/20 mt-4">포인트 적용하기</button>
+          </form>
+        </div>
+
+        {/* Role Update Form */}
+        <div className="bg-white p-8 rounded-xl border border-gray-200 shadow-sm">
+          <h2 className="text-sm font-bold uppercase tracking-widest text-gray-400 mb-6">사용자 권한(Role) 변경</h2>
+          <form onSubmit={handleUpdateRole} className="space-y-6">
+            <div className="space-y-1">
+              <label className="text-[10px] font-bold text-gray-400 uppercase">사용자 이메일</label>
+              <input 
+                type="email" 
+                value={roleData.email}
+                onChange={e => setRoleData({...roleData, email: e.target.value})}
+                className="w-full border-b border-gray-200 py-3 text-lg font-bold focus:outline-none focus:border-venuea-dark transition-colors"
+                placeholder="example@benua.shop"
+                required
+              />
+            </div>
+            <div className="space-y-1">
+              <label className="text-[10px] font-bold text-gray-400 uppercase">변경할 권한</label>
+              <select 
+                value={roleData.role}
+                onChange={e => setRoleData({...roleData, role: e.target.value})}
+                className="w-full border-b border-gray-200 py-3 text-lg font-bold focus:outline-none focus:border-venuea-dark transition-colors bg-transparent"
+              >
+                <option value="USER">USER (일반 고객)</option>
+                <option value="CS">CS (고객 센터)</option>
+                <option value="OPERATOR">OPERATOR (운영/상품)</option>
+                {adminRole === "MASTER" && <option value="ADMIN">ADMIN (관리자)</option>}
+                {adminRole === "MASTER" && <option value="MASTER">MASTER (최고 권리자)</option>}
+              </select>
+            </div>
+            <button className="w-full bg-gray-900 text-white py-4 rounded-xl font-bold hover:bg-black transition-all shadow-lg mt-4">권한 변경 적용</button>
+          </form>
+        </div>
       </div>
 
       <div className="bg-amber-50 rounded-xl p-8 border border-amber-100 max-w-xl">
@@ -1836,7 +1943,7 @@ function AdminUserPoints() {
   );
 }
 
-function AdminKeys() {
+function AdminKeys({ adminRole }: { adminRole: string }) {
   const [keys, setKeys] = useState<any[]>([]);
   const [newKey, setNewKey] = useState("");
   const [newKeyRole, setNewKeyRole] = useState("OPERATOR");
@@ -1937,8 +2044,8 @@ function AdminKeys() {
           >
             <option value="CS">CS (리뷰, 문의 전용)</option>
             <option value="OPERATOR">OPERATOR (주문, 상품 전용)</option>
-            <option value="ADMIN">ADMIN (로그, 설정 외 전권한)</option>
-            <option value="MASTER">MASTER (최고 권한)</option>
+            {adminRole === "MASTER" && <option value="ADMIN">ADMIN (로그, 설정 외 전권한)</option>}
+            {adminRole === "MASTER" && <option value="MASTER">MASTER (최고 권한)</option>}
           </select>
           <button type="submit" className="bg-venuea-dark text-white px-6 py-2 rounded-lg font-medium hover:bg-venuea-gold transition-colors">
             추가
@@ -1965,16 +2072,20 @@ function AdminKeys() {
                   <select
                     value={key.role || 'MASTER'}
                     onChange={(e) => handleUpdateKeyRole(key.id, e.target.value)}
+                    disabled={adminRole !== "MASTER" && key.role === "MASTER"}
                     className={cn(
                       "outline-none px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-widest cursor-pointer text-center appearance-none",
                       key.role === 'MASTER' ? "bg-purple-100 text-purple-700" :
                       key.role === 'ADMIN' ? "bg-red-100 text-red-700" :
                       key.role === 'OPERATOR' ? "bg-blue-100 text-blue-700" :
-                      "bg-green-100 text-green-700"
+                      "bg-green-100 text-green-700",
+                      (adminRole !== "MASTER" && key.role === "MASTER") ? "opacity-50 cursor-not-allowed" : ""
                     )}
                   >
-                    <option value="MASTER" className="bg-white text-black">MASTER</option>
-                    <option value="ADMIN" className="bg-white text-black">ADMIN</option>
+                    {adminRole === "MASTER" && <option value="MASTER" className="bg-white text-black">MASTER</option>}
+                    {key.role === "MASTER" && adminRole !== "MASTER" && <option value="MASTER" className="bg-white text-black">MASTER</option>}
+                    {adminRole === "MASTER" && <option value="ADMIN" className="bg-white text-black">ADMIN</option>}
+                    {key.role === "ADMIN" && adminRole !== "MASTER" && <option value="ADMIN" className="bg-white text-black">ADMIN</option>}
                     <option value="OPERATOR" className="bg-white text-black">OPERATOR</option>
                     <option value="CS" className="bg-white text-black">CS</option>
                   </select>
@@ -1996,7 +2107,11 @@ function AdminKeys() {
                 <td className="px-6 py-4 text-right">
                   <button 
                     onClick={() => handleDeleteKey(key.id)}
-                    className="text-red-500 hover:text-red-700 p-2 hover:bg-red-50 rounded-lg transition-colors"
+                    disabled={adminRole !== "MASTER" && (key.role === "MASTER" || key.role === "ADMIN")}
+                    className={cn(
+                      "text-red-500 hover:text-red-700 p-2 hover:bg-red-50 rounded-lg transition-colors",
+                      (adminRole !== "MASTER" && (key.role === "MASTER" || key.role === "ADMIN")) ? "opacity-30 cursor-not-allowed hover:bg-transparent" : ""
+                    )}
                   >
                     <Trash2 size={16} />
                   </button>

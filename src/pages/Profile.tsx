@@ -37,7 +37,8 @@ export default function Profile() {
     phone: "",
     zipcode: "",
     address: "",
-    detail_address: ""
+    detail_address: "",
+    newsletter_subscribed: false
   });
   const [isAddressModalOpen, setIsAddressModalOpen] = useState(false);
   const navigate = useNavigate();
@@ -58,7 +59,8 @@ export default function Profile() {
         phone: userData.user.phone || "",
         zipcode: userData.user.zipcode || "",
         address: userData.user.address || "",
-        detail_address: userData.user.detail_address || ""
+        detail_address: userData.user.detail_address || "",
+        newsletter_subscribed: userData.user.newsletter_subscribed === 1
       });
 
       const ordersRes = await fetch("/api/orders/me");
@@ -104,6 +106,25 @@ export default function Profile() {
       window.location.reload();
     } catch {
       toast.error("로그아웃 실패");
+    }
+  };
+
+  const handleWithdraw = async () => {
+    if (!confirm("정말 탈퇴하시겠습니까? 보유하신 포인트와 멤버십 등급, 쿠폰은 모두 소멸되며 복구할 수 없습니다.")) {
+      return;
+    }
+
+    try {
+      const response = await fetch("/api/auth/me", { method: "DELETE" });
+      if (response.ok) {
+        toast.success("베뉴아를 이용해주셔서 감사합니다. 탈퇴가 정상적으로 처리되었습니다.");
+        navigate("/");
+        window.location.reload();
+      } else {
+        toast.error("탈퇴 처리에 실패했습니다.");
+      }
+    } catch {
+      toast.error("서버와 통신할 수 없습니다.");
     }
   };
 
@@ -359,6 +380,26 @@ export default function Profile() {
               </div>
               <h3 className="text-2xl font-bold text-venuea-dark uppercase tracking-tight">{user.name}</h3>
               <p className="text-sm text-venuea-muted font-mono">{user.email}</p>
+
+              {!user.is_verified && (
+                <div className="mt-4 p-4 border border-red-200 bg-red-50 text-center">
+                  <p className="text-[10px] font-bold text-red-500 uppercase tracking-widest mb-2">이메일 인증이 필요합니다</p>
+                  <button 
+                    onClick={async () => {
+                      try {
+                        const res = await fetch("/api/auth/send-verification", { method: "POST" });
+                        if (res.ok) toast.success("인증 메일이 발송되었습니다. 이메일을 확인해 주세요.");
+                        else toast.error("메일 발송에 실패했습니다.");
+                      } catch {
+                        toast.error("서버 오류");
+                      }
+                    }}
+                    className="text-xs font-bold text-venuea-dark border border-venuea-dark bg-white px-4 py-2 hover:bg-venuea-dark hover:text-white transition-colors"
+                  >
+                    인증 메일 재발송
+                  </button>
+                </div>
+              )}
               
               <div className="mt-8 space-y-3">
                 <p className="text-[10px] font-bold uppercase tracking-widest text-venuea-dark/30 mb-2">Social Linkage</p>
@@ -540,10 +581,39 @@ export default function Profile() {
                       </div>
                     </div>
 
+                    <div className="pt-2 flex items-center space-x-3">
+                      <input
+                        type="checkbox"
+                        id="newsletter_profile"
+                        checked={editForm.newsletter_subscribed}
+                        onChange={e => setEditForm({...editForm, newsletter_subscribed: e.target.checked})}
+                        className="w-4 h-4 text-venuea-gold border-gray-300 focus:ring-venuea-gold rounded cursor-pointer"
+                      />
+                      <label htmlFor="newsletter_profile" className="text-xs text-gray-600 cursor-pointer">
+                        (선택) 마케팅 정보, 이벤트 알림 등 뉴스레터 수신
+                      </label>
+                    </div>
+
                     <div className="pt-6 border-t border-venuea-dark/5">
                       <button className="w-full bg-venuea-dark text-white py-4 font-bold uppercase tracking-widest hover:bg-venuea-gold transition-all">
                         변경사항 저장하기
                       </button>
+                    </div>
+
+                    <div className="pt-10 border-t border-venuea-dark/5 mt-10">
+                      <div className="flex justify-between items-center bg-gray-50 p-6 rounded-lg border border-gray-100">
+                        <div>
+                          <h4 className="text-sm font-bold text-gray-800 mb-1">계정 탈퇴</h4>
+                          <p className="text-xs text-gray-500">모든 정보와 포인트가 삭제되며 복구할 수 없습니다.</p>
+                        </div>
+                        <button 
+                          type="button"
+                          onClick={handleWithdraw}
+                          className="bg-white border border-red-200 text-red-500 hover:bg-red-50 px-4 py-2 text-xs font-bold uppercase tracking-widest transition-colors rounded-md shadow-sm"
+                        >
+                          회원 탈퇴
+                        </button>
+                      </div>
                     </div>
                   </form>
                 </motion.div>

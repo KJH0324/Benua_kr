@@ -18,7 +18,8 @@ export default function Login() {
     address: "",
     detail_address: "",
     google_id: "",
-    naver_id: ""
+    naver_id: "",
+    newsletter_subscribed: true
   });
   const [isAddressModalOpen, setIsAddressModalOpen] = useState(false);
   const [validationErrors, setValidationErrors] = useState<Record<string, string>>({});
@@ -274,6 +275,18 @@ export default function Login() {
                   className="w-full bg-[#F9F9F9] border border-venuea-dark/10 px-4 py-3 focus:outline-none focus:border-venuea-gold transition-colors"
                   placeholder="101동 202호"
                 />
+              </div>
+              <div className="pt-2 flex items-center space-x-3">
+                <input
+                  type="checkbox"
+                  id="newsletter"
+                  checked={formData.newsletter_subscribed}
+                  onChange={e => setFormData({...formData, newsletter_subscribed: e.target.checked})}
+                  className="w-4 h-4 text-venuea-gold border-gray-300 focus:ring-venuea-gold rounded cursor-pointer"
+                />
+                <label htmlFor="newsletter" className="text-xs text-gray-600 cursor-pointer">
+                  (선택) 마케팅 정보, 이벤트 알림 등 뉴스레터 수신에 동의합니다.
+                </label>
               </div>
             </>
           )}

@@ -413,6 +413,12 @@ migrate(`ALTER TABLE inquiries ADD COLUMN replied_at DATETIME`);
 migrate(`ALTER TABLE user_coupons ADD COLUMN notified INTEGER DEFAULT 0`);
 
 migrate(`ALTER TABLE admin_keys ADD COLUMN role TEXT DEFAULT 'MASTER'`);
+migrate(`ALTER TABLE admin_logs ADD COLUMN admin_identifier TEXT`);
+migrate(`ALTER TABLE admin_logs ADD COLUMN ip_address TEXT`);
+migrate(`ALTER TABLE admin_logs ADD COLUMN user_agent TEXT`);
+migrate(`ALTER TABLE admin_logs ADD COLUMN changes TEXT`);
+migrate(`ALTER TABLE admin_logs ADD COLUMN timestamp_ms INTEGER`);
+
 const JWT_SECRET = process.env.JWT_SECRET || "benua-secret-key-2024";
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "benua-admin-123";
 
@@ -452,9 +458,29 @@ async function startServer() {
   });
 
   // --- Logging ---
-  function logAdminAction(adminId: number | null, action: string, targetType: string | null = null, targetId: number | null = null, details: string | null = null) {
+  function logAdminAction(req: any, action: string, targetType: string | null = null, targetId: string | number | null = null, details: string | null = null, changes: any = null) {
     try {
-      db.prepare("INSERT INTO admin_logs (admin_id, action, target_type, target_id, details) VALUES (?, ?, ?, ?, ?)").run(adminId, action, targetType, targetId, details);
+      const adminId = req.admin ? req.admin.id : null;
+      let adminIdentifier = req.admin?.identifier || "System";
+      
+      if (req.admin?.isKey && req.admin?.keyId) {
+        const k = db.prepare("SELECT key_value FROM admin_keys WHERE id = ?").get(req.admin.keyId) as any;
+        if (k) adminIdentifier = k.key_value;
+      } else if (req.admin?.id && !req.admin?.isKey) {
+        const u = db.prepare("SELECT email FROM users WHERE id = ?").get(req.admin.id) as any;
+        if (u) adminIdentifier = u.email;
+      } else if (req.body?.adminKey) {
+        adminIdentifier = req.body.adminKey;
+      }
+
+      const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress || "";
+      const ua = req.headers['user-agent'] || "";
+      const tsMs = Date.now();
+
+      db.prepare(`
+        INSERT INTO admin_logs (admin_id, admin_identifier, action, target_type, target_id, details, changes, ip_address, user_agent, timestamp_ms) 
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(adminId, adminIdentifier, action, targetType, targetId, details, changes ? JSON.stringify(changes) : null, ip, ua, tsMs);
     } catch (err) {
       console.error("Failed to log admin action:", err);
     }
@@ -619,15 +645,17 @@ async function startServer() {
   };
 
   // --- User Auth APIs ---
-  app.post("/api/auth/register", (req, res) => {
-    const { email, password, name, phone, zipcode, address, detail_address, google_id, naver_id } = req.body;
+  app.post("/api/auth/register", async (req, res) => {
+    const { email, password, name, phone, zipcode, address, detail_address, google_id, naver_id, newsletter_subscribed } = req.body;
     try {
       const hashedPassword = hashPassword(password);
+      const isSubscribed = newsletter_subscribed ? 1 : 0;
       const info = db.prepare(
-        "INSERT INTO users (email, password, name, phone, zipcode, address, detail_address, google_id, naver_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
-      ).run(email, hashedPassword, name, phone, zipcode, address, detail_address, google_id || null, naver_id || null);
+        "INSERT INTO users (email, password, name, phone, zipcode, address, detail_address, google_id, naver_id, newsletter_subscribed) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+      ).run(email, hashedPassword, name, phone, zipcode, address, detail_address, google_id || null, naver_id || null, isSubscribed);
       
-      const token = jwt.sign({ id: info.lastInsertRowid, role: "user" }, JWT_SECRET, { expiresIn: "24h" });
+      const userId = info.lastInsertRowid;
+      const token = jwt.sign({ id: userId, role: "user" }, JWT_SECRET, { expiresIn: "24h" });
       
       const isProduction = process.env.NODE_ENV === "production";
       res.cookie("user_token", token, {
@@ -638,7 +666,29 @@ async function startServer() {
         path: "/",
         domain: isProduction ? ".benua.shop" : undefined
       });
-      res.json({ success: true });
+
+      // Send Verification Email Internally
+      try {
+        const verifyToken = crypto.randomBytes(20).toString('hex');
+        db.prepare("UPDATE users SET verification_token = ? WHERE id = ?").run(verifyToken, userId);
+
+        const verifyLink = `https://${req.get('host')}/verify-email?token=${verifyToken}`;
+        await sendMail(
+          email,
+          "이메일 인증을 완료해주세요",
+          `
+          <h2 style="font-size: 18px; margin-bottom: 20px;">이메일 인증 안내</h2>
+          <p style="margin-bottom: 30px;">베뉴아 회원이 되신 것을 환영합니다!<br>아래 버튼을 클릭하여 이메일 인증을 완료하고 모든 서비스를 이용해 보세요.</p>
+          <a href="${verifyLink}" style="display: inline-block; background-color: #B29141; color: #fff; padding: 14px 28px; text-decoration: none; border-radius: 4px; font-weight: bold; text-transform: uppercase; letter-spacing: 2px; font-size: 12px;">이메일 인증하기</a>
+          <p style="margin-top: 30px; font-size: 12px; color: #999;">감사합니다.</p>
+          `,
+          'SYSTEM'
+        );
+      } catch (e) {
+        console.error("Failed to send verification email on register", e);
+      }
+
+      res.json({ success: true, message: "회원가입이 완료되었습니다. 이메일을 확인해 주세요." });
     } catch (err: any) {
       if (err.code === "SQLITE_CONSTRAINT_UNIQUE") {
         return res.status(400).json({ error: "이미 존재하는 이메일입니다." });
@@ -763,7 +813,7 @@ async function startServer() {
       // Keep tier status fresh
       const status = updateUserTierStatus(decoded.id);
       
-      const user = db.prepare("SELECT id, name, email, phone, zipcode, address, detail_address, google_id, naver_id, points, tier, tier_updated_at FROM users WHERE id = ?").get(decoded.id) as any;
+      const user = db.prepare("SELECT id, name, email, phone, zipcode, address, detail_address, google_id, naver_id, points, tier, tier_updated_at, newsletter_subscribed, is_verified FROM users WHERE id = ?").get(decoded.id) as any;
       if (!user) {
         console.log(`[DEBUG][AUTH/ME] Fail - User not found in DB for ID: ${decoded.id}`);
         return res.json({ user: null });
@@ -787,15 +837,41 @@ async function startServer() {
     
     try {
       const decoded: any = jwt.verify(token, JWT_SECRET);
-      const { name, phone, zipcode, address, detail_address } = req.body;
+      const { name, phone, zipcode, address, detail_address, newsletter_subscribed } = req.body;
+      const isSubscribed = newsletter_subscribed ? 1 : 0;
       
       db.prepare(
-        "UPDATE users SET name = ?, phone = ?, zipcode = ?, address = ?, detail_address = ? WHERE id = ?"
-      ).run(name, phone, zipcode, address, detail_address, decoded.id);
+        "UPDATE users SET name = ?, phone = ?, zipcode = ?, address = ?, detail_address = ?, newsletter_subscribed = ? WHERE id = ?"
+      ).run(name, phone, zipcode, address, detail_address, isSubscribed, decoded.id);
       
       res.json({ success: true });
     } catch (err) {
       res.status(500).json({ error: "정보 수정 실패" });
+    }
+  });
+
+  app.delete("/api/auth/me", (req, res) => {
+    const token = req.cookies.user_token;
+    if (!token) return res.status(401).json({ error: "로그인이 필요합니다." });
+
+    try {
+      const decoded: any = jwt.verify(token, JWT_SECRET);
+      const userId = decoded.id;
+
+      // Unlink references gracefully
+      db.transaction(() => {
+        db.prepare("UPDATE orders SET user_id = NULL WHERE user_id = ?").run(userId);
+        db.prepare("UPDATE reviews SET user_id = NULL WHERE user_id = ?").run(userId);
+        db.prepare("DELETE FROM user_coupons WHERE user_id = ?").run(userId);
+        db.prepare("DELETE FROM point_history WHERE user_id = ?").run(userId);
+        db.prepare("DELETE FROM cart WHERE user_id = ?").run(userId);
+        db.prepare("DELETE FROM users WHERE id = ?").run(userId);
+      })();
+
+      res.clearCookie("user_token");
+      res.json({ success: true });
+    } catch (err) {
+      res.status(500).json({ error: "탈퇴 처리 중 오류가 발생했습니다." });
     }
   });
 
@@ -1189,6 +1265,8 @@ async function startServer() {
       path: "/",
       domain: isProduction ? ".benua.shop" : undefined
     });
+
+    logAdminAction(req, "LOGIN", "system", null, "Admin logged in successfully", null);
     res.json({ success: true });
   });
 
@@ -1197,8 +1275,8 @@ async function startServer() {
     res.json({ success: true });
   });
 
-  app.get("/api/admin/check", authenticateCS, (req, res) => {
-    res.json({ authenticated: true });
+  app.get("/api/admin/check", authenticateCS, (req: any, res) => {
+    res.json({ authenticated: true, role: req.admin.role });
   });
 
   // Admin Keys Management
@@ -1209,11 +1287,16 @@ async function startServer() {
     res.json(filteredKeys);
   });
 
-  app.post("/api/admin/keys", authenticateAdmin, (req, res) => {
+  app.post("/api/admin/keys", authenticateAdmin, (req: any, res) => {
     const { keyValue, role } = req.body;
     if (!keyValue) return res.status(400).json({ error: "Key 값을 입력해주세요." });
+
+    if (req.admin.role !== 'MASTER' && role === 'MASTER') {
+      return res.status(403).json({ error: "MASTER 권한의 Key는 MASTER 등급만 생성할 수 있습니다." });
+    }
+
     try {
-      db.prepare("INSERT INTO admin_keys (key_value, role) VALUES (?, ?)").run(keyValue, role || 'MASTER');
+      db.prepare("INSERT INTO admin_keys (key_value, role) VALUES (?, ?)").run(keyValue, role || 'ADMIN');
       res.json({ success: true });
     } catch (err: any) {
       if (err.code === "SQLITE_CONSTRAINT_UNIQUE") {
@@ -1231,8 +1314,21 @@ async function startServer() {
     }
 
     try {
+      const existingKey = db.prepare("SELECT role FROM admin_keys WHERE id = ?").get(id) as any;
+      if (!existingKey) return res.status(404).json({ error: "Key를 찾을 수 없습니다." });
+
+      if (req.admin.role !== 'MASTER') {
+        if (role === 'MASTER') {
+          return res.status(403).json({ error: "MASTER 권한으로 승급시킬 수 없습니다." });
+        }
+        if (existingKey.role === 'MASTER') {
+          return res.status(403).json({ error: "MASTER 권한의 Key는 수정할 수 없습니다." });
+        }
+      }
+
       db.prepare("UPDATE admin_keys SET role = ? WHERE id = ?").run(role, id);
-      logAdminAction(req.admin.id, "UPDATE_KEY_ROLE", "admin_keys", parseInt(id), `Key role updated to ${role}`);
+      const changes = { before: { role: existingKey.role }, after: { role } };
+      logAdminAction(req, "UPDATE_KEY_ROLE", "admin_keys", parseInt(id), `Key role updated to ${role}`, changes);
       res.json({ success: true });
     } catch (err) {
       console.error(err);
@@ -1389,13 +1485,24 @@ async function startServer() {
     }
   });
 
-  app.delete("/api/admin/keys/:id", authenticateAdmin, (req, res) => {
-    const count = db.prepare("SELECT COUNT(*) as count FROM admin_keys").get() as any;
-    if (count.count <= 1) {
-      return res.status(400).json({ error: "최소 1개의 관리자 Key가 필요합니다." });
+  app.delete("/api/admin/keys/:id", authenticateAdmin, (req: any, res) => {
+    try {
+      const existingKey = db.prepare("SELECT role FROM admin_keys WHERE id = ?").get(req.params.id) as any;
+      if (!existingKey) return res.status(404).json({ error: "Key not found" });
+
+      if (req.admin.role !== 'MASTER' && existingKey.role === 'MASTER') {
+        return res.status(403).json({ error: "MASTER 권한의 Key는 삭제할 수 없습니다." });
+      }
+
+      const count = db.prepare("SELECT COUNT(*) as count FROM admin_keys").get() as any;
+      if (count.count <= 1) {
+        return res.status(400).json({ error: "최소 1개의 관리자 Key가 필요합니다." });
+      }
+      db.prepare("DELETE FROM admin_keys WHERE id = ?").run(req.params.id);
+      res.json({ success: true });
+    } catch (err) {
+      res.status(500).json({ error: "키 삭제 실패" });
     }
-    db.prepare("DELETE FROM admin_keys WHERE id = ?").run(req.params.id);
-    res.json({ success: true });
   });
 
   // Products
@@ -2026,24 +2133,31 @@ async function startServer() {
     }
 
     // Role hierarchy enforcement
-    if (req.admin.role !== "MASTER" && role === "MASTER") {
-      return res.status(403).json({ error: "MASTER 역할을 부여할 수 없습니다." });
+    if (req.admin.role !== "MASTER") {
+      if (role === "MASTER") {
+        return res.status(403).json({ error: "MASTER 역할을 부여할 수 없습니다." });
+      }
     }
 
     try {
       let targetUser;
       if (targetUserIdOrEmail.includes('@')) {
-        targetUser = db.prepare("SELECT id FROM users WHERE email = ?").get(targetUserIdOrEmail) as any;
+        targetUser = db.prepare("SELECT id, role FROM users WHERE email = ?").get(targetUserIdOrEmail) as any;
       } else {
-        targetUser = db.prepare("SELECT id FROM users WHERE id = ?").get(targetUserIdOrEmail) as any;
+        targetUser = db.prepare("SELECT id, role FROM users WHERE id = ?").get(targetUserIdOrEmail) as any;
       }
 
       if (!targetUser) {
         return res.status(404).json({ error: "사용자를 찾을 수 없습니다." });
       }
 
+      if (req.admin.role !== "MASTER" && targetUser.role === "MASTER") {
+        return res.status(403).json({ error: "MASTER 등급 유저의 권한은 수정할 수 없습니다." });
+      }
+
       db.prepare("UPDATE users SET role = ? WHERE id = ?").run(role, targetUser.id);
-      logAdminAction(adminId, "UPDATE_ROLE", "users", targetUser.id, `Role set to ${role}`);
+      const changes = { before: { role: targetUser.role }, after: { role } };
+      logAdminAction(req, "UPDATE_USER_ROLE", "users", targetUser.id, `User role set to ${role}`, changes);
       res.json({ success: true });
     } catch (err) {
       console.error(err);
@@ -2205,6 +2319,18 @@ async function startServer() {
     }
   });
 
+  app.post("/api/inquiries", (req, res) => {
+    const { name, email, subject, message } = req.body;
+    try {
+      db.prepare(
+        "INSERT INTO inquiries (name, email, subject, message) VALUES (?, ?, ?, ?)"
+      ).run(name, email, subject, message);
+      res.json({ success: true });
+    } catch (err) {
+      res.status(500).json({ error: "문의 사항 저장 실패" });
+    }
+  });
+
   app.post("/api/admin/inquiries/:id/reply", authenticateCS, async (req, res) => {
     const { replyMessage } = req.body;
     const { id } = req.params;
@@ -2281,6 +2407,30 @@ async function startServer() {
     }
   });
 
+  app.delete("/api/admin/newsletter/subscribers/:email", authenticateAdmin, (req, res) => {
+    const { email } = req.params;
+    try {
+      db.prepare("DELETE FROM newsletter_subscribers WHERE email = ?").run(email);
+      db.prepare("UPDATE users SET newsletter_subscribed = 0 WHERE email = ?").run(email);
+      res.json({ success: true });
+    } catch (err) {
+      res.status(500).json({ error: "구독자 삭제 중 오류가 발생했습니다." });
+    }
+  });
+
+  app.post("/api/newsletter/unsubscribe", (req, res) => {
+    const { email } = req.body;
+    if (!email) return res.status(400).json({ error: "이메일이 필요합니다." });
+
+    try {
+      db.prepare("DELETE FROM newsletter_subscribers WHERE email = ?").run(email);
+      db.prepare("UPDATE users SET newsletter_subscribed = 0 WHERE email = ?").run(email);
+      res.json({ success: true, message: "수신 거부가 완료되었습니다." });
+    } catch (err) {
+      res.status(500).json({ error: "처리 중 오류가 발생했습니다." });
+    }
+  });
+
   app.post("/api/admin/newsletter/send", authenticateAdmin, async (req, res) => {
     const { subject, content } = req.body;
     if (!subject || !content) return res.status(400).json({ error: "Subject and content are required" });
@@ -2293,6 +2443,10 @@ async function startServer() {
       console.log(`[NEWSLETTER] Sending mass mail to ${allEmails.length} subscribers`);
       
       for (const email of allEmails) {
+        // Generate a simple base64 encoded token or just pass email to frontend
+        const encodedEmail = Buffer.from(email).toString('base64');
+        const unsubLink = `https://${req.get('host')}/unsubscribe?token=${encodedEmail}`;
+
         await sendMail(
           email,
           subject,
@@ -2302,7 +2456,7 @@ async function startServer() {
               ${content}
             </div>
             <div style="margin-top: 40px; padding-top: 20px; border-top: 1px dashed #eee; font-size: 11px; color: #999;">
-              <p>더 이상 소식을 원하지 않으시면 <a href="#" style="color: #666; text-decoration: underline;">수신 거부</a>를 클릭해 주세요.</p>
+              <p>더 이상 소식을 원하지 않으시면 <a href="${unsubLink}" style="color: #666; text-decoration: underline;">수신 거부</a>를 클릭해 주세요.</p>
             </div>
           </div>
           `,
