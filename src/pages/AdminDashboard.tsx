@@ -26,7 +26,9 @@ import {
   Download,
   Upload,
   FileText,
-  ArrowRight
+  ArrowRight,
+  Shield,
+  Activity
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { cn, formatPrice } from "../lib/utils";
@@ -109,9 +111,9 @@ export default function AdminDashboard() {
   };
 
   return (
-    <div className="flex min-h-screen bg-gray-50 pt-[140px] md:pt-20">
+    <div className="flex min-h-screen bg-gray-50">
       {/* Mobile Header */}
-      <div className="fixed top-20 left-0 right-0 h-[60px] bg-white border-b border-gray-200 z-30 flex items-center justify-between px-6 md:hidden">
+      <div className="fixed top-0 left-0 right-0 h-[60px] bg-white border-b border-gray-200 z-30 flex items-center justify-between px-6 md:hidden">
         <h2 className="text-sm font-bold uppercase tracking-widest text-venuea-dark">Admin Console</h2>
         <button 
           onClick={() => setIsMobileSidebarOpen(true)}
@@ -141,7 +143,7 @@ export default function AdminDashboard() {
             >
               <div className="flex justify-between items-center mb-10">
                 <div className="group">
-                  <h2 className="text-2xl font-bold tracking-tighter text-venuea-dark">Benua</h2>
+                  <h2 className="text-2xl font-bold tracking-[4px] uppercase text-venuea-dark">Benua</h2>
                   <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-venuea-dark/30 block -mt-1">admin</span>
                 </div>
                 <button onClick={() => setIsMobileSidebarOpen(false)} className="p-2 text-gray-400 hover:text-gray-900">
@@ -190,7 +192,7 @@ export default function AdminDashboard() {
       <aside className="w-64 bg-white border-r border-gray-200 hidden md:block">
         <div className="p-6">
           <div className="mb-10 pl-4">
-            <h1 className="text-3xl font-bold tracking-tighter text-venuea-dark">Benua</h1>
+            <h1 className="text-2xl font-bold tracking-[4px] uppercase text-venuea-dark">Benua</h1>
             <span className="text-[10px] font-bold uppercase tracking-[0.3em] text-venuea-dark/20 block -mt-1 ml-0.5">admin</span>
           </div>
           <nav className="space-y-1">
@@ -227,7 +229,32 @@ export default function AdminDashboard() {
       </aside>
 
       {/* Main Content */}
-      <main className="flex-grow p-4 md:p-8 overflow-x-hidden">
+      <main className="flex-grow p-4 md:p-8 overflow-x-hidden pt-[60px] md:pt-0">
+        {/* Global Admin Header - Desktop Only */}
+        <div className="hidden md:flex justify-between items-center mb-10 pb-6 border-b border-gray-100 sticky top-0 bg-gray-50/80 backdrop-blur-md z-20 pt-8">
+          <div>
+            <h2 className="text-sm font-bold uppercase tracking-[0.3em] text-venuea-dark/40 flex items-center gap-2">
+              <Shield size={12} /> Management Protocol
+            </h2>
+            <p className="text-xs text-gray-400 mt-1 uppercase tracking-widest leading-none">Authorized Access Only // Benua Infrastructure</p>
+          </div>
+          <div className="flex items-center space-x-6">
+            <div className="bg-green-50 text-green-600 px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wider flex items-center gap-2 border border-green-100/50 shadow-sm">
+              <Activity size={12} className="animate-pulse" />
+              <span className="relative flex h-2 w-2">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
+              </span>
+              System Online
+            </div>
+            <div className="h-8 w-[1px] bg-gray-200" />
+            <div className="text-right">
+              <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block mb-1">Current Date</span>
+              <span className="text-xs font-bold text-venuea-dark">{new Date().toLocaleDateString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric' })}</span>
+            </div>
+          </div>
+        </div>
+
         <Routes>
           <Route path="/" element={<AdminOverview />} />
           <Route path="/products" element={<AdminProducts />} />
@@ -1469,7 +1496,7 @@ function AdminUserPoints() {
               value={pointData.email}
               onChange={e => setPointData({...pointData, email: e.target.value})}
               className="w-full border-b border-gray-200 py-3 text-lg font-bold focus:outline-none focus:border-venuea-gold transition-colors"
-              placeholder="example@venuea.com"
+              placeholder="example@benua.shop"
               required
             />
           </div>

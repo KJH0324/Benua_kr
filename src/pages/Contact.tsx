@@ -58,7 +58,7 @@ export default function Contact() {
                 </div>
                 <div>
                   <h4 className="text-xs font-bold uppercase tracking-widest text-venuea-dark mb-1">이메일</h4>
-                  <p className="text-venuea-muted">support@benua.shop</p>
+                  <p className="text-venuea-muted">example@benua.shop</p>
                 </div>
               </div>
               <div className="flex items-start space-x-6">

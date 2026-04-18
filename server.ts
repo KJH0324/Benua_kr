@@ -538,7 +538,7 @@ async function startServer() {
         sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
         
         const deliveredOrders = db.prepare(`
-            SELECT id, user_id, order_number, total_amount, shipping_fee, tier_at_order
+            SELECT id, user_id, order_number, total_amount, shipping_fee
             FROM orders 
             WHERE status = 'delivered' AND status_updated_at < ?
         `).all(sevenDaysAgo.toISOString()) as any[];

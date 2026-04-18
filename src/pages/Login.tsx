@@ -290,7 +290,7 @@ export default function Login() {
                 if (e.target.value) setValidationErrors(prev => ({...prev, email: ''}));
               }}
               className="w-full bg-[#F9F9F9] border border-venuea-dark/10 px-4 py-3 focus:outline-none focus:border-venuea-gold transition-colors"
-              placeholder="name@example.com"
+              placeholder="example@benua.shop"
             />
           </div>
           <div className="space-y-2 relative">
