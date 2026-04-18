@@ -7,6 +7,7 @@ export default function Contact() {
   const [formData, setFormData] = useState({
     name: "",
     email: "",
+    category: "",
     subject: "",
     message: ""
   });
@@ -14,6 +15,10 @@ export default function Contact() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!formData.category) {
+      toast.error("문의 카테고리를 선택해주세요.");
+      return;
+    }
     setIsSubmitting(true);
 
     try {
@@ -25,7 +30,7 @@ export default function Contact() {
 
       if (response.ok) {
         toast.success("메시지가 전송되었습니다. 관리자가 확인 후 답변 드릴 예정입니다.");
-        setFormData({ name: "", email: "", subject: "", message: "" });
+        setFormData({ name: "", email: "", category: "", subject: "", message: "" });
       } else {
         toast.error("전송에 실패했습니다. 다시 시도해 주세요.");
       }
@@ -39,7 +44,7 @@ export default function Contact() {
   return (
     <div className="pt-[120px] md:pt-32 pb-20 px-6 md:px-[60px]">
       <div className="max-w-7xl mx-auto">
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-20">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-20 items-center">
           <motion.div
             initial={{ opacity: 0, x: -20 }}
             animate={{ opacity: 1, x: 0 }}
@@ -48,38 +53,9 @@ export default function Contact() {
             <h1 className="text-4xl md:text-6xl font-bold text-venuea-dark mb-8 tracking-tight">문의하기</h1>
             <p className="text-lg text-venuea-muted mb-12 font-light leading-relaxed">
               베뉴아의 제품이나 서비스에 대해 궁금한 점이 있으신가요? <br />
-              아래 연락처나 폼을 통해 언제든 문의해 주세요.
+              아래 폼을 통해 언제든 공식 문의를 남겨 주세요. <br />
+              관리자가 확인 후 입력하신 이메일로 빠르게 답변해 드립니다.
             </p>
-
-            <div className="space-y-8">
-              <div className="flex items-start space-x-6">
-                <div className="w-12 h-12 bg-venuea-dark text-venuea-gold flex items-center justify-center rounded-full shrink-0">
-                  <Mail size={20} />
-                </div>
-                <div>
-                  <h4 className="text-xs font-bold uppercase tracking-widest text-venuea-dark mb-1">이메일</h4>
-                  <p className="text-venuea-muted">example@benua.shop</p>
-                </div>
-              </div>
-              <div className="flex items-start space-x-6">
-                <div className="w-12 h-12 bg-venuea-dark text-venuea-gold flex items-center justify-center rounded-full shrink-0">
-                  <Phone size={20} />
-                </div>
-                <div>
-                  <h4 className="text-xs font-bold uppercase tracking-widest text-venuea-dark mb-1">전화</h4>
-                  <p className="text-venuea-muted">02-1234-5678</p>
-                </div>
-              </div>
-              <div className="flex items-start space-x-6">
-                <div className="w-12 h-12 bg-venuea-dark text-venuea-gold flex items-center justify-center rounded-full shrink-0">
-                  <MapPin size={20} />
-                </div>
-                <div>
-                  <h4 className="text-xs font-bold uppercase tracking-widest text-venuea-dark mb-1">주소</h4>
-                  <p className="text-venuea-muted">인천광역시 [상세 주소 입력]</p>
-                </div>
-              </div>
-            </div>
           </motion.div>
 
           <motion.div
@@ -111,6 +87,24 @@ export default function Contact() {
                   />
                 </div>
               </div>
+              
+              <div className="space-y-2">
+                <label className="text-[10px] font-bold uppercase tracking-widest text-venuea-dark/40">카테고리</label>
+                <select
+                  required
+                  value={formData.category}
+                  onChange={e => setFormData({...formData, category: e.target.value})}
+                  className="w-full bg-[#F9F9F9] border border-venuea-dark/10 px-4 py-3 text-sm focus:outline-none focus:border-venuea-gold appearance-none cursor-pointer"
+                >
+                  <option value="">문의하실 분류를 선택해주세요</option>
+                  <option value="상품 문의">상품 문의</option>
+                  <option value="배송 문의">배송 문의</option>
+                  <option value="반품/교환">반품/교환</option>
+                  <option value="결제 문의">결제 문의</option>
+                  <option value="기타">기타</option>
+                </select>
+              </div>
+
               <div className="space-y-2">
                 <label className="text-[10px] font-bold uppercase tracking-widest text-venuea-dark/40">제목</label>
                 <input 

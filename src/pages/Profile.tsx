@@ -319,7 +319,7 @@ export default function Profile() {
             {/* Membership Tier Card */}
             <div className={cn(
               "p-8 relative overflow-hidden group shadow-2xl",
-              user.tier === 'BEIGE' ? "bg-[#F5F5F0] text-[#8B7355] border border-[#8B7355]/20" :
+              (!user.tier || user.tier === 'BEIGE') ? "bg-[#F5F5F0] text-[#8B7355] border border-[#8B7355]/20" :
               user.tier === 'GREEN' ? "bg-[#2D5A27] text-white" :
               user.tier === 'BLACK' ? "bg-black text-white" :
               "bg-black text-[#D4AF37] border-2 border-[#D4AF37]"
@@ -630,7 +630,7 @@ export default function Profile() {
                     <header className="flex justify-between items-center mb-8">
                       <h3 className="text-lg font-bold text-venuea-dark uppercase tracking-widest flex items-center space-x-3">
                         <div className="w-1.5 h-6 bg-venuea-gold" />
-                        <span>최근 주문 (최대 3건)</span>
+                        <span>최근 주문</span>
                       </h3>
                       <button onClick={() => setActiveTab('orders')} className="text-[10px] font-bold uppercase tracking-widest text-venuea-gold hover:underline">전체 주문 내역</button>
                     </header>

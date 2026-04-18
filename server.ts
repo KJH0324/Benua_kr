@@ -196,6 +196,7 @@ db.exec(`
     material TEXT,
     dimensions TEXT,
     origin TEXT,
+    manufacturer TEXT,
     discount_rate INTEGER DEFAULT 0,
     show_on_main INTEGER DEFAULT 0,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
@@ -242,6 +243,7 @@ db.exec(`
 
   CREATE TABLE IF NOT EXISTS inquiries (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
+    category TEXT DEFAULT '기타',
     name TEXT NOT NULL,
     email TEXT NOT NULL,
     subject TEXT NOT NULL,
@@ -324,6 +326,20 @@ const checkAndMigrateUsers = () => {
     db.prepare("UPDATE users SET tier = 'Beige' WHERE tier IS NULL").run();
     db.prepare("UPDATE users SET tier_updated_at = CURRENT_TIMESTAMP WHERE tier_updated_at IS NULL").run();
     console.log("[DEBUG][DB] Users migration check complete");
+
+    const inquiriesTableInfo = db.prepare("PRAGMA table_info(inquiries)").all() as any[];
+    const inquiriesColumns = inquiriesTableInfo.map(c => c.name);
+    if (!inquiriesColumns.includes('category')) {
+      db.exec(`ALTER TABLE inquiries ADD COLUMN category TEXT DEFAULT '기타'`);
+      console.log("[DEBUG][DB] Added category column to inquiries");
+    }
+
+    const productsTableInfo = db.prepare("PRAGMA table_info(products)").all() as any[];
+    const productsColumns = productsTableInfo.map(c => c.name);
+    if (!productsColumns.includes('manufacturer')) {
+      db.exec(`ALTER TABLE products ADD COLUMN manufacturer TEXT`);
+      console.log("[DEBUG][DB] Added manufacturer column to products");
+    }
   } catch (err: any) {
     console.error("[DEBUG][DB] Users migration CRITICAL ERROR:", err.message);
   }
@@ -1949,9 +1965,12 @@ async function startServer() {
                 db.prepare("UPDATE products SET stock = stock + ? WHERE id = ?").run(item.quantity, item.product_id);
             }
         } else {
-            // Shipping 후: 반품비 5000원 제외하고 환불 (refund_requested 상태로 관리자 검토 대기)
+            // Shipping 후: 단순 변심, 주문 실수인 경우에만 반품비 5000원 제외
             newStatus = 'refund_requested';
-            refundAmount = Math.max(0, order.total_amount - 5000);
+            refundAmount = order.total_amount;
+            if (reason === '단순 변심' || reason === '주문 실수') {
+                refundAmount = Math.max(0, order.total_amount - 5000);
+            }
         }
 
         db.prepare("UPDATE orders SET status = ?, refund_reason = ?, refund_amount = ?, status_updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(newStatus, reason, refundAmount, id);
@@ -2320,13 +2339,14 @@ async function startServer() {
   });
 
   app.post("/api/inquiries", (req, res) => {
-    const { name, email, subject, message } = req.body;
+    const { name, email, category, subject, message } = req.body;
     try {
       db.prepare(
-        "INSERT INTO inquiries (name, email, subject, message) VALUES (?, ?, ?, ?)"
-      ).run(name, email, subject, message);
+        "INSERT INTO inquiries (category, name, email, subject, message) VALUES (?, ?, ?, ?, ?)"
+      ).run(category || '기타', name, email, subject, message);
       res.json({ success: true });
     } catch (err) {
+      console.error(err);
       res.status(500).json({ error: "문의 사항 저장 실패" });
     }
   });
