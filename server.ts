@@ -353,7 +353,8 @@ const checkAndMigrateOrders = () => {
       console.log("[DEBUG][DB] Added refund_reason to orders");
     }
     if (!columns.includes('status_updated_at')) {
-      db.exec(`ALTER TABLE orders ADD COLUMN status_updated_at DATETIME DEFAULT CURRENT_TIMESTAMP`);
+      db.exec(`ALTER TABLE orders ADD COLUMN status_updated_at DATETIME DEFAULT '2024-01-01 00:00:00'`);
+      db.prepare("UPDATE orders SET status_updated_at = created_at WHERE status_updated_at = '2024-01-01 00:00:00'").run();
       console.log("[DEBUG][DB] Added status_updated_at to orders");
     }
     console.log("[DEBUG][DB] Orders migration check complete");
