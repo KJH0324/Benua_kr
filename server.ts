@@ -199,8 +199,11 @@ const checkAndMigrateUsers = () => {
       console.log("[DEBUG][DB] Added tier column");
     }
     if (!columns.includes('tier_updated_at')) {
-      db.exec(`ALTER TABLE users ADD COLUMN tier_updated_at DATETIME DEFAULT CURRENT_TIMESTAMP`);
-      console.log("[DEBUG][DB] Added tier_updated_at column");
+      // SQLite limitation: Cannot add column with non-constant default (CURRENT_TIMESTAMP)
+      // We use a constant string first, then update it.
+      db.exec(`ALTER TABLE users ADD COLUMN tier_updated_at DATETIME DEFAULT '2024-01-01 00:00:00'`);
+      db.prepare("UPDATE users SET tier_updated_at = CURRENT_TIMESTAMP WHERE tier_updated_at = '2024-01-01 00:00:00'").run();
+      console.log("[DEBUG][DB] Added tier_updated_at column with workaround");
     }
     if (!columns.includes('total_spent_6m')) {
       db.exec(`ALTER TABLE users ADD COLUMN total_spent_6m INTEGER DEFAULT 0`);
