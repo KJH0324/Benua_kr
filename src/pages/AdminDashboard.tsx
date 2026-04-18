@@ -30,6 +30,7 @@ import {
   Shield,
   Activity
 } from "lucide-react";
+import AdminLogs from "./AdminLogs";
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
 import { motion, AnimatePresence } from "motion/react";
 import { cn, formatPrice } from "../lib/utils";
@@ -108,6 +109,7 @@ export default function AdminDashboard() {
     { name: "고객 관리", path: `${adminPathBase}/customers`, icon: Users },
     { name: "쿠폰 관리", path: `${adminPathBase}/coupons`, icon: Ticket },
     { name: "뉴스레터", path: `${adminPathBase}/newsletter`, icon: FileText },
+    { name: "관리자 로그", path: `${adminPathBase}/logs`, icon: Activity },
     { name: "관리자 키", path: `${adminPathBase}/keys`, icon: Settings },
   ];
 
@@ -275,6 +277,7 @@ export default function AdminDashboard() {
           <Route path="/coupons" element={<AdminCoupons />} />
           <Route path="/inquiries" element={<AdminInquiries />} />
           <Route path="/newsletter" element={<AdminNewsletter />} />
+          <Route path="/logs" element={<AdminLogs />} />
           <Route path="/keys" element={<AdminKeys />} />
         </Routes>
       </main>
@@ -1781,6 +1784,21 @@ function AdminUserPoints() {
     } catch { toast.error("서버 오류"); }
   };
 
+  const handleUpdateRole = async (email: string, role: string) => {
+    try {
+      const res = await fetch(`/api/admin/users/${email}/role`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ role })
+      });
+      if(res.ok) {
+        toast.success("권한이 변경되었습니다.");
+      } else {
+        toast.error("권한 변경 실패");
+      }
+    } catch { toast.error("서버 오류"); }
+  };
+
   return (
     <div className="space-y-12">
       <h1 className="text-2xl font-serif font-bold text-gray-900">회원/포인트 관리</h1>
@@ -1888,9 +1906,27 @@ function AdminKeys() {
   return (
     <div className="space-y-6 max-w-4xl">
       <header>
-        <h1 className="text-2xl font-serif font-bold text-gray-900">관리자 Key 관리</h1>
+        <h1 className="text-2xl font-serif font-bold text-gray-900">관리자 Key & 권한 관리</h1>
         <p className="text-sm text-gray-500 mt-1">시스템에 접근할 수 있는 관리자 Key와 2FA 상태를 관리합니다.</p>
       </header>
+
+      <div className="bg-white p-6 rounded-xl border border-gray-200">
+        <h2 className="text-sm font-bold uppercase tracking-widest text-gray-400 mb-4">권한 즉시 변경</h2>
+        <div className="flex gap-4">
+          <input type="text" id="role-email" placeholder="이메일" className="border rounded px-4 py-2 flex-1" />
+          <select id="role-select" className="border rounded px-4 py-2">
+            <option value="USER">USER</option>
+            <option value="OPERATOR">OPERATOR</option>
+            <option value="CS">CS</option>
+            <option value="ADMIN">ADMIN</option>
+          </select>
+          <button onClick={() => {
+            const email = (document.getElementById('role-email') as HTMLInputElement).value;
+            const role = (document.getElementById('role-select') as HTMLSelectElement).value;
+            handleUpdateRole(email, role);
+          }} className="bg-venuea-gold text-white px-6 py-2 rounded-lg font-medium">부여</button>
+        </div>
+      </div>
 
       <div className="bg-white p-6 rounded-xl border border-gray-200">
         <h2 className="text-sm font-bold uppercase tracking-widest text-gray-400 mb-4">새 Key 추가</h2>

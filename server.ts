@@ -450,6 +450,24 @@ async function startServer() {
     next();
   });
 
+  // --- Logging ---
+  function logAdminAction(adminId: number | null, action: string, targetType: string | null = null, targetId: number | null = null, details: string | null = null) {
+    try {
+      db.prepare("INSERT INTO admin_logs (admin_id, action, target_type, target_id, details) VALUES (?, ?, ?, ?, ?)").run(adminId, action, targetType, targetId, details);
+    } catch (err) {
+      console.error("Failed to log admin action:", err);
+    }
+  }
+
+  app.get("/api/admin/logs", authenticateAdmin, (req: any, res) => {
+    try {
+      const logs = db.prepare("SELECT * FROM admin_logs ORDER BY created_at DESC").all();
+      res.json(logs);
+    } catch (err) {
+      res.status(500).json({ error: "로그 조회 실패" });
+    }
+  });
+
   // --- Auth Middleware ---
   const authorize = (allowedRoles: string[]) => (req: any, res: any, next: any) => {
     const token = req.cookies.admin_token;
@@ -460,19 +478,17 @@ async function startServer() {
       
       // Admin token bypass
       if (decoded.role === "admin") {
-        req.admin = decoded;
-        req.admin.role = "MASTER";
+        req.admin = { id: 0, role: "MASTER" }; // Use 0 for logged in via Admin Key
         return next();
       }
 
-      const user = db.prepare("SELECT role FROM users WHERE id = ?").get(decoded.id) as any;
+      const user = db.prepare("SELECT id, role FROM users WHERE id = ?").get(decoded.id) as any;
       
       if (!user || !allowedRoles.includes(user.role)) {
         return res.status(403).json({ error: "Forbidden: Insufficient permissions" });
       }
       
-      req.admin = decoded;
-      req.admin.role = user.role;
+      req.admin = user;
       next();
     } catch (err) {
       res.status(401).json({ error: "Invalid token" });
