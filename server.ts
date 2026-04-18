@@ -272,6 +272,10 @@ const checkAndMigrateOrders = () => {
       db.exec(`ALTER TABLE orders ADD COLUMN refund_reason TEXT`);
       console.log("[DEBUG][DB] Added refund_reason to orders");
     }
+    if (!columns.includes('status_updated_at')) {
+      db.exec(`ALTER TABLE orders ADD COLUMN status_updated_at DATETIME DEFAULT CURRENT_TIMESTAMP`);
+      console.log("[DEBUG][DB] Added status_updated_at to orders");
+    }
     console.log("[DEBUG][DB] Orders migration check complete");
   } catch (err: any) {
     console.error("[DEBUG][DB] Orders migration ERROR:", err.message);
@@ -422,16 +426,40 @@ async function startServer() {
     // 6 months spending
     const sixMonthsAgo = new Date();
     sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
-    const spendingRow = db.prepare("SELECT SUM(total_amount - shipping_fee) as spent FROM orders WHERE user_id = ? AND created_at > ?").get(userId, sixMonthsAgo.toISOString()) as any;
+    
+    // Calculate spent amount: (total_amount - shipping_fee) is the product amount.
+    // We then subtract any refund_amount. 
+    // ONLY count orders that are 'completed' (구매확정)
+    const spendingRow = db.prepare(`
+      SELECT SUM(
+        CASE 
+          WHEN status = 'completed'
+          THEN MAX(0, (total_amount - shipping_fee) - IFNULL(refund_amount, 0))
+          ELSE 0
+        END
+      ) as spent 
+      FROM orders 
+      WHERE user_id = ? AND created_at > ?
+    `).get(userId, sixMonthsAgo.toISOString()) as any;
+    
     const spent = spendingRow.spent || 0;
     
+    // Update total_spent_6m column if it exists (for caching/display)
+    try {
+      db.prepare("UPDATE users SET total_spent_6m = ? WHERE id = ?").run(spent, userId);
+    } catch(e) {}
+
     const user = db.prepare("SELECT tier FROM users WHERE id = ?").get(userId) as any;
     const oldTier = user.tier || 'BEIGE';
     const newTier = calculateUserTier(spent);
 
     if (newTier !== oldTier) {
         db.prepare("UPDATE users SET tier = ?, tier_updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(newTier, userId);
-        issueTierCoupons(userId, oldTier, newTier);
+        // Only issue coupons when upgrading
+        const tierOrder = ['BEIGE', 'GREEN', 'BLACK', 'THE_BLACK'];
+        if (tierOrder.indexOf(newTier) > tierOrder.indexOf(oldTier)) {
+            issueTierCoupons(userId, oldTier, newTier);
+        }
     }
     return { spent, tier: newTier };
   };
@@ -503,11 +531,61 @@ async function startServer() {
     }
   });
 
+  const runAutoCompletion = () => {
+    try {
+        // Find orders that have been 'delivered' for more than 7 days
+        const sevenDaysAgo = new Date();
+        sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+        
+        const deliveredOrders = db.prepare(`
+            SELECT id, user_id, order_number, total_amount, shipping_fee, tier_at_order
+            FROM orders 
+            WHERE status = 'delivered' AND status_updated_at < ?
+        `).all(sevenDaysAgo.toISOString()) as any[];
+
+        if (deliveredOrders.length > 0) {
+            const updateStatus = db.prepare("UPDATE orders SET status = 'completed', status_updated_at = CURRENT_TIMESTAMP WHERE id = ?");
+            
+            for (const order of deliveredOrders) {
+                db.transaction(() => {
+                    updateStatus.run(order.id);
+                    
+                    // Award points logic (same as manual confirmation)
+                    if (order.user_id) {
+                        const user = db.prepare("SELECT * FROM users WHERE id = ?").get(order.user_id) as any;
+                        const config = (TIER_CONFIG as any)[user.tier || 'BEIGE'];
+                        const rate = config.accrual_rate;
+                        
+                        const earned = Math.floor((order.total_amount - order.shipping_fee) * rate);
+                        const expires_at = new Date();
+                        expires_at.setFullYear(expires_at.getFullYear() + 1);
+
+                        db.prepare("UPDATE orders SET earned_points = ? WHERE id = ?").run(earned, order.id);
+                        db.prepare("UPDATE users SET points = points + ? WHERE id = ?").run(earned, order.user_id);
+                        db.prepare("INSERT INTO point_history (user_id, amount, reason, type, expires_at) VALUES (?, ?, ?, ?, ?)").run(
+                            order.user_id,
+                            earned,
+                            `주문 ${order.order_number} 자동 구매 확정 적립`,
+                            'EARNED',
+                            expires_at.toISOString()
+                        );
+                        updateUserTierStatus(order.user_id);
+                    }
+                })();
+            }
+            console.log(`[AUTO] Completed ${deliveredOrders.length} orders automatically.`);
+        }
+    } catch (err) {
+        console.error("[AUTO] Error during auto-completion:", err);
+    }
+  };
+
   app.get("/api/auth/me", (req, res) => {
     const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
     const token = req.cookies.user_token;
     
-    console.log(`[DEBUG][AUTH/ME] Request from IP: ${ip}`);
+    // Periodically run auto-completion logic (e.g., when anyone hits the 'me' endpoint)
+    runAutoCompletion();
     console.log(`[DEBUG][AUTH/ME] Cookie present: ${!!token}`);
     if (token) {
       console.log(`[DEBUG][AUTH/ME] Token preview: ${token.substring(0, 15)}...`);
@@ -628,7 +706,7 @@ async function startServer() {
     console.log(`[ADMIN] Updating tracking for order ${id}: ${shipping_company} ${tracking_number}`);
     try {
       const result = db.prepare(
-        "UPDATE orders SET tracking_number = ?, shipping_company = ?, status = 'shipping' WHERE id = ?"
+        "UPDATE orders SET tracking_number = ?, shipping_company = ?, status = 'shipping', status_updated_at = CURRENT_TIMESTAMP WHERE id = ?"
       ).run(tracking_number, shipping_company, id);
       
       if (result.changes === 0) {
@@ -1351,7 +1429,7 @@ async function startServer() {
       const order = db.prepare("SELECT * FROM orders WHERE id = ?").get(id) as any;
       if (!order) return res.status(404).json({ error: "Order not found" });
 
-      db.prepare("UPDATE orders SET status = ? WHERE id = ?").run(status, id);
+      db.prepare("UPDATE orders SET status = ?, status_updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(status, id);
 
       // Point rewarding on completion (Purchase Confirmation)
       if (status === 'completed' && order.user_id && order.status !== 'completed') {
@@ -1424,7 +1502,7 @@ async function startServer() {
         if (!order) return res.status(404).json({ error: "Order not found" });
         if (order.status === 'completed') return res.status(400).json({ error: "Already confirmed" });
 
-        db.prepare("UPDATE orders SET status = 'completed' WHERE id = ?").run(id);
+        db.prepare("UPDATE orders SET status = 'completed', status_updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(id);
         
         // Point rewarding logic (already integrated in status update handler, but I'll call it explicitly here or trigger it)
         // I'll reuse the logic from the admin status update
@@ -1495,7 +1573,11 @@ async function startServer() {
             refundAmount = Math.max(0, order.total_amount - 5000);
         }
 
-        db.prepare("UPDATE orders SET status = ?, refund_reason = ?, refund_amount = ? WHERE id = ?").run(newStatus, reason, refundAmount, id);
+        db.prepare("UPDATE orders SET status = ?, refund_reason = ?, refund_amount = ?, status_updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(newStatus, reason, refundAmount, id);
+        
+        // Update tier status immediately after refund changes spending
+        updateUserTierStatus(order.user_id);
+        
         res.json({ success: true, status: newStatus, refund_amount: refundAmount });
     } catch (err) {
         res.status(500).json({ error: "Refund request failed" });

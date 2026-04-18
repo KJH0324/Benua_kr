@@ -198,7 +198,7 @@ export default function Profile() {
       const data = await res.json();
       if (res.ok) {
         if (data.status === 'refunded') {
-          toast.success("취소 및 즉시 환불 처리가 완료되었습니다.");
+          toast.success("취소 및 환불 처리가 완료되었습니다.");
         } else {
           toast.success("환불 요청이 접수되었습니다. (배송 후 반품비 5,000원 제외)");
         }
