@@ -150,6 +150,7 @@ export default function Checkout() {
           user_id: user.id,
           customer_name: formData.name,
           customer_email: user.email,
+          customer_phone: formData.phone,
           shipping_address: `[${formData.zipcode}] ${formData.address} ${formData.detail_address}`,
           total_amount: finalTotal,
           shipping_fee: effectiveShipping,

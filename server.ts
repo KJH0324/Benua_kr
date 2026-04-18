@@ -138,6 +138,7 @@ db.exec(`
     user_id INTEGER,
     customer_name TEXT,
     customer_email TEXT,
+    customer_phone TEXT,
     shipping_address TEXT,
     total_amount INTEGER,
     shipping_fee INTEGER DEFAULT 0,
@@ -259,9 +260,17 @@ const checkAndMigrateOrders = () => {
       db.exec(`ALTER TABLE orders ADD COLUMN shipping_company TEXT`);
       console.log("[DEBUG][DB] Added shipping_company to orders");
     }
+    if (!columns.includes('customer_phone')) {
+      db.exec(`ALTER TABLE orders ADD COLUMN customer_phone TEXT`);
+      console.log("[DEBUG][DB] Added customer_phone to orders");
+    }
     if (!columns.includes('refund_amount')) {
       db.exec(`ALTER TABLE orders ADD COLUMN refund_amount INTEGER DEFAULT 0`);
       console.log("[DEBUG][DB] Added refund_amount to orders");
+    }
+    if (!columns.includes('refund_reason')) {
+      db.exec(`ALTER TABLE orders ADD COLUMN refund_reason TEXT`);
+      console.log("[DEBUG][DB] Added refund_reason to orders");
     }
     console.log("[DEBUG][DB] Orders migration check complete");
   } catch (err: any) {
@@ -958,8 +967,10 @@ async function startServer() {
 
   // Admin Keys Management
   app.get("/api/admin/keys", authenticateAdmin, (req, res) => {
-    const keys = db.prepare("SELECT id, key_value, CASE WHEN totp_secret IS NULL THEN 0 ELSE 1 END as has_2fa, created_at FROM admin_keys ORDER BY created_at DESC").all();
-    res.json(keys);
+    const keys = db.prepare("SELECT id, key_value, CASE WHEN totp_secret IS NULL THEN 0 ELSE 1 END as has_2fa, created_at FROM admin_keys ORDER BY created_at DESC").all() as any[];
+    const defaultAdminKey = process.env.ADMIN_PASSWORD || 'benua-admin-123';
+    const filteredKeys = keys.filter(k => k.key_value !== defaultAdminKey);
+    res.json(filteredKeys);
   });
 
   app.post("/api/admin/keys", authenticateAdmin, (req, res) => {
@@ -1229,7 +1240,7 @@ async function startServer() {
   // Orders
   app.post("/api/orders", (req, res) => {
     const { 
-      user_id, customer_name, customer_email, shipping_address, 
+      user_id, customer_name, customer_email, customer_phone, shipping_address, 
       total_amount, shipping_fee, items, 
       used_points, used_coupon_id, payment_method 
     } = req.body;
@@ -1251,9 +1262,9 @@ async function startServer() {
       const transaction = db.transaction(() => {
         // 1. Create Order
         const info = db.prepare(
-          "INSERT INTO orders (order_number, user_id, customer_name, customer_email, shipping_address, total_amount, shipping_fee, used_points, used_coupon_id, payment_method, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+          "INSERT INTO orders (order_number, user_id, customer_name, customer_email, customer_phone, shipping_address, total_amount, shipping_fee, used_points, used_coupon_id, payment_method, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
         ).run(
-          order_number, user_id, customer_name, customer_email, shipping_address, 
+          order_number, user_id, customer_name, customer_email, customer_phone, shipping_address, 
           p_total_amount, p_shipping_fee, p_used_points, p_used_coupon_id, 
           payment_method || 'card', 'paid'
         );

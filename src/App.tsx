@@ -1,5 +1,6 @@
-import { BrowserRouter as Router, Routes, Route, Navigate } from "react-router-dom";
+import { BrowserRouter as Router, Routes, Route, Navigate, useLocation } from "react-router-dom";
 import { Toaster } from "sonner";
+import { useEffect } from "react";
 import Navbar from "./components/Navbar";
 import Footer from "./components/Footer";
 import ScrollToTop from "./components/ScrollToTop";
@@ -22,6 +23,33 @@ import ErrorBoundary from "./components/ErrorBoundary";
 import CouponPopup from "./components/CouponPopup";
 import { isAdminSubdomain } from "./lib/subdomain";
 
+function PageTitleHandler() {
+  const location = useLocation();
+
+  useEffect(() => {
+    const path = location.pathname;
+    let title = "Benua";
+
+    if (path === "/shop") title = "Benua | 스토어";
+    else if (path.startsWith("/product/")) title = "Benua | 상품상세";
+    else if (path === "/cart") title = "Benua | 장바구니";
+    else if (path === "/checkout") title = "Benua | 결제";
+    else if (path === "/profile") title = "Benua | 마이페이지";
+    else if (path === "/login") title = "Benua | 로그인";
+    else if (path === "/about") title = "Benua | 브랜드 스토리";
+    else if (path === "/contact") title = "Benua | 고객센터";
+    else if (path === "/track") title = "Benua | 배송조회";
+    
+    if (isAdminSubdomain() || path.includes("/admin")) {
+      title = "Benua | 관리자";
+    }
+
+    document.title = title;
+  }, [location]);
+
+  return null;
+}
+
 export default function App() {
   const isAdmin = isAdminSubdomain();
 
@@ -29,6 +57,7 @@ export default function App() {
     return (
       <ErrorBoundary>
         <Router>
+          <PageTitleHandler />
           <ScrollToTop />
           <div className="flex flex-col min-h-screen bg-gray-50">
             <main className="flex-grow">
@@ -49,6 +78,7 @@ export default function App() {
   return (
     <ErrorBoundary>
       <Router>
+        <PageTitleHandler />
         <ScrollToTop />
         <div className="flex flex-col min-h-screen bg-white">
           <Navbar />

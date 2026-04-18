@@ -30,6 +30,7 @@ export default function Cart() {
   // Save to localStorage whenever items change
   useEffect(() => {
     localStorage.setItem("venuea-cart", JSON.stringify(items));
+    window.dispatchEvent(new Event("cartUpdated"));
   }, [items]);
 
   const subtotal = items.reduce((acc, item) => acc + item.price * item.quantity, 0);
@@ -41,9 +42,17 @@ export default function Cart() {
   const total = subtotal + shipping;
 
   const updateQuantity = (id: string, delta: number) => {
-    setItems(items.map(item => 
-      item.id === id ? { ...item, quantity: Math.max(1, item.quantity + delta) } : item
-    ));
+    setItems(items.map(item => {
+      if (item.id === id) {
+        const newQty = item.quantity + delta;
+        if (delta > 0 && item.stock !== undefined && newQty > item.stock) {
+          toast.error(`재고가 부족합니다. (최대 ${item.stock}개)`);
+          return item;
+        }
+        return { ...item, quantity: Math.max(1, newQty) };
+      }
+      return item;
+    }));
   };
 
   const removeItem = (id: string) => {

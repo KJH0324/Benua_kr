@@ -25,7 +25,8 @@ import {
   Ticket,
   Download,
   Upload,
-  FileText
+  FileText,
+  ArrowRight
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { cn, formatPrice } from "../lib/utils";
@@ -46,6 +47,19 @@ interface Product {
   dimensions?: string;
   origin?: string;
 }
+
+const getStatusText = (status: string) => {
+  const map: any = {
+    pending: '결제대기',
+    paid: '결제완료',
+    shipping: '배송중',
+    delivered: '배송완료',
+    completed: '구매확정',
+    refund_requested: '환불요청',
+    refunded: '환불완료'
+  };
+  return map[status] || status;
+};
 
 export default function AdminDashboard() {
   const location = useLocation();
@@ -126,7 +140,10 @@ export default function AdminDashboard() {
               className="fixed top-0 left-0 bottom-0 w-[280px] bg-white z-50 md:hidden p-6 flex flex-col shadow-2xl"
             >
               <div className="flex justify-between items-center mb-10">
-                <h2 className="text-xs font-bold uppercase tracking-widest text-gray-400">관리자 콘솔</h2>
+                <div className="group">
+                  <h2 className="text-2xl font-bold tracking-tighter text-venuea-dark">Benua</h2>
+                  <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-venuea-dark/30 block -mt-1">admin</span>
+                </div>
                 <button onClick={() => setIsMobileSidebarOpen(false)} className="p-2 text-gray-400 hover:text-gray-900">
                   <X size={20} />
                 </button>
@@ -172,7 +189,10 @@ export default function AdminDashboard() {
       {/* Desktop Sidebar */}
       <aside className="w-64 bg-white border-r border-gray-200 hidden md:block">
         <div className="p-6">
-          <h2 className="text-xs font-bold uppercase tracking-widest text-gray-400 mb-8">관리자 콘솔</h2>
+          <div className="mb-10 pl-4">
+            <h1 className="text-3xl font-bold tracking-tighter text-venuea-dark">Benua</h1>
+            <span className="text-[10px] font-bold uppercase tracking-[0.3em] text-venuea-dark/20 block -mt-1 ml-0.5">admin</span>
+          </div>
           <nav className="space-y-1">
             {sidebarLinks.map((link) => {
               const Icon = link.icon;
@@ -241,7 +261,14 @@ function AdminCoupons() {
     try {
       const res = await fetch("/api/admin/coupons");
       const data = await res.json();
-      setCoupons(data);
+      // Filter out tier-specific coupons from the distribution list to prevent accidents
+      const filtered = data.filter((c: any) => {
+        const lowerName = c.name.toLowerCase();
+        const lowerCode = c.code.toLowerCase();
+        const tierKeywords = ['더 블랙', '더블랙', 'the black', 'black', 'green', 'beige', '그린', '베이지', '블랙'];
+        return !tierKeywords.some(kw => lowerName.includes(kw) || lowerCode.includes(kw));
+      });
+      setCoupons(filtered);
     } catch {
       toast.error("쿠폰 목록을 불러오지 못했습니다.");
     } finally {
@@ -499,10 +526,10 @@ function AdminOverview() {
   const activeOrders = orders.filter(o => o.status !== 'completed' && o.status !== 'refunded').length;
 
   const stats = [
-    { name: "누적 매출 (확정)", value: formatPrice(totalRevenue), change: "Status: Completed", icon: ShoppingBag },
-    { name: "활성 주문", value: activeOrders.toString(), change: "Pending/Paid/Shipping", icon: Clock },
-    { name: "전체 상품", value: products.length.toString(), change: `In Stock: ${products.filter(p => (p.stock || 0) > 0).length}`, icon: Package },
-    { name: "전체 주문", value: orders.length.toString(), change: "Total count", icon: Users },
+    { name: "누적 매출 (확정)", value: formatPrice(totalRevenue), change: "구매확정 건 기준", icon: ShoppingBag },
+    { name: "활성 주문", value: activeOrders.toString(), change: "배송중/결제완료 건", icon: Clock },
+    { name: "전체 상품", value: products.length.toString(), change: "판매 중인 상품 수", icon: Package },
+    { name: "전체 주문", value: orders.length.toString(), change: "누적 주문 횟수", icon: Users },
   ];
 
   return (
@@ -949,6 +976,7 @@ function AdminOrders() {
   const [orders, setOrders] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [selectedOrder, setSelectedOrder] = useState<any>(null);
+  const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
   const [isTrackingModalOpen, setIsTrackingModalOpen] = useState(false);
   const [trackingForm, setTrackingForm] = useState({
     number: "",
@@ -1000,6 +1028,9 @@ function AdminOrders() {
       if (res.ok) {
         toast.success("상태가 변경되었습니다.");
         fetchOrders();
+        if (selectedOrder?.id === id) {
+          setSelectedOrder({ ...selectedOrder, status });
+        }
       }
     } catch {
       toast.error("변경 실패");
@@ -1078,19 +1109,47 @@ function AdminOrders() {
           </thead>
           <tbody className="divide-y divide-gray-100">
             {orders.map((order) => (
-              <tr key={order.id} className="hover:bg-gray-50 transition-colors">
+              <tr key={order.id} className="hover:bg-gray-50 transition-colors border-b border-gray-100 last:border-0">
                 <td className="px-6 py-4">
-                  <p className="font-bold text-gray-900">{order.order_number}</p>
+                  <button 
+                    onClick={() => {
+                      setSelectedOrder(order);
+                      setIsDetailModalOpen(true);
+                    }}
+                    className="font-bold text-venuea-gold hover:underline"
+                  >
+                    {order.order_number}
+                  </button>
                   <p className="text-[10px] text-gray-400 mt-1">{new Date(order.created_at).toLocaleString()}</p>
-                  <div className="mt-2 text-xs text-gray-500">
+                  <div className="mt-3 text-xs text-gray-500 bg-gray-50 p-2 rounded-lg border border-gray-100">
+                    <p className="font-bold text-venuea-dark mb-1 flex items-center gap-1">
+                      <ShoppingBag size={10} /> 주문 품목
+                    </p>
                     {order.items?.map((item: any) => (
-                      <div key={item.id}>{item.name} x {item.quantity}</div>
+                      <div key={item.id} className="flex justify-between items-center text-[10px]">
+                        <span>{item.name}</span>
+                        <span className="font-bold">x{item.quantity}</span>
+                      </div>
                     ))}
                   </div>
                 </td>
-                <td className="px-6 py-4">
-                  <p className="font-medium text-gray-900">{order.customer_name}</p>
-                  <p className="text-xs text-gray-500">{order.customer_email}</p>
+                <td className="px-6 py-4 space-y-2">
+                  <div>
+                    <p className="font-bold text-gray-900 flex items-center gap-1">
+                      <Users size={14} className="text-gray-400" />
+                      {order.customer_name}
+                    </p>
+                    <p className="text-xs text-venuea-gold font-medium">{order.customer_phone || '연락처 없음'}</p>
+                    <p className="text-[10px] text-gray-400">{order.customer_email}</p>
+                  </div>
+                  <div className="bg-blue-50/50 p-2 rounded-lg border border-blue-100/50">
+                    <p className="text-[10px] font-bold text-blue-600 mb-1 flex items-center gap-1">
+                      <Truck size={10} /> 배송지 정보
+                    </p>
+                    <p className="text-[11px] text-blue-800 leading-relaxed font-medium">
+                      {order.shipping_address}
+                    </p>
+                  </div>
                 </td>
                 <td className="px-6 py-4">
                   <p className="font-bold text-venuea-dark">{formatPrice(order.total_amount)}</p>
@@ -1107,7 +1166,7 @@ function AdminOrders() {
                     order.status === 'refund_requested' && "bg-orange-50 text-orange-600",
                     order.status === 'refunded' && "bg-red-50 text-red-600"
                   )}>
-                    {order.status === 'refund_requested' ? '환불요청' : order.status}
+                    {getStatusText(order.status)}
                   </span>
                   {order.refund_reason && (
                     <div className="mt-2 space-y-1">
@@ -1161,6 +1220,154 @@ function AdminOrders() {
           <div className="p-20 text-center text-gray-400">주문 내역이 없습니다.</div>
         )}
       </div>
+
+      {/* Order Detail Modal */}
+      <AnimatePresence>
+        {isDetailModalOpen && selectedOrder && (
+          <div className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="bg-white rounded-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto shadow-2xl border border-gray-100"
+            >
+              <div className="sticky top-0 bg-white/80 backdrop-blur-sm px-8 py-6 border-b border-gray-100 flex justify-between items-center z-10">
+                <div>
+                  <h2 className="text-xl font-bold font-serif text-gray-900">주문 상세 내역</h2>
+                  <p className="text-xs text-venuea-gold mt-1 font-mono uppercase tracking-widest">{selectedOrder.order_number}</p>
+                </div>
+                <button 
+                  onClick={() => setIsDetailModalOpen(false)}
+                  className="p-2 hover:bg-gray-100 rounded-full transition-colors text-gray-400"
+                >
+                  <X size={24} />
+                </button>
+              </div>
+
+              <div className="p-8 space-y-8">
+                {/* Status Update */}
+                <div className="bg-gray-50 rounded-xl p-4 flex flex-wrap items-center justify-between gap-4">
+                  <div>
+                    <span className="text-[10px] font-bold uppercase tracking-widest text-gray-400 block mb-1">주문 상태 변경</span>
+                    <div className="flex items-center gap-2">
+                      <span className={`px-2 py-1 rounded-full text-xs font-bold ${
+                        selectedOrder.status === 'completed' ? 'bg-green-100 text-green-700' :
+                        selectedOrder.status === 'refunded' ? 'bg-red-100 text-red-700' :
+                        'bg-venuea-gold/10 text-venuea-gold'
+                      }`}>
+                        {getStatusText(selectedOrder.status)}
+                      </span>
+                      <ArrowRight size={14} className="text-gray-300" />
+                      <select 
+                        value={selectedOrder.status}
+                        onChange={(e) => updateStatus(selectedOrder.id, e.target.value)}
+                        className="text-xs font-bold border-none bg-transparent outline-none focus:ring-0 cursor-pointer text-venuea-dark"
+                      >
+                        <option value="pending">결제대기</option>
+                        <option value="paid">결제완료</option>
+                        <option value="shipping">배송중</option>
+                        <option value="delivered">배송완료</option>
+                        <option value="completed">구매확정</option>
+                        <option value="refund_requested">환불요청</option>
+                        <option value="refunded">환불완료</option>
+                      </select>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Customer Info */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                  <div>
+                    <h3 className="text-sm font-bold border-l-4 border-venuea-gold pl-3 mb-4">고객 정보</h3>
+                    <div className="space-y-3">
+                      <div className="flex justify-between items-center py-2 border-b border-gray-50">
+                        <span className="text-xs text-gray-400">성함</span>
+                        <span className="text-sm font-medium">{selectedOrder.customer_name}</span>
+                      </div>
+                      <div className="flex justify-between items-center py-2 border-b border-gray-50">
+                        <span className="text-xs text-gray-400">연락처</span>
+                        <span className="text-sm font-medium">{selectedOrder.customer_phone}</span>
+                      </div>
+                      <div className="flex justify-between items-center py-2 border-b border-gray-50">
+                        <span className="text-xs text-gray-400">이메일</span>
+                        <span className="text-sm font-medium">{selectedOrder.customer_email}</span>
+                      </div>
+                    </div>
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-bold border-l-4 border-venuea-gold pl-3 mb-4">배송지 정보</h3>
+                    <div className="space-y-3">
+                      <div className="py-2">
+                        <span className="text-xs text-gray-400 block mb-1">배송 주소</span>
+                        <span className="text-sm font-medium leading-relaxed">{selectedOrder.shipping_address}</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Tracking Info (If shipping or beyond) */}
+                {['shipping', 'delivered', 'completed', 'refund_requested', 'refunded'].includes(selectedOrder.status) && (
+                  <div>
+                    <h3 className="text-sm font-bold border-l-4 border-venuea-gold pl-3 mb-4">배송 정보</h3>
+                    <div className="grid grid-cols-2 gap-4 bg-gray-50 p-4 rounded-xl">
+                      <div>
+                        <span className="text-[10px] font-bold uppercase text-gray-400 block mb-1">택배사</span>
+                        <span className="text-sm font-medium">{selectedOrder.shipping_company || '미입력'}</span>
+                      </div>
+                      <div>
+                        <span className="text-[10px] font-bold uppercase text-gray-400 block mb-1">송장번호</span>
+                        <span className="text-sm font-mono font-bold text-venuea-gold">{selectedOrder.tracking_number || '미입력'}</span>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Order Summary */}
+                <div>
+                  <h3 className="text-sm font-bold border-l-4 border-venuea-gold pl-3 mb-4">주문 품목</h3>
+                  <div className="bg-white border border-gray-100 rounded-xl overflow-hidden mb-4">
+                    <div className="bg-gray-50 px-4 py-2 text-[10px] font-bold uppercase tracking-widest text-gray-400 grid grid-cols-6">
+                      <span className="col-span-3">상품명</span>
+                      <span className="text-center">단가</span>
+                      <span className="text-center">수량</span>
+                      <span className="text-right">소계</span>
+                    </div>
+                    <div className="divide-y divide-gray-50">
+                      {selectedOrder.items?.map((item: any) => (
+                        <div key={item.id} className="px-4 py-3 grid grid-cols-6 items-center text-xs">
+                          <span className="col-span-3 font-medium">{item.name}</span>
+                          <span className="text-center text-gray-500">{formatPrice(item.price)}</span>
+                          <span className="text-center font-bold">x{item.quantity}</span>
+                          <span className="text-right font-bold text-venuea-dark">{formatPrice(item.price * item.quantity)}</span>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="p-4 bg-gray-50 space-y-2">
+                       <div className="flex justify-between items-center text-[11px]">
+                          <span className="text-gray-400">포인트 사용</span>
+                          <span className="text-red-500 font-bold">-{formatPrice(selectedOrder.used_points || 0)}</span>
+                       </div>
+                       <div className="flex justify-between items-center text-sm font-bold pt-2 border-t border-gray-200">
+                          <span className="text-gray-900">최종 결제 금액</span>
+                          <span className="text-lg text-venuea-gold">{formatPrice(selectedOrder.total_amount)}</span>
+                       </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="bottom-0 sticky bg-gray-50 p-6 flex justify-end gap-3 rounded-b-2xl">
+                <button 
+                  onClick={() => setIsDetailModalOpen(false)}
+                  className="px-6 py-2 rounded-lg text-sm font-bold border border-gray-200 hover:bg-white transition-colors"
+                >
+                  닫기
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
 
       <AnimatePresence>
         {isTrackingModalOpen && (

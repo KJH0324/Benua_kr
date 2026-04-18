@@ -8,20 +8,55 @@ export default function Navbar() {
   const [isScrolled, setIsScrolled] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [user, setUser] = useState<any>(null);
+  const [cartCount, setCartCount] = useState(0);
   const location = useLocation();
+
+  const updateCartCount = () => {
+    const savedCart = localStorage.getItem("venuea-cart");
+    if (savedCart) {
+      try {
+        const items = JSON.parse(savedCart);
+        const count = items.reduce((acc: number, item: any) => acc + item.quantity, 0);
+        setCartCount(count);
+      } catch (e) {
+        setCartCount(0);
+      }
+    } else {
+      setCartCount(0);
+    }
+  };
 
   useEffect(() => {
     const handleScroll = () => {
       setIsScrolled(window.scrollY > 50);
     };
     window.addEventListener("scroll", handleScroll);
-    return () => window.removeEventListener("scroll", handleScroll);
+    
+    // Initial count
+    updateCartCount();
+
+    // Listen to storage events (for multi-tab)
+    window.addEventListener("storage", updateCartCount);
+    
+    // Custom event for same-tab updates
+    const handleCartUpdate = () => {
+      updateCartCount();
+    };
+    window.addEventListener("cartUpdated", handleCartUpdate);
+
+    return () => {
+      window.removeEventListener("scroll", handleScroll);
+      window.removeEventListener("storage", updateCartCount);
+      window.removeEventListener("cartUpdated", handleCartUpdate);
+    };
   }, []);
 
   useEffect(() => {
     fetch(`/api/auth/me?t=${Date.now()}`, { credentials: 'include' })
       .then(res => res.json())
       .then(data => setUser(data.user));
+    
+    updateCartCount();
   }, [location.pathname]);
 
   const navLinks = [
@@ -61,9 +96,11 @@ export default function Navbar() {
         <div className="flex items-center space-x-6">
           <Link to="/cart" className="relative text-venuea-dark hover:text-venuea-gold transition-colors">
             <ShoppingCart size={20} />
-            <span className="absolute -top-2 -right-2 bg-venuea-gold text-white text-[10px] font-bold w-4 h-4 rounded-full flex items-center justify-center">
-              0
-            </span>
+            {cartCount > 0 && (
+              <span className="absolute -top-2 -right-2 bg-venuea-gold text-white text-[10px] font-bold w-4 h-4 rounded-full flex items-center justify-center">
+                {cartCount}
+              </span>
+            )}
           </Link>
           {user ? (
             <Link to="/profile" className="text-[11px] font-bold uppercase tracking-widest text-venuea-dark hover:text-venuea-gold transition-colors">

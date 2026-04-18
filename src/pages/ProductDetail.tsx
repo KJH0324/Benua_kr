@@ -35,6 +35,7 @@ export default function ProductDetail() {
         if (!response.ok) throw new Error("상품을 찾을 수 없습니다.");
         const data = await response.json();
         setProduct(data);
+        document.title = `Benua | ${data.name}`;
 
         const revRes = await fetch(`/api/products/${id}/reviews`);
         if (revRes.ok) setReviews(await revRes.json());
@@ -97,11 +98,13 @@ export default function ProductDetail() {
           original_price: product.price,
           discount_rate: product.discount_rate || 0,
           quantity: quantity,
+          stock: product.stock,
           image: product.image_url || "https://picsum.photos/seed/placeholder/800/1000"
         });
       }
       
       localStorage.setItem("venuea-cart", JSON.stringify(currentCart));
+      window.dispatchEvent(new Event("cartUpdated"));
       toast.success("장바구니에 담겼습니다.");
     } catch (e) {
       console.error(e);
