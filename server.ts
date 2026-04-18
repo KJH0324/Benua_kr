@@ -414,6 +414,12 @@ async function startServer() {
   });
 
   app.get("/api/auth/me", (req, res) => {
+    // Prevent caching of auth status
+    res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+    res.setHeader("Pragma", "no-cache");
+    res.setHeader("Expires", "0");
+    res.setHeader("Surrogate-Control", "no-store");
+
     const token = req.cookies.user_token;
     if (!token) {
       console.log("[AUTH/ME] No token cookie found.");
