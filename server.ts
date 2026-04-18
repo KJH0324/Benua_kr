@@ -187,9 +187,10 @@ db.exec(`
 const migrate = (sql: string) => {
   try {
     db.exec(sql);
+    console.log(`[DB MIGRATION SUCCESS] Executed: ${sql.substring(0, 50)}...`);
   } catch (e: any) {
     if (!e.message.includes("duplicate column name")) {
-      console.log(`[DB MIGRATION INFO] ${e.message}`);
+      console.error(`[DB MIGRATION ERROR] ${e.message} (SQL: ${sql})`);
     }
   }
 };
@@ -211,6 +212,8 @@ migrate(`ALTER TABLE users ADD COLUMN points INTEGER DEFAULT 0`);
 migrate(`ALTER TABLE users ADD COLUMN tier TEXT DEFAULT 'Beige'`);
 migrate(`ALTER TABLE users ADD COLUMN tier_updated_at DATETIME DEFAULT CURRENT_TIMESTAMP`);
 migrate(`ALTER TABLE users ADD COLUMN total_spent_6m INTEGER DEFAULT 0`);
+migrate(`UPDATE users SET tier = 'Beige' WHERE tier IS NULL`);
+migrate(`UPDATE users SET tier_updated_at = CURRENT_TIMESTAMP WHERE tier_updated_at IS NULL`);
 
 migrate(`ALTER TABLE orders ADD COLUMN used_points INTEGER DEFAULT 0`);
 migrate(`ALTER TABLE orders ADD COLUMN used_coupon_id INTEGER`);
