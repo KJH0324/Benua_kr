@@ -183,48 +183,82 @@ db.exec(`
   );
 `);
 
-// Defensive ALTER TABLE statements with better error reporting
-const migrate = (sql: string) => {
+// Explicit schema check and migration for users table
+const checkAndMigrateUsers = () => {
   try {
-    db.exec(sql);
-    console.log(`[DB MIGRATION SUCCESS] Executed: ${sql.substring(0, 50)}...`);
-  } catch (e: any) {
-    if (!e.message.includes("duplicate column name")) {
-      console.error(`[DB MIGRATION ERROR] ${e.message} (SQL: ${sql})`);
+    const tableInfo = db.prepare("PRAGMA table_info(users)").all() as any[];
+    const columns = tableInfo.map(c => c.name);
+    console.log(`[DEBUG][DB] Users table columns check: ${columns.join(", ")}`);
+
+    if (!columns.includes('points')) {
+      db.exec(`ALTER TABLE users ADD COLUMN points INTEGER DEFAULT 0`);
+      console.log("[DEBUG][DB] Added points column");
     }
+    if (!columns.includes('tier')) {
+      db.exec(`ALTER TABLE users ADD COLUMN tier TEXT DEFAULT 'Beige'`);
+      console.log("[DEBUG][DB] Added tier column");
+    }
+    if (!columns.includes('tier_updated_at')) {
+      db.exec(`ALTER TABLE users ADD COLUMN tier_updated_at DATETIME DEFAULT CURRENT_TIMESTAMP`);
+      console.log("[DEBUG][DB] Added tier_updated_at column");
+    }
+    if (!columns.includes('total_spent_6m')) {
+      db.exec(`ALTER TABLE users ADD COLUMN total_spent_6m INTEGER DEFAULT 0`);
+      console.log("[DEBUG][DB] Added total_spent_6m column");
+    }
+    if (!columns.includes('google_id')) {
+      db.exec(`ALTER TABLE users ADD COLUMN google_id TEXT`);
+      console.log("[DEBUG][DB] Added google_id column");
+    }
+    if (!columns.includes('naver_id')) {
+      db.exec(`ALTER TABLE users ADD COLUMN naver_id TEXT`);
+      console.log("[DEBUG][DB] Added naver_id column");
+    }
+
+    // Ensure no NULL values for new mandatory fields
+    db.prepare("UPDATE users SET tier = 'Beige' WHERE tier IS NULL").run();
+    db.prepare("UPDATE users SET tier_updated_at = CURRENT_TIMESTAMP WHERE tier_updated_at IS NULL").run();
+    console.log("[DEBUG][DB] Users migration check complete");
+  } catch (err: any) {
+    console.error("[DEBUG][DB] Users migration CRITICAL ERROR:", err.message);
   }
 };
 
-migrate(`ALTER TABLE products ADD COLUMN stock INTEGER DEFAULT 0`);
-migrate(`ALTER TABLE products ADD COLUMN material TEXT`);
-migrate(`ALTER TABLE products ADD COLUMN dimensions TEXT`);
-migrate(`ALTER TABLE products ADD COLUMN origin TEXT`);
-migrate(`ALTER TABLE products ADD COLUMN description_image_url TEXT`);
-migrate(`ALTER TABLE products ADD COLUMN category TEXT`);
-migrate(`ALTER TABLE products ADD COLUMN discount_rate INTEGER DEFAULT 0`);
-migrate(`ALTER TABLE products ADD COLUMN show_on_main INTEGER DEFAULT 0`);
+checkAndMigrateUsers();
+
+// Also check orders table for tracking columns
+const checkAndMigrateOrders = () => {
+  try {
+    const tableInfo = db.prepare("PRAGMA table_info(orders)").all() as any[];
+    const columns = tableInfo.map(c => c.name);
+    if (!columns.includes('tracking_number')) {
+      db.exec(`ALTER TABLE orders ADD COLUMN tracking_number TEXT`);
+      console.log("[DEBUG][DB] Added tracking_number to orders");
+    }
+    if (!columns.includes('shipping_company')) {
+      db.exec(`ALTER TABLE orders ADD COLUMN shipping_company TEXT`);
+      console.log("[DEBUG][DB] Added shipping_company to orders");
+    }
+  } catch (err: any) {
+    console.error("[DEBUG][DB] Orders migration ERROR:", err.message);
+  }
+};
+
+checkAndMigrateOrders();
+
+// Keep other migrations simpler
+const migrate = (sql: string) => {
+  try {
+    db.exec(sql);
+  } catch (e: any) {
+    // Ignore duplicate column errors
+  }
+};
 
 migrate(`ALTER TABLE inquiries ADD COLUMN status TEXT DEFAULT 'pending'`);
 migrate(`ALTER TABLE inquiries ADD COLUMN reply_message TEXT`);
 migrate(`ALTER TABLE inquiries ADD COLUMN replied_at DATETIME`);
-
-migrate(`ALTER TABLE users ADD COLUMN points INTEGER DEFAULT 0`);
-migrate(`ALTER TABLE users ADD COLUMN tier TEXT DEFAULT 'Beige'`);
-migrate(`ALTER TABLE users ADD COLUMN tier_updated_at DATETIME DEFAULT CURRENT_TIMESTAMP`);
-migrate(`ALTER TABLE users ADD COLUMN total_spent_6m INTEGER DEFAULT 0`);
-migrate(`UPDATE users SET tier = 'Beige' WHERE tier IS NULL`);
-migrate(`UPDATE users SET tier_updated_at = CURRENT_TIMESTAMP WHERE tier_updated_at IS NULL`);
-
-migrate(`ALTER TABLE orders ADD COLUMN used_points INTEGER DEFAULT 0`);
-migrate(`ALTER TABLE orders ADD COLUMN used_coupon_id INTEGER`);
-migrate(`ALTER TABLE orders ADD COLUMN earned_points INTEGER DEFAULT 0`);
-migrate(`ALTER TABLE orders ADD COLUMN order_data_json TEXT`);
-migrate(`ALTER TABLE orders ADD COLUMN tracking_number TEXT`);
-migrate(`ALTER TABLE orders ADD COLUMN shipping_company TEXT`);
-
 migrate(`ALTER TABLE user_coupons ADD COLUMN notified INTEGER DEFAULT 0`);
-migrate(`ALTER TABLE users ADD COLUMN google_id TEXT`);
-migrate(`ALTER TABLE users ADD COLUMN naver_id TEXT`);
 
 const JWT_SECRET = process.env.JWT_SECRET || "benua-secret-key-2024";
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "benua-admin-123";
