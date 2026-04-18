@@ -378,7 +378,12 @@ async function startServer() {
       }
       
       const token = jwt.sign({ id: user.id, role: "user" }, JWT_SECRET, { expiresIn: "24h" });
-      res.cookie("user_token", token, { httpOnly: true, secure: process.env.NODE_ENV === "production" });
+      res.cookie("user_token", token, {
+        httpOnly: true,
+        secure: true,
+        sameSite: "none",
+        maxAge: 24 * 60 * 60 * 1000
+      });
       res.json({ success: true, user: { name: user.name, email: user.email, address: user.address } });
     } catch (err) {
       res.status(500).json({ error: "로그인 실패" });

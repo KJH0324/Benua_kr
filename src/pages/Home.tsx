@@ -121,16 +121,40 @@ export default function Home() {
             transition={{ duration: 1.5, delay: 0.5 }}
             className="relative w-[260px] md:w-[320px] h-[380px] md:h-[440px] bg-white shadow-[0_40px_80px_rgba(0,0,0,0.08)] p-8 md:p-10 flex flex-col justify-between z-10"
           >
-            <div className="w-full h-[200px] md:h-[240px] bg-gradient-to-br from-[#F5F5F5] to-[#EAEAEA] flex items-center justify-center text-[10px] md:text-[12px] text-[#CCC] tracking-[2px] uppercase">
-              Benua Item 01
-            </div>
-            <div className="product-info">
-              <h3 className="text-[16px] md:text-[18px] font-bold mb-1 md:mb-2">시그니처 에센스</h3>
-              <p className="text-venuea-gold font-bold text-[18px] md:text-[20px]">₩184,000</p>
-              <div className="text-[10px] md:text-[11px] mt-3 md:mt-4 uppercase tracking-[1px] text-[#AAA]">
-                무료 특급 배송
-              </div>
-            </div>
+            {realProducts.length > 0 ? (
+              <>
+                <Link to={`/product/${realProducts[0].id}`} className="w-full h-[200px] md:h-[240px] bg-white overflow-hidden group">
+                  <img 
+                    src={realProducts[0].image_url} 
+                    alt={realProducts[0].name} 
+                    className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110"
+                    referrerPolicy="no-referrer"
+                  />
+                </Link>
+                <div className="product-info">
+                  <span className="text-[10px] text-venuea-gold uppercase tracking-[2px] font-bold block mb-2">Spotlight Item</span>
+                  <h3 className="text-[16px] md:text-[18px] font-bold mb-1 md:mb-2 line-clamp-1">{realProducts[0].name}</h3>
+                  <p className="text-venuea-dark font-bold text-[18px] md:text-[20px]">{formatPrice(realProducts[0].price)}</p>
+                  <div className="text-[10px] md:text-[11px] mt-3 md:mt-4 uppercase tracking-[1px] text-venuea-muted flex items-center space-x-2">
+                    <span className="w-1 h-1 bg-venuea-gold rounded-full" />
+                    <span>무료 특급 배송</span>
+                  </div>
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="w-full h-[200px] md:h-[240px] bg-gradient-to-br from-[#F5F5F5] to-[#EAEAEA] flex items-center justify-center text-[10px] md:text-[12px] text-[#CCC] tracking-[2px] uppercase">
+                  Benua Item 01
+                </div>
+                <div className="product-info">
+                  <h3 className="text-[16px] md:text-[18px] font-bold mb-1 md:mb-2">시그니처 에센스</h3>
+                  <p className="text-venuea-gold font-bold text-[18px] md:text-[20px]">₩184,000</p>
+                  <div className="text-[10px] md:text-[11px] mt-3 md:mt-4 uppercase tracking-[1px] text-[#AAA]">
+                    무료 특급 배송
+                  </div>
+                </div>
+              </>
+            )}
           </motion.div>
         </div>
       </section>
