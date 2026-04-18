@@ -208,7 +208,8 @@ migrate(`ALTER TABLE inquiries ADD COLUMN reply_message TEXT`);
 migrate(`ALTER TABLE inquiries ADD COLUMN replied_at DATETIME`);
 
 migrate(`ALTER TABLE users ADD COLUMN points INTEGER DEFAULT 0`);
-migrate(`ALTER TABLE users ADD COLUMN grade TEXT DEFAULT 'Sand'`);
+migrate(`ALTER TABLE users ADD COLUMN tier TEXT DEFAULT 'Beige'`);
+migrate(`ALTER TABLE users ADD COLUMN tier_updated_at DATETIME DEFAULT CURRENT_TIMESTAMP`);
 migrate(`ALTER TABLE users ADD COLUMN total_spent_6m INTEGER DEFAULT 0`);
 
 migrate(`ALTER TABLE orders ADD COLUMN used_points INTEGER DEFAULT 0`);
