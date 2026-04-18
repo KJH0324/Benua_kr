@@ -102,6 +102,7 @@ export default function AdminDashboard() {
     { name: "고객 문의", path: `${adminPathBase}/inquiries`, icon: MessageSquare },
     { name: "고객 관리", path: `${adminPathBase}/customers`, icon: Users },
     { name: "쿠폰 관리", path: `${adminPathBase}/coupons`, icon: Ticket },
+    { name: "뉴스레터", path: `${adminPathBase}/newsletter`, icon: FileText },
     { name: "관리자 키", path: `${adminPathBase}/keys`, icon: Settings },
   ];
 
@@ -232,24 +233,26 @@ export default function AdminDashboard() {
       <main className="flex-grow p-4 md:p-8 overflow-x-hidden pt-[60px] md:pt-0">
         {/* Global Admin Header - Desktop Only */}
         <div className="hidden md:flex justify-between items-center mb-10 pb-6 border-b border-gray-100 sticky top-0 bg-gray-50/80 backdrop-blur-md z-20 pt-8">
-          <div>
-            <h2 className="text-sm font-bold uppercase tracking-[0.3em] text-venuea-dark/40 flex items-center gap-2">
-              <Shield size={12} /> Management Protocol
-            </h2>
-            <p className="text-xs text-gray-400 mt-1 uppercase tracking-widest leading-none">Authorized Access Only // Benua Infrastructure</p>
+          <div className="flex items-center space-x-4">
+            <div className="bg-white p-2 rounded-xl shadow-sm border border-gray-100">
+              <LayoutDashboard size={20} className="text-venuea-gold" />
+            </div>
+            <div>
+              <h2 className="text-lg font-serif font-bold text-gray-900 tracking-tight">관리자 제어반</h2>
+              <div className="flex items-center gap-2 mt-0.5">
+                <span className="text-[10px] font-bold text-venuea-gold uppercase tracking-widest bg-venuea-gold/10 px-1.5 py-0.5 rounded">Active</span>
+                <p className="text-[10px] text-gray-400 uppercase tracking-widest font-medium">Session: {new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })} Login</p>
+              </div>
+            </div>
           </div>
           <div className="flex items-center space-x-6">
-            <div className="bg-green-50 text-green-600 px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wider flex items-center gap-2 border border-green-100/50 shadow-sm">
-              <Activity size={12} className="animate-pulse" />
-              <span className="relative flex h-2 w-2">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
-                <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
-              </span>
-              System Online
+            <div className="text-right">
+              <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block mb-0.5">Administrator</span>
+              <span className="text-xs font-bold text-venuea-dark">admin@benua.shop</span>
             </div>
             <div className="h-8 w-[1px] bg-gray-200" />
             <div className="text-right">
-              <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block mb-1">Current Date</span>
+              <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block mb-0.5">Today</span>
               <span className="text-xs font-bold text-venuea-dark">{new Date().toLocaleDateString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric' })}</span>
             </div>
           </div>
@@ -262,9 +265,144 @@ export default function AdminDashboard() {
           <Route path="/customers" element={<AdminUserPoints />} />
           <Route path="/coupons" element={<AdminCoupons />} />
           <Route path="/inquiries" element={<AdminInquiries />} />
+          <Route path="/newsletter" element={<AdminNewsletter />} />
           <Route path="/keys" element={<AdminKeys />} />
         </Routes>
       </main>
+    </div>
+  );
+}
+
+function AdminNewsletter() {
+  const [subscribers, setSubscribers] = useState<{guestSubscribers: any[], userSubscribers: any[]}>({guestSubscribers: [], userSubscribers: []});
+  const [subject, setSubject] = useState("");
+  const [content, setContent] = useState("");
+  const [isSending, setIsSending] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
+
+  useEffect(() => {
+    fetchSubscribers();
+  }, []);
+
+  const fetchSubscribers = async () => {
+    try {
+      const res = await fetch("/api/admin/newsletter/subscribers");
+      const data = await res.json();
+      setSubscribers(data);
+    } catch (err) {
+      toast.error("구독자 목록을 불러오지 못했습니다.");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleSend = async () => {
+    if (!subject || !content) return toast.error("제목과 내용을 입력해주세요.");
+    if (!confirm(`총 ${subscribers.guestSubscribers.length + subscribers.userSubscribers.length}명의 구독자에게 뉴스레터를 발송하시겠습니까?`)) return;
+
+    setIsSending(true);
+    try {
+      const res = await fetch("/api/admin/newsletter/send", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ subject, content })
+      });
+      if (res.ok) {
+        toast.success("뉴스레터 발송이 완료되었습니다.");
+        setSubject("");
+        setContent("");
+      } else {
+        toast.error("발송 실패");
+      }
+    } catch (err) {
+      toast.error("오류 발생");
+    } finally {
+      setIsSending(false);
+    }
+  };
+
+  if (isLoading) return <div className="flex justify-center p-10"><Loader2 className="animate-spin" /></div>;
+
+  return (
+    <div className="space-y-8 animate-in fade-in duration-500">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+        {/* Left: Sender */}
+        <div className="bg-white p-8 rounded-2xl shadow-sm border border-gray-100">
+          <div className="flex items-center gap-3 mb-6">
+            <div className="p-2 bg-venuea-gold/10 rounded-lg text-venuea-gold">
+              <Upload size={20} />
+            </div>
+            <h3 className="text-xl font-bold font-serif">뉴스레터 작성 및 발송</h3>
+          </div>
+          
+          <div className="space-y-4">
+            <div>
+              <label className="text-[10px] font-bold uppercase tracking-widest text-gray-400 block mb-2">Subject</label>
+              <input 
+                value={subject}
+                onChange={(e) => setSubject(e.target.value)}
+                placeholder="오늘의 베뉴아 소식을 전해드립니다."
+                className="w-full bg-gray-50 border border-gray-100 px-4 py-3 rounded-xl focus:outline-none focus:ring-2 focus:ring-venuea-gold/20 focus:bg-white transition-all"
+              />
+            </div>
+            <div>
+              <label className="text-[10px] font-bold uppercase tracking-widest text-gray-400 block mb-2">Content (HTML Support)</label>
+              <textarea 
+                value={content}
+                onChange={(e) => setContent(e.target.value)}
+                rows={12}
+                placeholder="베뉴아의 감성을 담은 내용을 작성해주세요..."
+                className="w-full bg-gray-50 border border-gray-100 px-4 py-4 rounded-xl focus:outline-none focus:ring-2 focus:ring-venuea-gold/20 focus:bg-white transition-all font-mono text-sm leading-relaxed"
+              />
+            </div>
+            <button
+              onClick={handleSend}
+              disabled={isSending}
+              className="w-full bg-venuea-dark text-white py-4 rounded-xl font-bold uppercase tracking-widest hover:bg-venuea-gold transition-all flex items-center justify-center gap-2 disabled:bg-gray-400"
+            >
+              {isSending ? <Loader2 size={18} className="animate-spin" /> : <ArrowRight size={18} />}
+              {isSending ? "발송 중..." : "구독자 전체 발송하기"}
+            </button>
+          </div>
+        </div>
+
+        {/* Right: Stats & Subscribers */}
+        <div className="space-y-6">
+          <div className="grid grid-cols-2 gap-4">
+            <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
+              <span className="text-[10px] font-bold uppercase tracking-widest text-gray-400 block mb-1">Users</span>
+              <p className="text-3xl font-serif font-bold text-venuea-dark">{subscribers.userSubscribers.length}</p>
+            </div>
+            <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
+              <span className="text-[10px] font-bold uppercase tracking-widest text-gray-400 block mb-1">Guests</span>
+              <p className="text-3xl font-serif font-bold text-venuea-gold">{subscribers.guestSubscribers.length}</p>
+            </div>
+          </div>
+
+          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+            <div className="px-6 py-4 border-b border-gray-50 bg-gray-50/50">
+              <h4 className="text-xs font-bold uppercase tracking-widest text-gray-500">최근 구독자 (비회원)</h4>
+            </div>
+            <div className="max-h-[400px] overflow-y-auto">
+              <table className="w-full">
+                <tbody className="divide-y divide-gray-50">
+                  {subscribers.guestSubscribers.map((s: any) => (
+                    <tr key={s.id} className="hover:bg-gray-50 transition-colors">
+                      <td className="px-6 py-4 text-sm text-gray-600">{s.email}</td>
+                      <td className="px-6 py-4 text-[10px] text-gray-400 text-right">{new Date(s.created_at).toLocaleDateString()}</td>
+                    </tr>
+                  ))}
+                  {subscribers.guestSubscribers.length === 0 && (
+                    <tr>
+                      <td colSpan={2} className="px-6 py-10 text-center text-sm text-gray-400">구독자가 없습니다.</td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

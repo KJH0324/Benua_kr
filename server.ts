@@ -11,11 +11,62 @@ import multer from "multer";
 import fs from "fs";
 import speakeasy from "speakeasy";
 import QRCode from "qrcode";
+import nodemailer from "nodemailer";
 
 dotenv.config();
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+// Email Transporter setup
+const transporter = nodemailer.createTransport({
+  host: process.env.SMTP_HOST || "smtp.example.com",
+  port: parseInt(process.env.SMTP_PORT || "587"),
+  secure: process.env.SMTP_PORT === "465",
+  auth: {
+    user: process.env.SMTP_USER,
+    pass: process.env.SMTP_PASS,
+  },
+});
+
+// Email Helper Functions
+const sendMail = async (to: string, subject: string, html: string, fromType: 'ADMIN' | 'SUPPORT' | 'NEWS' | 'SYSTEM' = 'SYSTEM') => {
+  const fromMap = {
+    ADMIN: process.env.SMTP_FROM_ADMIN || 'admin@benua.shop',
+    SUPPORT: process.env.SMTP_FROM_SUPPORT || 'support@benua.shop',
+    NEWS: process.env.SMTP_FROM_NEWS || 'news@benua.shop',
+    SYSTEM: process.env.SMTP_FROM_SYSTEM || 'Benua@benua.shop'
+  };
+
+  const mailOptions = {
+    from: `"Benua" <${fromMap[fromType]}>`,
+    to,
+    subject: `[Benua] ${subject}`,
+    html: `
+      <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; padding: 40px; color: #1a1a1a; background-color: #fdfdfd; border: 1px solid #f0f0f0; border-radius: 8px;">
+        <div style="margin-bottom: 40px; text-align: center;">
+          <h1 style="font-size: 24px; font-weight: bold; letter-spacing: 4px; text-transform: uppercase;">Benua</h1>
+        </div>
+        ${html}
+        <div style="margin-top: 60px; padding-top: 20px; border-top: 1px solid #f0f0f0; font-size: 11px; color: #999; text-align: center;">
+          <p>© ${new Date().getFullYear()} Benua. All rights reserved.</p>
+          <p>이 메일은 발신 전용입니다. 문의사항은 고객센터를 이용해주세요.</p>
+        </div>
+      </div>
+    `
+  };
+
+  try {
+    if (!process.env.SMTP_USER || !process.env.SMTP_PASS) {
+      console.log(`[MAIL][MOCK] Sending to ${to}: ${subject}`);
+      return;
+    }
+    await transporter.sendMail(mailOptions);
+    console.log(`[MAIL][SUCCESS] Sent to ${to}: ${subject}`);
+  } catch (err) {
+    console.error(`[MAIL][ERROR] Failed to send to ${to}:`, err);
+  }
+};
 
 // Database setup
 const db = new Database("benua.db");
@@ -218,6 +269,26 @@ const checkAndMigrateUsers = () => {
       db.exec(`ALTER TABLE users ADD COLUMN naver_id TEXT`);
       console.log("[DEBUG][DB] Added naver_id column");
     }
+    if (!columns.includes('is_verified')) {
+      db.exec(`ALTER TABLE users ADD COLUMN is_verified INTEGER DEFAULT 0`);
+      console.log("[DEBUG][DB] Added is_verified column");
+    }
+    if (!columns.includes('verification_token')) {
+      db.exec(`ALTER TABLE users ADD COLUMN verification_token TEXT`);
+      console.log("[DEBUG][DB] Added verification_token column");
+    }
+    if (!columns.includes('reset_token')) {
+      db.exec(`ALTER TABLE users ADD COLUMN reset_token TEXT`);
+      console.log("[DEBUG][DB] Added reset_token column");
+    }
+    if (!columns.includes('reset_expires')) {
+      db.exec(`ALTER TABLE users ADD COLUMN reset_expires DATETIME`);
+      console.log("[DEBUG][DB] Added reset_expires column");
+    }
+    if (!columns.includes('newsletter_subscribed')) {
+      db.exec(`ALTER TABLE users ADD COLUMN newsletter_subscribed INTEGER DEFAULT 1`);
+      console.log("[DEBUG][DB] Added newsletter_subscribed column");
+    }
 
     // Ensure no NULL values for new mandatory fields
     db.prepare("UPDATE users SET tier = 'Beige' WHERE tier IS NULL").run();
@@ -229,6 +300,15 @@ const checkAndMigrateUsers = () => {
 };
 
 checkAndMigrateUsers();
+
+// Newsletter subscribers table for non-registered users
+db.exec(`
+  CREATE TABLE IF NOT EXISTS newsletter_subscribers (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    email TEXT UNIQUE NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+`);
 
 // Also check orders table for tracking columns
 const checkAndMigrateOrders = () => {
@@ -1386,7 +1466,50 @@ async function startServer() {
         return orderId;
       });
 
-      transaction();
+      const orderId = transaction();
+      
+      // Async: Send Confirmation Email
+      (async () => {
+        try {
+          const itemsListHtml = items.map((item: any) => `
+            <div style="display: flex; align-items: center; margin-bottom: 10px; padding-bottom: 10px; border-bottom: 1px solid #f0f0f0;">
+              <div style="flex: 1;">
+                <p style="font-size: 14px; font-weight: bold; margin: 0;">${item.name}</p>
+                <p style="font-size: 12px; color: #666; margin: 4px 0 0 0;">${item.price.toLocaleString()}원 x ${item.quantity}개</p>
+              </div>
+            </div>
+          `).join('');
+
+          await sendMail(
+            customer_email,
+            `베뉴아 주문이 접수되었습니다. (주문번호: ${order_number})`,
+            `
+            <h2 style="font-size: 18px; margin-bottom: 24px;">주문 접수 및 결제 완료</h2>
+            <p style="margin-bottom: 30px;">안녕하세요, ${customer_name}님. 베뉴아입니다.<br>고객님의 주문이 성공적으로 접수되었습니다.</p>
+            
+            <div style="background-color: #f9f9f9; padding: 24px; border-radius: 8px; margin-bottom: 30px;">
+              <p style="font-size: 13px; font-weight: bold; margin-bottom: 16px; color: #B29141;">주문 정보</p>
+              <p style="font-size: 14px; margin-bottom: 8px;">주문번호: <b>${order_number}</b></p>
+              <p style="font-size: 14px; margin-bottom: 24px;">결제금액: <b>${p_total_amount.toLocaleString()}원</b></p>
+              
+              <p style="font-size: 13px; font-weight: bold; margin-bottom: 16px; color: #B29141;">주문 상품</p>
+              ${itemsListHtml}
+              
+              <p style="font-size: 13px; font-weight: bold; margin: 24px 0 16px 0; color: #B29141;">배송지 정보</p>
+              <p style="font-size: 14px; color: #333; line-height: 1.6;">${shipping_address}</p>
+            </div>
+
+            <div style="padding: 24px; border: 1px solid #eee; border-radius: 8px;">
+               <p style="font-size: 12px; color: #888; margin: 0;">* 배송 현황은 베뉴아 웹사이트 > 마이페이지에서 확인하실 수 있습니다.</p>
+            </div>
+            `,
+            'SYSTEM'
+          );
+        } catch (e) {
+          console.error("Confirmation email error:", e);
+        }
+      })();
+
       res.json({ success: true, order_number });
     } catch (err: any) {
       console.error(err);
@@ -1422,14 +1545,69 @@ async function startServer() {
     }
   });
 
-  app.post("/api/admin/orders/:id/status", authenticateAdmin, (req, res) => {
+  app.post("/api/admin/orders/:id/status", authenticateAdmin, async (req, res) => {
     const { status } = req.body;
     const { id } = req.params;
     try {
       const order = db.prepare("SELECT * FROM orders WHERE id = ?").get(id) as any;
       if (!order) return res.status(404).json({ error: "Order not found" });
 
+      const prevStatus = order.status;
       db.prepare("UPDATE orders SET status = ?, status_updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(status, id);
+
+      // Email notifications based on status change
+      if (status !== prevStatus) {
+        const orderItems = db.prepare("SELECT * FROM order_items WHERE order_id = ?").all() as any[];
+        const itemsListHtml = orderItems.map(item => `
+          <div style="display: flex; align-items: center; margin-bottom: 10px; padding-bottom: 10px; border-bottom: 1px solid #f0f0f0;">
+            <div style="flex: 1;">
+              <p style="font-size: 14px; font-weight: bold; margin: 0;">${item.name}</p>
+              <p style="font-size: 12px; color: #666; margin: 4px 0 0 0;">${item.price.toLocaleString()}원 x ${item.quantity}개</p>
+            </div>
+          </div>
+        `).join('');
+
+        if (status === 'paid') {
+          await sendMail(
+            order.customer_email,
+            `주문이 성공적으로 결제되었습니다. (주문번호: ${order.order_number})`,
+            `
+            <h2 style="font-size: 18px; margin-bottom: 24px;">주문 결제 완료 안내</h2>
+            <p style="margin-bottom: 30px;">안녕하세요, ${order.customer_name}님. 베뉴아입니다.<br>고객님의 소중한 주문이 정상적으로 결제되었습니다.</p>
+            
+            <div style="background-color: #f9f9f9; padding: 24px; border-radius: 8px; margin-bottom: 30px;">
+              <p style="font-size: 13px; font-weight: bold; margin-bottom: 16px; color: #B29141;">주문 정보</p>
+              <p style="font-size: 14px; margin-bottom: 8px;">주문번호: <b>${order.order_number}</b></p>
+              <p style="font-size: 14px; margin-bottom: 24px;">결제금액: <b>${order.total_amount.toLocaleString()}원</b></p>
+              
+              <p style="font-size: 13px; font-weight: bold; margin-bottom: 16px; color: #B29141;">주문 상품</p>
+              ${itemsListHtml}
+            </div>
+
+            <p style="font-size: 13px; color: #666; line-height: 1.6;">상품 준비가 시작되면 다시 한번 안내해 드리겠습니다.<br>감사합니다.</p>
+            `,
+            'SYSTEM'
+          );
+        } else if (status === 'shipping') {
+          await sendMail(
+            order.customer_email,
+            `주문하신 상품의 배송이 시작되었습니다.`,
+            `
+            <h2 style="font-size: 18px; margin-bottom: 24px;">배송 시작 안내</h2>
+            <p style="margin-bottom: 30px;">안녕하세요, ${order.customer_name}님. 기다리시던 상품이 발송되었습니다.</p>
+            
+            <div style="background-color: #f9f9f9; padding: 24px; border-radius: 8px; margin-bottom: 30px;">
+              <p style="font-size: 13px; font-weight: bold; margin-bottom: 16px; color: #B29141;">배송 정보</p>
+              <p style="font-size: 14px; margin-bottom: 8px;">택배사: <b>${order.shipping_company || 'CJS'}</b></p>
+              <p style="font-size: 14px; margin-bottom: 8px;">운송장번호: <b>${order.tracking_number || '-'}</b></p>
+            </div>
+
+            <p style="font-size: 13px; color: #666;">배송 추적은 택배사 홈페이지나 베뉴아 마이페이지에서 확인하실 수 있습니다.</p>
+            `,
+            'SYSTEM'
+          );
+        }
+      }
 
       // Point rewarding on completion (Purchase Confirmation)
       if (status === 'completed' && order.user_id && order.status !== 'completed') {
@@ -1763,20 +1941,204 @@ async function startServer() {
     }
   });
 
-  app.post("/api/admin/inquiries/:id/reply", authenticateAdmin, (req, res) => {
+  app.post("/api/admin/inquiries/:id/reply", authenticateAdmin, async (req, res) => {
     const { replyMessage } = req.body;
     const { id } = req.params;
     try {
+      const inquiry = db.prepare("SELECT * FROM inquiries WHERE id = ?").get(id) as any;
+      if (!inquiry) return res.status(404).json({ error: "Inquiry not found" });
+
       db.prepare(
         "UPDATE inquiries SET reply_message = ?, status = 'replied', replied_at = CURRENT_TIMESTAMP WHERE id = ?"
       ).run(replyMessage, id);
       
-      // Simulate email sending
-      console.log(`[SIMULATED EMAIL] To: (User's Email), Message: ${replyMessage}`);
+      // Send real email
+      await sendMail(
+        inquiry.email,
+        `문의하신 내용에 대해 답변 드립니다.`,
+        `
+        <div style="padding: 24px; background-color: #fcfcfc; border: 1px solid #f0f0f0; border-radius: 12px;">
+          <h2 style="font-size: 18px; font-family: 'Times New Roman', serif; font-style: italic; color: #1a1a1a; margin-bottom: 24px;">안녕하세요, ${inquiry.name}님.</h2>
+          
+          <div style="margin-bottom: 32px; padding-bottom: 32px; border-bottom: 1px solid #f0f0f0;">
+            <p style="font-size: 12px; color: #999; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px;">문의하신 내용</p>
+            <blockquote style="margin: 0; padding: 16px; background-color: #fff; border-left: 2px solid #e5e5e5; font-size: 14px; color: #666;">
+              ${inquiry.message}
+            </blockquote>
+          </div>
+
+          <div>
+            <p style="font-size: 12px; color: #999; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px;">베뉴아의 답변</p>
+            <p style="font-size: 15px; line-height: 1.8; color: #1a1a1a; white-space: pre-wrap; font-weight: 500;">
+              ${replyMessage}
+            </p>
+          </div>
+
+          <div style="margin-top: 40px; padding-top: 24px; border-top: 1px solid #f0f0f0;">
+            <p style="font-size: 13px; color: #666;">항상 베뉴아와 한땀 한땀 함께해주셔서 감사합니다.</p>
+          </div>
+        </div>
+        `,
+        'SUPPORT'
+      );
       
       res.json({ success: true });
     } catch (err) {
+      console.error("Failed to send reply:", err);
       res.status(500).json({ error: "Failed to send reply" });
+    }
+  });
+
+  // Newsletter
+  app.post("/api/newsletter/subscribe", (req, res) => {
+    const { email } = req.body;
+    if (!email) return res.status(400).json({ error: "Email is required" });
+    try {
+      const existing = db.prepare("SELECT * FROM newsletter_subscribers WHERE email = ?").get(email);
+      if (!existing) {
+        db.prepare("INSERT INTO newsletter_subscribers (email) VALUES (?)").run(email);
+      }
+      res.json({ success: true, message: "구독해주셔서 감사합니다!" });
+    } catch (err) {
+      res.status(500).json({ error: "구독 처리 중 오류가 발생했습니다." });
+    }
+  });
+
+  app.get("/api/admin/newsletter/subscribers", authenticateAdmin, (req, res) => {
+    try {
+      const subscribers = db.prepare("SELECT * FROM newsletter_subscribers ORDER BY created_at DESC").all();
+      const registeredSubscribers = db.prepare("SELECT email FROM users WHERE newsletter_subscribed = 1").all();
+      res.json({ 
+        guestSubscribers: subscribers, 
+        userSubscribers: registeredSubscribers 
+      });
+    } catch (err) {
+      res.status(500).json({ error: "Failed to fetch subscribers" });
+    }
+  });
+
+  app.post("/api/admin/newsletter/send", authenticateAdmin, async (req, res) => {
+    const { subject, content } = req.body;
+    if (!subject || !content) return res.status(400).json({ error: "Subject and content are required" });
+
+    try {
+      const guestEmails = (db.prepare("SELECT email FROM newsletter_subscribers").all() as any[]).map(s => s.email);
+      const userEmails = (db.prepare("SELECT email FROM users WHERE newsletter_subscribed = 1").all() as any[]).map(u => u.email);
+      const allEmails = [...new Set([...guestEmails, ...userEmails])];
+
+      console.log(`[NEWSLETTER] Sending mass mail to ${allEmails.length} subscribers`);
+      
+      for (const email of allEmails) {
+        await sendMail(
+          email,
+          subject,
+          `
+          <div style="font-family: 'Inter', sans-serif;">
+            <div style="margin-bottom: 30px;">
+              ${content}
+            </div>
+            <div style="margin-top: 40px; padding-top: 20px; border-top: 1px dashed #eee; font-size: 11px; color: #999;">
+              <p>더 이상 소식을 원하지 않으시면 <a href="#" style="color: #666; text-decoration: underline;">수신 거부</a>를 클릭해 주세요.</p>
+            </div>
+          </div>
+          `,
+          'NEWS'
+        );
+      }
+
+      res.json({ success: true, count: allEmails.length });
+    } catch (err) {
+      res.status(500).json({ error: "Failed to send newsletter" });
+    }
+  });
+
+  // Password Reset
+  app.post("/api/auth/forgot-password", async (req, res) => {
+    const { email } = req.body;
+    try {
+      const user = db.prepare("SELECT * FROM users WHERE email = ?").get(email) as any;
+      if (!user) return res.json({ success: true, message: "If an account exists, a reset link has been sent." });
+
+      const token = crypto.randomBytes(20).toString('hex');
+      const expires = new Date(Date.now() + 3600000).toISOString(); // 1 hour
+
+      db.prepare("UPDATE users SET reset_token = ?, reset_expires = ? WHERE email = ?").run(token, expires, email);
+
+      const resetLink = `https://${req.get('host')}/reset-password?token=${token}`;
+
+      await sendMail(
+        email,
+        "비밀번호 재설정 안내",
+        `
+        <h2 style="font-size: 18px; margin-bottom: 20px;">비밀번호 재설정 요청</h2>
+        <p style="margin-bottom: 30px;">본 메일은 비밀번호 재설정을 위해 발송되었습니다.<br>아래 버튼을 클릭하여 새로운 비밀번호를 설정해 주세요.</p>
+        <a href="${resetLink}" style="display: inline-block; background-color: #1a1a1a; color: #fff; padding: 14px 28px; text-decoration: none; border-radius: 4px; font-weight: bold; text-transform: uppercase; letter-spacing: 2px; font-size: 12px;">비밀번호 재설정하기</a>
+        <p style="margin-top: 30px; font-size: 12px; color: #999;">만약 본인이 요청하지 않으셨다면 이 메일을 무시해 주세요.<br>링크는 1시간 동안 유효합니다.</p>
+        `,
+        'SYSTEM'
+      );
+
+      res.json({ success: true, message: "Reset link sent" });
+    } catch (err) {
+      res.status(500).json({ error: "Failed to process request" });
+    }
+  });
+
+  app.post("/api/auth/reset-password", async (req, res) => {
+    const { token, newPassword } = req.body;
+    try {
+      const user = db.prepare("SELECT * FROM users WHERE reset_token = ? AND reset_expires > CURRENT_TIMESTAMP").get(token) as any;
+      if (!user) return res.status(400).json({ error: "유효하지 않거나 만료된 토큰입니다." });
+
+      const hashedPassword = crypto.createHash('sha256').update(newPassword).digest('hex');
+      db.prepare("UPDATE users SET password = ?, reset_token = NULL, reset_expires = NULL WHERE id = ?").run(hashedPassword, user.id);
+
+      res.json({ success: true, message: "Password updated successfully" });
+    } catch (err) {
+      res.status(500).json({ error: "Failed to reset password" });
+    }
+  });
+
+  // Verification Email
+  app.post("/api/auth/send-verification", authenticateUser, async (req, res) => {
+    const user_id = (req as any).user.id;
+    try {
+      const user = db.prepare("SELECT * FROM users WHERE id = ?").get(user_id) as any;
+      if (user.is_verified) return res.status(400).json({ error: "Already verified" });
+
+      const token = crypto.randomBytes(20).toString('hex');
+      db.prepare("UPDATE users SET verification_token = ? WHERE id = ?").run(token, user_id);
+
+      const verifyLink = `https://${req.get('host')}/verify-email?token=${token}`;
+
+      await sendMail(
+        user.email,
+        "이메일 인증을 완료해주세요",
+        `
+        <h2 style="font-size: 18px; margin-bottom: 20px;">이메일 인증 안내</h2>
+        <p style="margin-bottom: 30px;">베뉴아 회원이 되신 것을 환영합니다!<br>아래 버튼을 클릭하여 이메일 인증을 완료하고 모든 서비스를 이용해 보세요.</p>
+        <a href="${verifyLink}" style="display: inline-block; background-color: #B29141; color: #fff; padding: 14px 28px; text-decoration: none; border-radius: 4px; font-weight: bold; text-transform: uppercase; letter-spacing: 2px; font-size: 12px;">이메일 인증하기</a>
+        <p style="margin-top: 30px; font-size: 12px; color: #999;">감사합니다.</p>
+        `,
+        'SYSTEM'
+      );
+
+      res.json({ success: true });
+    } catch (err) {
+      res.status(500).json({ error: "Failed to send verification email" });
+    }
+  });
+
+  app.get("/api/auth/verify/:token", async (req, res) => {
+    const { token } = req.params;
+    try {
+      const user = db.prepare("SELECT * FROM users WHERE verification_token = ?").get(token) as any;
+      if (!user) return res.status(400).json({ error: "Invalid token" });
+
+      db.prepare("UPDATE users SET is_verified = 1, verification_token = NULL WHERE id = ?").run(user.id);
+      res.json({ success: true });
+    } catch (err) {
+      res.status(500).json({ error: "Failed to verify email" });
     }
   });
 

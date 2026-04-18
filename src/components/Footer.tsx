@@ -1,6 +1,31 @@
+import { useState } from "react";
 import { Link } from "react-router-dom";
 
 export default function Footer() {
+  const [email, setEmail] = useState("");
+  const [status, setStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!email) return;
+    setStatus('loading');
+    try {
+      const response = await fetch("/api/newsletter/subscribe", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email }),
+      });
+      if (response.ok) {
+        setStatus('success');
+        setEmail("");
+      } else {
+        setStatus('error');
+      }
+    } catch (error) {
+      setStatus('error');
+    }
+  };
+
   return (
     <footer className="bg-white border-t border-venuea-dark/5 py-16 px-8 md:px-[60px]">
       <div className="max-w-[1440px] mx-auto grid grid-cols-1 md:grid-cols-4 gap-12">
@@ -34,15 +59,25 @@ export default function Footer() {
         <div>
           <h4 className="text-xs font-bold uppercase tracking-widest text-venuea-dark mb-6">뉴스레터</h4>
           <p className="text-sm text-venuea-muted mb-4">새로운 소식과 특별한 혜택을 받아보세요.</p>
-          <form className="flex">
-            <input 
-              type="email" 
-              placeholder="이메일 주소" 
-              className="bg-[#F9F9F9] border border-venuea-dark/10 px-4 py-2 text-sm flex-grow focus:outline-none focus:border-venuea-gold"
-            />
-            <button className="bg-venuea-dark text-white px-4 py-2 text-xs font-bold uppercase tracking-widest hover:bg-venuea-gold transition-colors">
-              구독하기
-            </button>
+          <form className="flex flex-col gap-2" onSubmit={handleSubmit}>
+            <div className="flex">
+              <input 
+                type="email" 
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="이메일 주소" 
+                required
+                className="bg-[#F9F9F9] border border-venuea-dark/10 px-4 py-2 text-sm flex-grow focus:outline-none focus:border-venuea-gold"
+              />
+              <button 
+                disabled={status === 'loading' || status === 'success'}
+                className="bg-venuea-dark text-white px-4 py-2 text-xs font-bold uppercase tracking-widest hover:bg-venuea-gold transition-colors disabled:bg-gray-400"
+              >
+                {status === 'loading' ? '처리중' : '구독하기'}
+              </button>
+            </div>
+            {status === 'success' && <p className="text-[10px] text-green-600 font-bold uppercase tracking-widest">구독해주셔서 감사합니다!</p>}
+            {status === 'error' && <p className="text-[10px] text-red-500 font-bold uppercase tracking-widest">오류가 발생했습니다.</p>}
           </form>
         </div>
       </div>
