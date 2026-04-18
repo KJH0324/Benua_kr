@@ -68,7 +68,7 @@ export default function App() {
                 <Route path="/profile" element={<Profile />} />
                 <Route path="/login" element={<Login />} />
                 {/* Legacy redirect for /admin */}
-                <Route path="/admin/*" element={<Navigate to={`https://admin.benua.shop${window.location.pathname.replace('/admin', '')}`} replace />} />
+                <Route path="/admin/*" element={<Navigate to={`https://dash.benua.shop${window.location.pathname.replace('/admin', '')}`} replace />} />
               </Routes>
             </AnimatePresence>
           </main>

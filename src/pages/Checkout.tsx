@@ -4,7 +4,7 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { formatPrice } from "../lib/utils";
 import DaumPostcode from "react-daum-postcode";
-import { X, CreditCard, Wallet, Building } from "lucide-react";
+import { X, CreditCard, Wallet, Building, Ticket } from "lucide-react";
 
 export default function Checkout() {
   const location = useLocation();
@@ -19,6 +19,8 @@ export default function Checkout() {
   const [discount, setDiscount] = useState(0);
   const [appliedCoupon, setAppliedCoupon] = useState<any>(null);
   const [pointUsage, setPointUsage] = useState(0);
+  const [myCoupons, setMyCoupons] = useState<any[]>([]);
+  const [isCouponListOpen, setIsCouponListOpen] = useState(false);
   
   const isFreeShipping = user?.tier === 'BLACK' || user?.tier === 'THE_BLACK' || appliedCoupon?.type === 'SHIPPING';
   const effectiveShipping = isFreeShipping ? 0 : shipping;
@@ -53,6 +55,11 @@ export default function Checkout() {
             address: data.user.address,
             detail_address: data.user.detail_address
           });
+          
+          // Fetch my coupons
+          fetch("/api/coupons/me")
+            .then(res => res.json())
+            .then(coupons => setMyCoupons(Array.isArray(coupons) ? coupons : []));
         } else {
           navigate("/login");
         }
@@ -100,6 +107,38 @@ export default function Checkout() {
     } catch (err) {
       toast.error("쿠폰 적용 중 오류가 발생했습니다.");
     }
+  };
+
+  const handleSelectCoupon = (coupon: any) => {
+    let disc = 0;
+    if (coupon.type === 'FIXED') {
+      disc = coupon.value;
+    } else if (coupon.type === 'PERCENT') {
+      disc = Math.floor(subtotal * (coupon.value / 100));
+      if (coupon.max_discount_amount > 0) {
+        disc = Math.min(disc, coupon.max_discount_amount);
+      }
+    }
+    
+    if (coupon.min_order_amount > 0 && subtotal < coupon.min_order_amount) {
+      toast.error(`${formatPrice(coupon.min_order_amount)} 이상 주문 시 사용 가능합니다.`);
+      return;
+    }
+
+    setAppliedCoupon({
+      ...coupon,
+      user_coupon_id: coupon.id
+    });
+    setDiscount(disc);
+    setIsCouponListOpen(false);
+    toast.success(`'${coupon.name}' 쿠폰이 적용되었습니다.`);
+  };
+
+  const formatDiscount = (coupon: any) => {
+    if (coupon.type === 'FIXED') return `${formatPrice(coupon.value)} 할인`;
+    if (coupon.type === 'PERCENT') return `${coupon.value}% 할인`;
+    if (coupon.type === 'SHIPPING') return `무료 배송`;
+    return '';
   };
 
   const handlePayment = async () => {
@@ -302,13 +341,21 @@ export default function Checkout() {
 
               <div className="space-y-4 mb-6">
                 <div className="p-1 border-b border-venuea-dark/10">
-                  <label className="text-[10px] font-bold uppercase tracking-widest text-venuea-dark/40 mb-1 block">쿠폰 코드</label>
+                  <div className="flex justify-between items-center mb-1">
+                    <label className="text-[10px] font-bold uppercase tracking-widest text-venuea-dark/40 block">쿠폰 선택</label>
+                    <button 
+                      onClick={() => setIsCouponListOpen(true)}
+                      className="text-[10px] font-bold text-venuea-gold uppercase tracking-widest hover:underline"
+                    >
+                      보유 쿠폰 보기 ({myCoupons.length})
+                    </button>
+                  </div>
                   <div className="flex gap-2">
                     <input 
                       type="text" 
                       value={couponCode}
                       onChange={e => setCouponCode(e.target.value)}
-                      placeholder="쿠폰 코드 입력"
+                      placeholder="직접 입력"
                       disabled={!!appliedCoupon}
                       className="flex-grow bg-[#F9F9F9] border border-venuea-dark/10 px-3 py-2 text-xs focus:outline-none focus:border-venuea-gold uppercase tracking-widest disabled:opacity-50"
                     />
@@ -416,6 +463,62 @@ export default function Checkout() {
               </div>
               <div className="h-[400px]">
                 <DaumPostcode onComplete={handleCompleteAddress} style={{ height: '100%' }} />
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {isCouponListOpen && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4"
+            onClick={() => setIsCouponListOpen(false)}
+          >
+            <motion.div 
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="bg-white w-full max-w-md overflow-hidden shadow-2xl"
+              onClick={e => e.stopPropagation()}
+            >
+              <div className="flex justify-between items-center p-6 border-b border-gray-100">
+                <h3 className="text-sm font-bold text-venuea-dark uppercase tracking-widest">내 쿠폰 ({myCoupons.length})</h3>
+                <button onClick={() => setIsCouponListOpen(false)} className="text-gray-400 hover:text-gray-600">
+                  <X size={20} />
+                </button>
+              </div>
+              <div className="p-6 max-h-[400px] overflow-y-auto space-y-3">
+                {myCoupons.length === 0 ? (
+                  <div className="py-12 text-center">
+                    <Ticket className="w-8 h-8 mx-auto mb-2 text-gray-300" />
+                    <p className="text-xs text-gray-400 uppercase tracking-widest">사용 가능한 쿠폰이 없습니다.</p>
+                  </div>
+                ) : (
+                  myCoupons.map((coupon) => (
+                    <button
+                      key={coupon.id}
+                      onClick={() => handleSelectCoupon(coupon)}
+                      className="w-full p-4 border border-venuea-dark/10 hover:border-venuea-gold hover:bg-venuea-gold/5 text-left transition-all group"
+                    >
+                      <div className="flex justify-between items-start mb-1">
+                        <span className="text-xs font-bold text-venuea-dark uppercase tracking-tight line-clamp-1">{coupon.name}</span>
+                        <span className="text-[10px] font-mono text-venuea-gold bg-venuea-gold/10 px-1.5 py-0.5 whitespace-nowrap">
+                          {formatDiscount(coupon)}
+                        </span>
+                      </div>
+                      <div className="flex justify-between items-end">
+                        <span className="text-[10px] text-venuea-muted uppercase tracking-widest">
+                          {coupon.min_order_amount > 0 ? `${formatPrice(coupon.min_order_amount)} 이상 구매 시` : '모든 금액 적용'}
+                        </span>
+                        <span className="text-[10px] font-bold text-venuea-dark group-hover:text-venuea-gold uppercase tracking-widest transition-colors font-mono ">건당 1회</span>
+                      </div>
+                    </button>
+                  ))
+                )}
               </div>
             </motion.div>
           </motion.div>

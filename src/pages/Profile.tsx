@@ -18,6 +18,10 @@ export default function Profile() {
   const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
   const [orderDetail, setOrderDetail] = useState<any>(null);
 
+  const [isRefundModalOpen, setIsRefundModalOpen] = useState(false);
+  const [refundReason, setRefundReason] = useState("");
+  const [selectedRefundOrder, setSelectedRefundOrder] = useState<any>(null);
+
   const [isReviewModalOpen, setIsReviewModalOpen] = useState(false);
   const [reviewForm, setReviewForm] = useState({
     product_id: 0,
@@ -178,23 +182,42 @@ export default function Profile() {
     }
   };
 
-  const handleRefundRequest = async (id: number) => {
-    const reason = prompt("환불 사유를 입력해주세요.");
-    if (!reason) return;
+  const handleRefundRequest = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!refundReason) {
+      toast.error("환불 사유를 선택해주세요.");
+      return;
+    }
+    
     try {
-      const res = await fetch(`/api/orders/${id}/refund-request`, {
+      const res = await fetch(`/api/orders/${selectedRefundOrder.id}/refund-request`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ reason })
+        body: JSON.stringify({ reason: refundReason })
       });
+      const data = await res.json();
       if (res.ok) {
-        toast.success("환불 요청이 접수되었습니다.");
+        if (data.status === 'refunded') {
+          toast.success("취소 및 즉시 환불 처리가 완료되었습니다.");
+        } else {
+          toast.success("환불 요청이 접수되었습니다. (배송 후 반품비 5,000원 제외)");
+        }
+        setIsRefundModalOpen(false);
+        setRefundReason("");
         fetchData();
-        if (isDetailModalOpen) fetchOrderDetail(id);
+        if (isDetailModalOpen) fetchOrderDetail(selectedRefundOrder.id);
+      } else {
+        toast.error(data.error || "요청 실패");
       }
     } catch {
-      toast.error("요청 실패");
+      toast.error("서버 오류");
     }
+  };
+
+  const openRefundModal = (order: any) => {
+    setSelectedRefundOrder(order);
+    setRefundReason("");
+    setIsRefundModalOpen(true);
   };
 
   const handleReviewSubmit = async (e: React.FormEvent) => {
@@ -860,7 +883,7 @@ export default function Profile() {
                   )}
                   {['paid', 'shipping', 'delivered'].includes(orderDetail.status) && (
                     <button 
-                      onClick={() => handleRefundRequest(orderDetail.id)}
+                      onClick={() => openRefundModal(orderDetail)}
                       className="flex-1 border border-venuea-dark text-venuea-dark py-4 font-bold uppercase tracking-widest hover:bg-red-50 hover:border-red-500 hover:text-red-500 transition-all"
                     >
                       환불 요청
@@ -868,6 +891,86 @@ export default function Profile() {
                   )}
                 </div>
               </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Refund Modal */}
+      <AnimatePresence>
+        {isRefundModalOpen && selectedRefundOrder && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[75] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
+          >
+            <motion.div 
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="bg-white w-full max-w-lg p-10 shadow-2xl relative"
+            >
+              <button 
+                onClick={() => setIsRefundModalOpen(false)}
+                className="absolute top-6 right-6 text-gray-400 hover:text-venuea-dark"
+              >
+                <X size={24} />
+              </button>
+
+              <div className="text-center mb-8">
+                <span className="text-[10px] font-bold uppercase tracking-[4px] text-red-500 mb-2 block">Refund Request</span>
+                <h3 className="text-xl font-bold text-venuea-dark">환불 요청 사유</h3>
+                <p className="text-[10px] text-venuea-muted mt-2 uppercase tracking-widest">
+                  {['pending', 'paid'].includes(selectedRefundOrder.status) 
+                    ? "배송 전 단계로 전액 즉시 환불이 가능합니다." 
+                    : "배송 후 단계로 반품 배송비 5,000원을 제외하고 환불됩니다."}
+                </p>
+              </div>
+
+              <form onSubmit={handleRefundRequest} className="space-y-6">
+                <div className="space-y-2">
+                  <label className="text-[10px] font-bold uppercase tracking-widest text-venuea-dark/40">사유 선택</label>
+                  <select 
+                    value={refundReason}
+                    onChange={e => setRefundReason(e.target.value)}
+                    required
+                    className="w-full bg-[#F9F9F9] border border-venuea-dark/10 p-4 text-sm focus:outline-none focus:border-venuea-gold appearance-none cursor-pointer"
+                  >
+                    <option value="">사유를 선택해주세요</option>
+                    <option value="단순 변심">단순 변심</option>
+                    <option value="주문 실수">주문 실수</option>
+                    <option value="배송 지연">배송 지연</option>
+                    <option value="상품 파손">상품 파손</option>
+                    <option value="오배송">오배송</option>
+                    <option value="기타">기타</option>
+                  </select>
+                </div>
+
+                <div className="pt-4 space-y-3">
+                  <div className="flex justify-between text-xs py-3 border-t border-gray-100">
+                    <span className="text-venuea-dark/60 font-bold uppercase tracking-widest">예상 환불 금액</span>
+                    <span className="text-venuea-gold font-bold font-mono">
+                      {formatPrice(['pending', 'paid'].includes(selectedRefundOrder.status) 
+                        ? selectedRefundOrder.total_amount 
+                        : Math.max(0, selectedRefundOrder.total_amount - 5000))}
+                    </span>
+                  </div>
+                  <button 
+                    type="submit"
+                    className="w-full bg-venuea-dark text-white py-4 font-bold uppercase tracking-widest hover:bg-red-500 transition-all border border-venuea-dark hover:border-red-500"
+                  >
+                    환불 요청하기
+                  </button>
+                  <button 
+                    type="button"
+                    onClick={() => setIsRefundModalOpen(false)}
+                    className="w-full bg-white text-venuea-dark/40 py-3 text-[10px] font-bold uppercase tracking-widest hover:text-venuea-dark transition-all"
+                  >
+                    돌아가기
+                  </button>
+                </div>
+              </form>
             </motion.div>
           </motion.div>
         )}

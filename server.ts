@@ -259,6 +259,10 @@ const checkAndMigrateOrders = () => {
       db.exec(`ALTER TABLE orders ADD COLUMN shipping_company TEXT`);
       console.log("[DEBUG][DB] Added shipping_company to orders");
     }
+    if (!columns.includes('refund_amount')) {
+      db.exec(`ALTER TABLE orders ADD COLUMN refund_amount INTEGER DEFAULT 0`);
+      console.log("[DEBUG][DB] Added refund_amount to orders");
+    }
     console.log("[DEBUG][DB] Orders migration check complete");
   } catch (err: any) {
     console.error("[DEBUG][DB] Orders migration ERROR:", err.message);
@@ -314,7 +318,7 @@ async function startServer() {
     
     if (isProduction && host === "benua.shop" && req.path.startsWith("/admin")) {
       const targetPath = req.path.replace("/admin", "") || "/";
-      return res.redirect(301, `https://admin.benua.shop${targetPath}${req.url.includes("?") ? req.url.substring(req.url.indexOf("?")) : ""}`);
+      return res.redirect(301, `https://dash.benua.shop${targetPath}${req.url.includes("?") ? req.url.substring(req.url.indexOf("?")) : ""}`);
     }
     next();
   });
@@ -1230,7 +1234,12 @@ async function startServer() {
       used_points, used_coupon_id, payment_method 
     } = req.body;
     
-    const order_number = `ORD-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+    // Generate 15 character alphanumeric order number (Uppercase letters + digits)
+    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+    let order_number = '';
+    for (let i = 0; i < 15; i++) {
+        order_number += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
     
     // Normalize optional fields
     const p_used_points = used_points ? parseInt(String(used_points)) || 0 : 0;
@@ -1440,8 +1449,43 @@ async function startServer() {
         const order = db.prepare("SELECT * FROM orders WHERE id = ? AND user_id = ?").get(id, req.user.id) as any;
         if (!order) return res.status(404).json({ error: "Order not found" });
         
-        db.prepare("UPDATE orders SET status = 'refund_requested', refund_reason = ? WHERE id = ?").run(reason, id);
-        res.json({ success: true });
+        if (['refund_requested', 'refunded'].includes(order.status)) {
+            return res.status(400).json({ error: "이미 환불 처리되었거나 요청 중인 주문입니다." });
+        }
+
+        let newStatus = 'refund_requested';
+        let refundAmount = order.total_amount;
+        const beforeShipping = ['pending', 'paid'].includes(order.status);
+
+        if (beforeShipping) {
+            // Shipping 전: 자동 전액 환불
+            newStatus = 'refunded';
+            refundAmount = order.total_amount;
+            
+            // Return used points
+            if (order.used_points > 0) {
+                db.prepare("UPDATE users SET points = points + ? WHERE id = ?").run(order.used_points, order.user_id);
+                db.prepare("INSERT INTO point_history (user_id, amount, reason, type) VALUES (?, ?, ?, ?)").run(
+                    order.user_id,
+                    order.used_points,
+                    `주문 ${order.order_number} 취소 자동 환불 (포인트 복구)`,
+                    'EARNED'
+                );
+            }
+
+            // Return stock
+            const items = db.prepare("SELECT * FROM order_items WHERE order_id = ?").all(id) as any[];
+            for (const item of items) {
+                db.prepare("UPDATE products SET stock = stock + ? WHERE id = ?").run(item.quantity, item.product_id);
+            }
+        } else {
+            // Shipping 후: 반품비 5000원 제외하고 환불 (refund_requested 상태로 관리자 검토 대기)
+            newStatus = 'refund_requested';
+            refundAmount = Math.max(0, order.total_amount - 5000);
+        }
+
+        db.prepare("UPDATE orders SET status = ?, refund_reason = ?, refund_amount = ? WHERE id = ?").run(newStatus, reason, refundAmount, id);
+        res.json({ success: true, status: newStatus, refund_amount: refundAmount });
     } catch (err) {
         res.status(500).json({ error: "Refund request failed" });
     }

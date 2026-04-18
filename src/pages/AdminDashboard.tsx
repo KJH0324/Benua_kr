@@ -1110,7 +1110,12 @@ function AdminOrders() {
                     {order.status === 'refund_requested' ? '환불요청' : order.status}
                   </span>
                   {order.refund_reason && (
-                    <p className="text-[10px] text-red-400 mt-1 max-w-[150px] truncate" title={order.refund_reason}>사유: {order.refund_reason}</p>
+                    <div className="mt-2 space-y-1">
+                      <p className="text-[10px] text-red-500 font-bold bg-red-50 px-1.5 py-0.5 rounded inline-block">사유: {order.refund_reason}</p>
+                      {order.refund_amount > 0 && (
+                        <p className="text-[10px] font-bold text-venuea-gold">환불 예정/완료: {formatPrice(order.refund_amount)}</p>
+                      )}
+                    </div>
                   )}
                 </td>
                 <td className="px-6 py-4 text-right space-y-2">

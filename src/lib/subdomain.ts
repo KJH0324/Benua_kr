@@ -1,7 +1,7 @@
 export const isAdminSubdomain = () => {
   if (typeof window === "undefined") return false;
   const hostname = window.location.hostname;
-  return hostname.startsWith("admin.");
+  return hostname.startsWith("dash.");
 };
 
 export const getBaseUrl = () => {
