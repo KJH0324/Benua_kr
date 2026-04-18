@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from "motion/react";
 import { ShieldCheck, ArrowRight, KeyRound, QrCode } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
+import { isAdminSubdomain } from "../lib/subdomain";
 
 export default function AdminLogin() {
   const [step, setStep] = useState<'key' | 'totp'>('key');
@@ -14,6 +15,7 @@ export default function AdminLogin() {
   const [keyError, setKeyError] = useState("");
   const [tokenError, setTokenError] = useState("");
   const navigate = useNavigate();
+  const isAdminSub = isAdminSubdomain();
 
   const handleKeySubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -69,7 +71,7 @@ export default function AdminLogin() {
 
       if (response.ok) {
         toast.success("관리자 로그인 성공");
-        navigate("/admin");
+        navigate(isAdminSub ? "/" : "/admin");
       } else {
         toast.error(data.error || "인증 실패");
       }

@@ -30,6 +30,7 @@ import {
 import { motion, AnimatePresence } from "motion/react";
 import { cn, formatPrice } from "../lib/utils";
 import { toast } from "sonner";
+import { isAdminSubdomain } from "../lib/subdomain";
 
 interface Product {
   id: number;
@@ -51,22 +52,24 @@ export default function AdminDashboard() {
   const navigate = useNavigate();
   const [isCheckingAuth, setIsCheckingAuth] = useState(true);
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
+  const isAdminSub = isAdminSubdomain();
+  const adminPathBase = isAdminSub ? "" : "/admin";
 
   useEffect(() => {
     const checkAuth = async () => {
       try {
         const response = await fetch("/api/admin/check");
         if (!response.ok) {
-          navigate("/admin/login");
+          navigate(isAdminSub ? "/login" : "/admin/login");
         }
       } catch (error) {
-        navigate("/admin/login");
+        navigate(isAdminSub ? "/login" : "/admin/login");
       } finally {
         setIsCheckingAuth(false);
       }
     };
     checkAuth();
-  }, [navigate]);
+  }, [navigate, isAdminSub]);
 
   if (isCheckingAuth) {
     return (
@@ -77,18 +80,18 @@ export default function AdminDashboard() {
   }
   
   const sidebarLinks = [
-    { name: "개요", path: "/admin", icon: LayoutDashboard },
-    { name: "상품 관리", path: "/admin/products", icon: Package },
-    { name: "주문 내역", path: "/admin/orders", icon: ShoppingBag },
-    { name: "고객 문의", path: "/admin/inquiries", icon: MessageSquare },
-    { name: "고객 관리", path: "/admin/customers", icon: Users },
-    { name: "쿠폰 관리", path: "/admin/coupons", icon: Ticket },
-    { name: "관리자 키", path: "/admin/keys", icon: Settings },
+    { name: "개요", path: `${adminPathBase}/`, icon: LayoutDashboard },
+    { name: "상품 관리", path: `${adminPathBase}/products`, icon: Package },
+    { name: "주문 내역", path: `${adminPathBase}/orders`, icon: ShoppingBag },
+    { name: "고객 문의", path: `${adminPathBase}/inquiries`, icon: MessageSquare },
+    { name: "고객 관리", path: `${adminPathBase}/customers`, icon: Users },
+    { name: "쿠폰 관리", path: `${adminPathBase}/coupons`, icon: Ticket },
+    { name: "관리자 키", path: `${adminPathBase}/keys`, icon: Settings },
   ];
 
   const handleLogout = async () => {
     await fetch("/api/admin/logout", { method: "POST" });
-    navigate("/admin/login");
+    navigate(isAdminSub ? "/login" : "/admin/login");
   };
 
   return (
@@ -209,6 +212,7 @@ export default function AdminDashboard() {
           <Route path="/" element={<AdminOverview />} />
           <Route path="/products" element={<AdminProducts />} />
           <Route path="/orders" element={<AdminOrders />} />
+          <Route path="/customers" element={<AdminUserPoints />} />
           <Route path="/coupons" element={<AdminCoupons />} />
           <Route path="/inquiries" element={<AdminInquiries />} />
           <Route path="/keys" element={<AdminKeys />} />

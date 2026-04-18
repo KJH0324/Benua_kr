@@ -234,6 +234,23 @@ const checkAndMigrateOrders = () => {
   try {
     const tableInfo = db.prepare("PRAGMA table_info(orders)").all() as any[];
     const columns = tableInfo.map(c => c.name);
+    
+    if (!columns.includes('payment_method')) {
+      db.exec(`ALTER TABLE orders ADD COLUMN payment_method TEXT`);
+      console.log("[DEBUG][DB] Added payment_method to orders");
+    }
+    if (!columns.includes('used_points')) {
+      db.exec(`ALTER TABLE orders ADD COLUMN used_points INTEGER DEFAULT 0`);
+      console.log("[DEBUG][DB] Added used_points to orders");
+    }
+    if (!columns.includes('used_coupon_id')) {
+      db.exec(`ALTER TABLE orders ADD COLUMN used_coupon_id INTEGER`);
+      console.log("[DEBUG][DB] Added used_coupon_id to orders");
+    }
+    if (!columns.includes('earned_points')) {
+      db.exec(`ALTER TABLE orders ADD COLUMN earned_points INTEGER DEFAULT 0`);
+      console.log("[DEBUG][DB] Added earned_points to orders");
+    }
     if (!columns.includes('tracking_number')) {
       db.exec(`ALTER TABLE orders ADD COLUMN tracking_number TEXT`);
       console.log("[DEBUG][DB] Added tracking_number to orders");
@@ -242,6 +259,7 @@ const checkAndMigrateOrders = () => {
       db.exec(`ALTER TABLE orders ADD COLUMN shipping_company TEXT`);
       console.log("[DEBUG][DB] Added shipping_company to orders");
     }
+    console.log("[DEBUG][DB] Orders migration check complete");
   } catch (err: any) {
     console.error("[DEBUG][DB] Orders migration ERROR:", err.message);
   }
@@ -288,6 +306,18 @@ async function startServer() {
   app.use(express.urlencoded({ limit: "50mb", extended: true }));
   app.use(cookieParser());
   app.use("/uploads", express.static(path.join(process.cwd(), "uploads")));
+
+  // Admin subdomain redirect middleware
+  app.use((req, res, next) => {
+    const host = req.headers.host || "";
+    const isProduction = process.env.NODE_ENV === "production";
+    
+    if (isProduction && host === "benua.shop" && req.path.startsWith("/admin")) {
+      const targetPath = req.path.replace("/admin", "") || "/";
+      return res.redirect(301, `https://admin.benua.shop${targetPath}${req.url.includes("?") ? req.url.substring(req.url.indexOf("?")) : ""}`);
+    }
+    next();
+  });
 
   // --- Auth Middleware ---
   const authenticateAdmin = (req: any, res: any, next: any) => {
@@ -410,7 +440,8 @@ async function startServer() {
         secure: isProduction,
         sameSite: isProduction ? "none" : "lax",
         maxAge: 24 * 60 * 60 * 1000,
-        path: "/"
+        path: "/",
+        domain: isProduction ? ".benua.shop" : undefined
       });
       res.json({ success: true });
     } catch (err: any) {
@@ -449,7 +480,8 @@ async function startServer() {
         secure: isProduction,
         sameSite: isProduction ? "none" : "lax",
         maxAge: 24 * 60 * 60 * 1000,
-        path: "/"
+        path: "/",
+        domain: isProduction ? ".benua.shop" : undefined
       });
       res.json({ success: true, user: { name: user.name, email: user.email, address: user.address } });
     } catch (err) {
@@ -576,7 +608,7 @@ async function startServer() {
     }
   });
 
-  // Tracking Number Update with Auto-Status Change
+  // Admin: Tracking Number Update with Auto-Status Change
   app.post("/api/admin/orders/:id/tracking", authenticateAdmin, (req, res) => {
     const { id } = req.params;
     const { tracking_number, shipping_company } = req.body;
@@ -701,7 +733,8 @@ async function startServer() {
         secure: isProduction,
         sameSite: isProduction ? "none" : "lax",
         maxAge: 24 * 60 * 60 * 1000,
-        path: "/"
+        path: "/",
+        domain: isProduction ? ".benua.shop" : undefined
       });
 
       res.send(`
@@ -826,7 +859,8 @@ async function startServer() {
         secure: isProduction,
         sameSite: isProduction ? "none" : "lax",
         maxAge: 24 * 60 * 60 * 1000,
-        path: "/"
+        path: "/",
+        domain: isProduction ? ".benua.shop" : undefined
       });
 
       res.send(`
@@ -903,7 +937,8 @@ async function startServer() {
       secure: isProduction,
       sameSite: isProduction ? "none" : "lax",
       maxAge: 24 * 60 * 60 * 1000,
-      path: "/"
+      path: "/",
+      domain: isProduction ? ".benua.shop" : undefined
     });
     res.json({ success: true });
   });
@@ -1189,15 +1224,30 @@ async function startServer() {
 
   // Orders
   app.post("/api/orders", (req, res) => {
-    const { user_id, customer_name, customer_email, shipping_address, total_amount, shipping_fee, items, used_points, used_coupon_id, payment_method } = req.body;
+    const { 
+      user_id, customer_name, customer_email, shipping_address, 
+      total_amount, shipping_fee, items, 
+      used_points, used_coupon_id, payment_method 
+    } = req.body;
+    
     const order_number = `ORD-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
     
+    // Normalize optional fields
+    const p_used_points = used_points ? parseInt(String(used_points)) || 0 : 0;
+    const p_used_coupon_id = used_coupon_id ? parseInt(String(used_coupon_id)) || null : null;
+    const p_shipping_fee = shipping_fee ? parseInt(String(shipping_fee)) || 0 : 0;
+    const p_total_amount = total_amount ? parseInt(String(total_amount)) || 0 : 0;
+
     try {
       const transaction = db.transaction(() => {
         // 1. Create Order
         const info = db.prepare(
           "INSERT INTO orders (order_number, user_id, customer_name, customer_email, shipping_address, total_amount, shipping_fee, used_points, used_coupon_id, payment_method, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
-        ).run(order_number, user_id, customer_name, customer_email, shipping_address, total_amount, shipping_fee, used_points || 0, used_coupon_id || null, payment_method || 'card', 'paid');
+        ).run(
+          order_number, user_id, customer_name, customer_email, shipping_address, 
+          p_total_amount, p_shipping_fee, p_used_points, p_used_coupon_id, 
+          payment_method || 'card', 'paid'
+        );
         
         const orderId = info.lastInsertRowid;
 
@@ -1213,24 +1263,26 @@ async function startServer() {
         }
 
         // 3. Deduct Points
-        if (user_id && used_points > 0) {
+        if (user_id && p_used_points > 0) {
             const userRow = db.prepare("SELECT points FROM users WHERE id = ?").get(user_id) as any;
+            if (!userRow) throw new Error("사용자를 찾을 수 없습니다.");
+            
             if (userRow.points < 1000) throw new Error("포인트는 1,000P 이상 보유 시 사용 가능합니다.");
-            if (used_points > userRow.points) throw new Error("보유 포인트보다 많은 포인트를 사용할 수 없습니다.");
-            if (used_points < 1000) throw new Error("포인트는 최소 1,000P 이상 사용해야 합니다.");
+            if (p_used_points > userRow.points) throw new Error("보유 포인트보다 많은 포인트를 사용할 수 없습니다.");
+            if (p_used_points < 1000) throw new Error("포인트는 최소 1,000P 이상 사용해야 합니다.");
 
-            db.prepare("UPDATE users SET points = points - ? WHERE id = ?").run(used_points, user_id);
+            db.prepare("UPDATE users SET points = points - ? WHERE id = ?").run(p_used_points, user_id);
             db.prepare("INSERT INTO point_history (user_id, amount, reason, type) VALUES (?, ?, ?, ?)").run(
                 user_id, 
-                -used_points, 
+                -p_used_points, 
                 `주문 ${order_number} 사용`, 
                 'USED'
             );
         }
 
         // 4. Mark Coupon Used
-        if (user_id && used_coupon_id) {
-            db.prepare("UPDATE user_coupons SET is_used = 1, used_at = CURRENT_TIMESTAMP WHERE id = ? AND user_id = ?").run(used_coupon_id, user_id);
+        if (user_id && p_used_coupon_id) {
+            db.prepare("UPDATE user_coupons SET is_used = 1, used_at = CURRENT_TIMESTAMP WHERE id = ? AND user_id = ?").run(p_used_coupon_id, user_id);
         }
 
         return orderId;
@@ -1324,17 +1376,6 @@ async function startServer() {
       res.json({ success: true });
     } catch (err) {
       res.status(500).json({ error: "상태 변경 실패" });
-    }
-  });
-
-  app.post("/api/admin/orders/:id/tracking", authenticateAdmin, (req, res) => {
-    const { id } = req.params;
-    const { tracking_number, shipping_company } = req.body;
-    try {
-      db.prepare("UPDATE orders SET tracking_number = ?, shipping_company = ? WHERE id = ?").run(tracking_number, shipping_company, id);
-      res.json({ success: true });
-    } catch (err) {
-      res.status(500).json({ error: "Failed to update tracking" });
     }
   });
 

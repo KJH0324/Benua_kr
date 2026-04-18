@@ -1,4 +1,4 @@
-import { BrowserRouter as Router, Routes, Route } from "react-router-dom";
+import { BrowserRouter as Router, Routes, Route, Navigate } from "react-router-dom";
 import { Toaster } from "sonner";
 import Navbar from "./components/Navbar";
 import Footer from "./components/Footer";
@@ -20,8 +20,32 @@ import Checkout from "./pages/Checkout";
 import { motion, AnimatePresence } from "motion/react";
 import ErrorBoundary from "./components/ErrorBoundary";
 import CouponPopup from "./components/CouponPopup";
+import { isAdminSubdomain } from "./lib/subdomain";
 
 export default function App() {
+  const isAdmin = isAdminSubdomain();
+
+  if (isAdmin) {
+    return (
+      <ErrorBoundary>
+        <Router>
+          <ScrollToTop />
+          <div className="flex flex-col min-h-screen bg-gray-50">
+            <main className="flex-grow">
+              <AnimatePresence mode="wait">
+                <Routes>
+                  <Route path="/login" element={<AdminLogin />} />
+                  <Route path="/*" element={<AdminDashboard />} />
+                </Routes>
+              </AnimatePresence>
+            </main>
+            <Toaster position="top-center" />
+          </div>
+        </Router>
+      </ErrorBoundary>
+    );
+  }
+
   return (
     <ErrorBoundary>
       <Router>
@@ -43,8 +67,8 @@ export default function App() {
                 <Route path="/track" element={<TrackOrder />} />
                 <Route path="/profile" element={<Profile />} />
                 <Route path="/login" element={<Login />} />
-                <Route path="/admin/login" element={<AdminLogin />} />
-                <Route path="/admin/*" element={<AdminDashboard />} />
+                {/* Legacy redirect for /admin */}
+                <Route path="/admin/*" element={<Navigate to={`https://admin.benua.shop${window.location.pathname.replace('/admin', '')}`} replace />} />
               </Routes>
             </AnimatePresence>
           </main>
