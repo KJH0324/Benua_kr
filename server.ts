@@ -183,38 +183,44 @@ db.exec(`
   );
 `);
 
-// Add columns to existing products table if they don't exist (SQLite ALTER TABLE limitation workaround)
-try { db.exec(`ALTER TABLE products ADD COLUMN stock INTEGER DEFAULT 0`); } catch(e) {}
-try { db.exec(`ALTER TABLE products ADD COLUMN material TEXT`); } catch(e) {}
-try { db.exec(`ALTER TABLE products ADD COLUMN dimensions TEXT`); } catch(e) {}
-try { db.exec(`ALTER TABLE products ADD COLUMN origin TEXT`); } catch(e) {}
-try { db.exec(`ALTER TABLE products ADD COLUMN description_image_url TEXT`); } catch(e) {}
-try { db.exec(`ALTER TABLE products ADD COLUMN category TEXT`); } catch(e) {}
-try { db.exec(`ALTER TABLE products ADD COLUMN discount_rate INTEGER DEFAULT 0`); } catch(e) {}
-try { db.exec(`ALTER TABLE products ADD COLUMN show_on_main INTEGER DEFAULT 0`); } catch(e) {}
+// Defensive ALTER TABLE statements with better error reporting
+const migrate = (sql: string) => {
+  try {
+    db.exec(sql);
+  } catch (e: any) {
+    if (!e.message.includes("duplicate column name")) {
+      console.log(`[DB MIGRATION INFO] ${e.message}`);
+    }
+  }
+};
 
-// Defensive ALTER TABLE for inquiries
-try { db.exec(`ALTER TABLE inquiries ADD COLUMN status TEXT DEFAULT 'pending'`); } catch(e) {}
-try { db.exec(`ALTER TABLE inquiries ADD COLUMN reply_message TEXT`); } catch(e) {}
-try { db.exec(`ALTER TABLE inquiries ADD COLUMN replied_at DATETIME`); } catch(e) {}
+migrate(`ALTER TABLE products ADD COLUMN stock INTEGER DEFAULT 0`);
+migrate(`ALTER TABLE products ADD COLUMN material TEXT`);
+migrate(`ALTER TABLE products ADD COLUMN dimensions TEXT`);
+migrate(`ALTER TABLE products ADD COLUMN origin TEXT`);
+migrate(`ALTER TABLE products ADD COLUMN description_image_url TEXT`);
+migrate(`ALTER TABLE products ADD COLUMN category TEXT`);
+migrate(`ALTER TABLE products ADD COLUMN discount_rate INTEGER DEFAULT 0`);
+migrate(`ALTER TABLE products ADD COLUMN show_on_main INTEGER DEFAULT 0`);
 
-// Defensive ALTER TABLE for users
-try { db.exec(`ALTER TABLE users ADD COLUMN points INTEGER DEFAULT 0`); } catch(e) {}
-try { db.exec(`ALTER TABLE users ADD COLUMN grade TEXT DEFAULT 'Sand'`); } catch(e) {}
-try { db.exec(`ALTER TABLE users ADD COLUMN total_spent_6m INTEGER DEFAULT 0`); } catch(e) {}
+migrate(`ALTER TABLE inquiries ADD COLUMN status TEXT DEFAULT 'pending'`);
+migrate(`ALTER TABLE inquiries ADD COLUMN reply_message TEXT`);
+migrate(`ALTER TABLE inquiries ADD COLUMN replied_at DATETIME`);
 
-// Defensive ALTER TABLE for orders
-try { db.exec(`ALTER TABLE orders ADD COLUMN used_points INTEGER DEFAULT 0`); } catch(e) {}
-try { db.exec(`ALTER TABLE orders ADD COLUMN used_coupon_id INTEGER`); } catch(e) {}
-try { db.exec(`ALTER TABLE orders ADD COLUMN earned_points INTEGER DEFAULT 0`); } catch(e) {}
-try { db.exec(`ALTER TABLE orders ADD COLUMN order_data_json TEXT`); } catch(e) {}
+migrate(`ALTER TABLE users ADD COLUMN points INTEGER DEFAULT 0`);
+migrate(`ALTER TABLE users ADD COLUMN grade TEXT DEFAULT 'Sand'`);
+migrate(`ALTER TABLE users ADD COLUMN total_spent_6m INTEGER DEFAULT 0`);
 
-// Defensive ALTER TABLE for user_coupons
-try { db.exec(`ALTER TABLE user_coupons ADD COLUMN notified INTEGER DEFAULT 0`); } catch(e) {}
+migrate(`ALTER TABLE orders ADD COLUMN used_points INTEGER DEFAULT 0`);
+migrate(`ALTER TABLE orders ADD COLUMN used_coupon_id INTEGER`);
+migrate(`ALTER TABLE orders ADD COLUMN earned_points INTEGER DEFAULT 0`);
+migrate(`ALTER TABLE orders ADD COLUMN order_data_json TEXT`);
+migrate(`ALTER TABLE orders ADD COLUMN tracking_number TEXT`);
+migrate(`ALTER TABLE orders ADD COLUMN shipping_company TEXT`);
 
-// Add columns to users table for social linkage
-try { db.exec(`ALTER TABLE users ADD COLUMN google_id TEXT`); } catch(e) {}
-try { db.exec(`ALTER TABLE users ADD COLUMN naver_id TEXT`); } catch(e) {}
+migrate(`ALTER TABLE user_coupons ADD COLUMN notified INTEGER DEFAULT 0`);
+migrate(`ALTER TABLE users ADD COLUMN google_id TEXT`);
+migrate(`ALTER TABLE users ADD COLUMN naver_id TEXT`);
 
 const JWT_SECRET = process.env.JWT_SECRET || "benua-secret-key-2024";
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "benua-admin-123";
@@ -233,6 +239,9 @@ function hashPassword(password: string) {
 async function startServer() {
   const app = express();
   const PORT = 3000;
+
+  // Essential for proxies like Nginx/ALB on Lightsail to handle cookies correctly
+  app.set("trust proxy", 1);
 
   app.use(express.json({ limit: "50mb" }));
   app.use(express.urlencoded({ limit: "50mb", extended: true }));
@@ -354,10 +363,11 @@ async function startServer() {
       
       const token = jwt.sign({ id: info.lastInsertRowid, role: "user" }, JWT_SECRET, { expiresIn: "24h" });
       
+      const isProduction = process.env.NODE_ENV === "production";
       res.cookie("user_token", token, {
         httpOnly: true,
-        secure: true,
-        sameSite: "none",
+        secure: isProduction,
+        sameSite: isProduction ? "none" : "lax",
         maxAge: 24 * 60 * 60 * 1000,
         path: "/"
       });
@@ -372,38 +382,58 @@ async function startServer() {
 
   app.post("/api/auth/login", (req, res) => {
     const { email, password } = req.body;
+    console.log(`[AUTH] Login attempt - Email: ${email}`);
     try {
       const user = db.prepare("SELECT * FROM users WHERE email = ?").get(email) as any;
-      if (!user || user.password !== hashPassword(password)) {
+      if (!user) {
+        console.log(`[AUTH] Login Failed: User not found for ${email}`);
+        return res.status(401).json({ error: "이메일 또는 비밀번호가 일치하지 않습니다." });
+      }
+
+      const inputHash = hashPassword(password);
+      if (user.password !== inputHash) {
+        console.log(`[AUTH] Login Failed: Password mismatch for ${email}`);
         return res.status(401).json({ error: "이메일 또는 비밀번호가 일치하지 않습니다." });
       }
       
+      console.log(`[AUTH] Login Success: User ID ${user.id} (${user.name})`);
       const token = jwt.sign({ id: user.id, role: "user" }, JWT_SECRET, { expiresIn: "24h" });
+      const isProduction = process.env.NODE_ENV === "production";
       res.cookie("user_token", token, {
         httpOnly: true,
-        secure: true,
-        sameSite: "none",
+        secure: isProduction,
+        sameSite: isProduction ? "none" : "lax",
         maxAge: 24 * 60 * 60 * 1000,
         path: "/"
       });
       res.json({ success: true, user: { name: user.name, email: user.email, address: user.address } });
     } catch (err) {
+      console.error("[AUTH] Login Exception:", err);
       res.status(500).json({ error: "로그인 실패" });
     }
   });
 
   app.get("/api/auth/me", (req, res) => {
     const token = req.cookies.user_token;
-    if (!token) return res.json({ user: null });
+    if (!token) {
+      console.log("[AUTH/ME] No token cookie found.");
+      return res.json({ user: null });
+    }
     try {
       const decoded: any = jwt.verify(token, JWT_SECRET);
+      console.log(`[AUTH/ME] Verifying token for user ID: ${decoded.id}`);
       
       // Keep tier status fresh
       const status = updateUserTierStatus(decoded.id);
       
       const user = db.prepare("SELECT id, name, email, phone, zipcode, address, detail_address, google_id, naver_id, points, tier, tier_updated_at FROM users WHERE id = ?").get(decoded.id) as any;
+      if (!user) {
+        console.log(`[AUTH/ME] User not found in DB for ID: ${decoded.id}`);
+        return res.json({ user: null });
+      }
       res.json({ user: { ...user, ...status, tier_config: TIER_CONFIG } });
     } catch (err) {
+      console.error("[AUTH/ME] Token verification failed:", err);
       res.json({ user: null });
     }
   });
@@ -489,13 +519,22 @@ async function startServer() {
   app.post("/api/admin/orders/:id/tracking", authenticateAdmin, (req, res) => {
     const { id } = req.params;
     const { tracking_number, shipping_company } = req.body;
+    console.log(`[ADMIN] Updating tracking for order ${id}: ${shipping_company} ${tracking_number}`);
     try {
-      db.prepare(
+      const result = db.prepare(
         "UPDATE orders SET tracking_number = ?, shipping_company = ?, status = 'shipping' WHERE id = ?"
       ).run(tracking_number, shipping_company, id);
+      
+      if (result.changes === 0) {
+        console.log(`[ADMIN] Tracking update failed: Order ${id} not found`);
+        return res.status(404).json({ error: "Order not found" });
+      }
+      
+      console.log(`[ADMIN] Tracking updated successfully for order ${id}`);
       res.json({ success: true });
-    } catch (err) {
-      res.status(500).json({ error: "Tracking update failed" });
+    } catch (err: any) {
+      console.error("[ADMIN] Tracking update EXCEPTION:", err);
+      res.status(500).json({ error: "Tracking update failed: " + err.message });
     }
   });
 
@@ -595,10 +634,11 @@ async function startServer() {
       }
 
       const token = jwt.sign({ id: user.id, role: "user" }, JWT_SECRET, { expiresIn: "24h" });
+      const isProduction = process.env.NODE_ENV === "production";
       res.cookie("user_token", token, {
         httpOnly: true,
-        secure: true,
-        sameSite: "none",
+        secure: isProduction,
+        sameSite: isProduction ? "none" : "lax",
         maxAge: 24 * 60 * 60 * 1000,
         path: "/"
       });
@@ -719,10 +759,11 @@ async function startServer() {
       }
 
       const token = jwt.sign({ id: user.id, role: "user" }, JWT_SECRET, { expiresIn: "24h" });
+      const isProduction = process.env.NODE_ENV === "production";
       res.cookie("user_token", token, {
         httpOnly: true,
-        secure: true,
-        sameSite: "none",
+        secure: isProduction,
+        sameSite: isProduction ? "none" : "lax",
         maxAge: 24 * 60 * 60 * 1000,
         path: "/"
       });
@@ -795,10 +836,11 @@ async function startServer() {
     }
 
     const jwtToken = jwt.sign({ role: "admin", keyId: keyRecord.id }, JWT_SECRET, { expiresIn: "24h" });
+    const isProduction = process.env.NODE_ENV === "production";
     res.cookie("admin_token", jwtToken, {
       httpOnly: true,
-      secure: true,
-      sameSite: "none",
+      secure: isProduction,
+      sameSite: isProduction ? "none" : "lax",
       maxAge: 24 * 60 * 60 * 1000,
       path: "/"
     });
