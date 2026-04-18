@@ -469,7 +469,7 @@ async function startServer() {
       
       // Admin token bypass
       if (decoded.role === "admin") {
-        req.admin = { id: 0, role: "MASTER" }; // Use 0 for logged in via Admin Key
+        req.admin = { id: null, role: "MASTER" }; // Use null for logged in via Admin Key to prevent FK error
         return next();
       }
 
@@ -1395,7 +1395,7 @@ async function startServer() {
     { name: "image", maxCount: 1 },
     { name: "description_image", maxCount: 1 }
   ]), (req: any, res) => {
-    const { name, price, description, category, stock, material, dimensions, origin, discount_rate, show_on_main } = req.body;
+    const { name, price, description, category, stock, material, dimensions, origin, manufacturer, discount_rate, show_on_main } = req.body;
     const files = req.files as { [fieldname: string]: Express.Multer.File[] };
     
     // Validate required fields

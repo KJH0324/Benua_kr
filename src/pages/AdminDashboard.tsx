@@ -884,7 +884,8 @@ function AdminProducts() {
     stock: 0,
     material: "",
     dimensions: "",
-    origin: ""
+    origin: "",
+    manufacturer: ""
   });
   const [mainImage, setMainImage] = useState<File | null>(null);
   const [descImage, setDescImage] = useState<File | null>(null);
@@ -963,7 +964,7 @@ function AdminProducts() {
         toast.success(editingId ? "상품이 수정되었습니다." : "상품이 등록되었습니다.");
         setIsModalOpen(false);
         setEditingId(null);
-        setNewProduct({ name: "", price: 0, discount_rate: 0, show_on_main: 0, category: "리빙", description: "", stock: 0, material: "", dimensions: "", origin: "" });
+        setNewProduct({ name: "", price: 0, discount_rate: 0, show_on_main: 0, category: "리빙", description: "", stock: 0, material: "", dimensions: "", origin: "", manufacturer: "" });
         setMainImage(null);
         setDescImage(null);
         fetchProducts();
@@ -987,7 +988,8 @@ function AdminProducts() {
       stock: product.stock || 0,
       material: product.material || "",
       dimensions: product.dimensions || "",
-      origin: product.origin || ""
+      origin: product.origin || "",
+      manufacturer: (product as any).manufacturer || ""
     });
     setIsModalOpen(true);
   };
@@ -1018,7 +1020,7 @@ function AdminProducts() {
           <button 
             onClick={() => {
               setEditingId(null);
-              setNewProduct({ name: "", price: 0, discount_rate: 0, show_on_main: 0, category: "리빙", description: "", stock: 0, material: "", dimensions: "", origin: "" });
+              setNewProduct({ name: "", price: 0, discount_rate: 0, show_on_main: 0, category: "리빙", description: "", stock: 0, material: "", dimensions: "", origin: "", manufacturer: "" });
               setIsModalOpen(true);
             }}
             className="bg-venuea-dark text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center space-x-2-lg shadow-lg shadow-venuea-dark/20 hover:bg-venuea-gold transition-all"
@@ -1784,21 +1786,6 @@ function AdminUserPoints() {
     } catch { toast.error("서버 오류"); }
   };
 
-  const handleUpdateRole = async (email: string, role: string) => {
-    try {
-      const res = await fetch(`/api/admin/users/${email}/role`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ role })
-      });
-      if(res.ok) {
-        toast.success("권한이 변경되었습니다.");
-      } else {
-        toast.error("권한 변경 실패");
-      }
-    } catch { toast.error("서버 오류"); }
-  };
-
   return (
     <div className="space-y-12">
       <h1 className="text-2xl font-serif font-bold text-gray-900">회원/포인트 관리</h1>
@@ -1901,6 +1888,21 @@ function AdminKeys() {
     } catch {
       toast.error("서버 오류");
     }
+  };
+
+  const handleUpdateRole = async (email: string, role: string) => {
+    try {
+      const res = await fetch(`/api/admin/users/${email}/role`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ role })
+      });
+      if(res.ok) {
+        toast.success("권한이 변경되었습니다.");
+      } else {
+        toast.error("권한 변경 실패");
+      }
+    } catch { toast.error("서버 오류"); }
   };
 
   return (
