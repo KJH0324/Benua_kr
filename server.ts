@@ -1988,13 +1988,6 @@ async function startServer() {
     }
   });
 
-  // --- Admin Audit Logging ---
-  const logAdminAction = (adminId: string, action: string, targetTable: string, targetId: string | number, details: string) => {
-    db.prepare("INSERT INTO admin_logs (admin_id, action, target_table, target_id, details) VALUES (?, ?, ?, ?, ?)").run(
-      adminId, action, targetTable, targetId, details
-    );
-  };
-
   // --- Admin Role Assignment API ---
   app.post("/api/admin/users/:id/role", authenticateAdmin, (req: any, res) => {
     const { role } = req.body;
