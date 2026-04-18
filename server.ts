@@ -56,9 +56,22 @@ db.exec(`
     address TEXT,
     detail_address TEXT,
     points INTEGER DEFAULT 0,
-    grade TEXT DEFAULT 'Sand',
-    total_spent_6m INTEGER DEFAULT 0,
+    tier TEXT DEFAULT 'BEIGE',
+    tier_updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    google_id TEXT,
+    naver_id TEXT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
+  CREATE TABLE IF NOT EXISTS point_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER,
+    amount INTEGER,
+    reason TEXT,
+    type TEXT, -- EARNED, USED, MANUAL_EARN, MANUAL_DEDUCT
+    expires_at DATETIME,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(user_id) REFERENCES users(id)
   );
 
   CREATE TABLE IF NOT EXISTS coupons (
@@ -79,6 +92,7 @@ db.exec(`
     coupon_id INTEGER,
     is_used INTEGER DEFAULT 0,
     used_at DATETIME,
+    notified INTEGER DEFAULT 0, -- 0: Not notified, 1: Notified
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     expires_at DATETIME,
     FOREIGN KEY(user_id) REFERENCES users(id),
@@ -130,7 +144,11 @@ db.exec(`
     used_points INTEGER DEFAULT 0,
     used_coupon_id INTEGER,
     earned_points INTEGER DEFAULT 0,
-    status TEXT DEFAULT 'pending', -- pending, paid, shipping, completed, refunded
+    status TEXT DEFAULT 'pending', -- pending, paid, shipping, delivered, completed, refund_requested, refunded
+    payment_method TEXT,
+    tracking_number TEXT,
+    shipping_company TEXT,
+    refund_reason TEXT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
 
@@ -191,6 +209,9 @@ try { db.exec(`ALTER TABLE orders ADD COLUMN used_coupon_id INTEGER`); } catch(e
 try { db.exec(`ALTER TABLE orders ADD COLUMN earned_points INTEGER DEFAULT 0`); } catch(e) {}
 try { db.exec(`ALTER TABLE orders ADD COLUMN order_data_json TEXT`); } catch(e) {}
 
+// Defensive ALTER TABLE for user_coupons
+try { db.exec(`ALTER TABLE user_coupons ADD COLUMN notified INTEGER DEFAULT 0`); } catch(e) {}
+
 // Add columns to users table for social linkage
 try { db.exec(`ALTER TABLE users ADD COLUMN google_id TEXT`); } catch(e) {}
 try { db.exec(`ALTER TABLE users ADD COLUMN naver_id TEXT`); } catch(e) {}
@@ -230,6 +251,96 @@ async function startServer() {
     } catch (err) {
       res.status(401).json({ error: "Invalid token" });
     }
+  };
+
+  const authenticateUser = (req: any, res: any, next: any) => {
+    const token = req.cookies.user_token;
+    if (!token) return res.status(401).json({ error: "Unauthorized" });
+
+    try {
+      const decoded = jwt.verify(token, JWT_SECRET) as any;
+      req.user = decoded;
+      next();
+    } catch (err) {
+      res.status(401).json({ error: "Invalid token" });
+    }
+  };
+
+  const formatPrice = (price: number) => {
+    return new Intl.NumberFormat('ko-KR', { style: 'currency', currency: 'KRW' }).format(price);
+  };
+
+  // --- Point & Tier Constants ---
+  const TIER_CONFIG = {
+    BEIGE: { name: "베이지", min_spend: 0, accrual_rate: 0.01 },
+    GREEN: { name: "그린", min_spend: 100000, accrual_rate: 0.03 },
+    BLACK: { name: "블랙", min_spend: 500000, accrual_rate: 0.05, free_shipping: true },
+    THE_BLACK: { name: "더 블랙", min_spend: 1000000, accrual_rate: 0.07, free_shipping: true }
+  };
+
+  const calculateUserTier = (spending6Months: number) => {
+    if (spending6Months >= TIER_CONFIG.THE_BLACK.min_spend) return 'THE_BLACK';
+    if (spending6Months >= TIER_CONFIG.BLACK.min_spend) return 'BLACK';
+    if (spending6Months >= TIER_CONFIG.GREEN.min_spend) return 'GREEN';
+    return 'BEIGE';
+  };
+
+  const issueTierCoupons = (userId: number, fromTier: string, toTier: string) => {
+    const tierOrder = ['BEIGE', 'GREEN', 'BLACK', 'THE_BLACK'];
+    const fromIdx = tierOrder.indexOf(fromTier);
+    const toIdx = tierOrder.indexOf(toTier);
+
+    if (toIdx <= fromIdx) return;
+
+    // Issue for each step up
+    for (let i = fromIdx + 1; i <= toIdx; i++) {
+        const tier = tierOrder[i];
+        const expires_at = new Date();
+        expires_at.setDate(expires_at.getDate() + 30);
+        const expires_str = expires_at.toISOString();
+
+        if (tier === 'BEIGE') {
+            const c = db.prepare("INSERT INTO coupons (name, code, type, value, min_order_amount) VALUES (?, ?, ?, ?, ?)").run("베이지 웰컴 배송권", `BEIGE-WELCOME-${Date.now()}`, "SHIPPING", 0, 0);
+            db.prepare("INSERT INTO user_coupons (user_id, coupon_id, expires_at) VALUES (?, ?, ?)").run(userId, c.lastInsertRowid, expires_str);
+        } else if (tier === 'GREEN') {
+            const c1 = db.prepare("INSERT INTO coupons (name, code, type, value, min_order_amount) VALUES (?, ?, ?, ?, ?)").run("그린 프리 배송권", `GREEN-FREE-${Date.now()}`, "SHIPPING", 0, 0);
+            const c2 = db.prepare("INSERT INTO coupons (name, code, type, value, min_order_amount) VALUES (?, ?, ?, ?, ?)").run("그린 감사 할인권", `GREEN-THANKS-${Date.now()}`, "FIXED", 3000, 30000);
+            db.prepare("INSERT INTO user_coupons (user_id, coupon_id, expires_at) VALUES (?, ?, ?)").run(userId, c1.lastInsertRowid, expires_str);
+            db.prepare("INSERT INTO user_coupons (user_id, coupon_id, expires_at) VALUES (?, ?, ?)").run(userId, c2.lastInsertRowid, expires_str);
+        } else if (tier === 'BLACK') {
+            const c1 = db.prepare("INSERT INTO coupons (name, code, type, value, min_order_amount, max_discount_amount) VALUES (?, ?, ?, ?, ?, ?)").run("블랙 10% 감사권", `BLACK-10P-${Date.now()}`, "PERCENT", 10, 0, 10000);
+            const c2 = db.prepare("INSERT INTO coupons (name, code, type, value, min_order_amount) VALUES (?, ?, ?, ?, ?)").run("블랙 쇼핑 지원금", `BLACK-SUPPORT-${Date.now()}`, "FIXED", 5000, 40000);
+            db.prepare("INSERT INTO user_coupons (user_id, coupon_id, expires_at) VALUES (?, ?, ?)").run(userId, c1.lastInsertRowid, expires_str);
+            db.prepare("INSERT INTO user_coupons (user_id, coupon_id, expires_at) VALUES (?, ?, ?)").run(userId, c2.lastInsertRowid, expires_str);
+        } else if (tier === 'THE_BLACK') {
+            const c1 = db.prepare("INSERT INTO coupons (name, code, type, value, min_order_amount, max_discount_amount) VALUES (?, ?, ?, ?, ?, ?)").run("더 블랙 VVIP 20%", `TBLACK-20P-${Date.now()}`, "PERCENT", 20, 0, 30000);
+            const c2 = db.prepare("INSERT INTO coupons (name, code, type, value, min_order_amount) VALUES (?, ?, ?, ?, ?)").run("더 블랙 스페셜 1만", `TBLACK-SPECIAL-${Date.now()}`, "FIXED", 10000, 50000);
+            const c3 = db.prepare("INSERT INTO coupons (name, code, type, value, min_order_amount) VALUES (?, ?, ?, ?, ?)").run("더 블랙 베이직 5천", `TBLACK-5K-1-${Date.now()}`, "FIXED", 5000, 30000);
+            const c4 = db.prepare("INSERT INTO coupons (name, code, type, value, min_order_amount) VALUES (?, ?, ?, ?, ?)").run("더 블랙 베이직 5천", `TBLACK-5K-2-${Date.now()}`, "FIXED", 5000, 30000);
+            db.prepare("INSERT INTO user_coupons (user_id, coupon_id, expires_at) VALUES (?, ?, ?)").run(userId, c1.lastInsertRowid, expires_str);
+            db.prepare("INSERT INTO user_coupons (user_id, coupon_id, expires_at) VALUES (?, ?, ?)").run(userId, c2.lastInsertRowid, expires_str);
+            db.prepare("INSERT INTO user_coupons (user_id, coupon_id, expires_at) VALUES (?, ?, ?)").run(userId, c3.lastInsertRowid, expires_str);
+            db.prepare("INSERT INTO user_coupons (user_id, coupon_id, expires_at) VALUES (?, ?, ?)").run(userId, c4.lastInsertRowid, expires_str);
+        }
+    }
+  };
+
+  const updateUserTierStatus = (userId: number) => {
+    // 6 months spending
+    const sixMonthsAgo = new Date();
+    sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
+    const spendingRow = db.prepare("SELECT SUM(total_amount - shipping_fee) as spent FROM orders WHERE user_id = ? AND created_at > ?").get(userId, sixMonthsAgo.toISOString()) as any;
+    const spent = spendingRow.spent || 0;
+    
+    const user = db.prepare("SELECT tier FROM users WHERE id = ?").get(userId) as any;
+    const oldTier = user.tier || 'BEIGE';
+    const newTier = calculateUserTier(spent);
+
+    if (newTier !== oldTier) {
+        db.prepare("UPDATE users SET tier = ?, tier_updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(newTier, userId);
+        issueTierCoupons(userId, oldTier, newTier);
+    }
+    return { spent, tier: newTier };
   };
 
   // --- User Auth APIs ---
@@ -279,8 +390,12 @@ async function startServer() {
     if (!token) return res.json({ user: null });
     try {
       const decoded: any = jwt.verify(token, JWT_SECRET);
-      const user = db.prepare("SELECT id, name, email, phone, zipcode, address, detail_address, google_id, naver_id FROM users WHERE id = ?").get(decoded.id);
-      res.json({ user });
+      
+      // Keep tier status fresh
+      const status = updateUserTierStatus(decoded.id);
+      
+      const user = db.prepare("SELECT id, name, email, phone, zipcode, address, detail_address, google_id, naver_id, points, tier, tier_updated_at FROM users WHERE id = ?").get(decoded.id) as any;
+      res.json({ user: { ...user, ...status, tier_config: TIER_CONFIG } });
     } catch (err) {
       res.json({ user: null });
     }
@@ -621,7 +736,7 @@ async function startServer() {
     const jwtToken = jwt.sign({ role: "admin", keyId: keyRecord.id }, JWT_SECRET, { expiresIn: "24h" });
     res.cookie("admin_token", jwtToken, {
       httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
+      secure: true,
       sameSite: "none",
       maxAge: 24 * 60 * 60 * 1000,
     });
@@ -653,7 +768,155 @@ async function startServer() {
       if (err.code === "SQLITE_CONSTRAINT_UNIQUE") {
         return res.status(400).json({ error: "이미 존재하는 Key입니다." });
       }
-      res.status(500).json({ error: "Key 추가 실패" });
+    }
+  });
+
+  // --- Coupon Management (Admin) ---
+  app.get("/api/admin/coupons", authenticateAdmin, (req, res) => {
+    try {
+      const coupons = db.prepare("SELECT * FROM coupons ORDER BY created_at DESC").all();
+      res.json(coupons);
+    } catch (err) {
+      res.status(500).json({ error: "쿠폰 조회 실패" });
+    }
+  });
+
+  app.post("/api/admin/coupons", authenticateAdmin, (req, res) => {
+    const { name, code, type, value, min_order_amount, max_discount_amount } = req.body;
+    try {
+      db.prepare(
+        "INSERT INTO coupons (name, code, type, value, min_order_amount, max_discount_amount) VALUES (?, ?, ?, ?, ?, ?)"
+      ).run(name, code, type, value, min_order_amount, max_discount_amount);
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: "쿠폰 등록 실패: " + err.message });
+    }
+  });
+
+  app.delete("/api/admin/coupons/:id", authenticateAdmin, (req, res) => {
+    try {
+      db.prepare("DELETE FROM coupons WHERE id = ?").run(req.params.id);
+      res.json({ success: true });
+    } catch (err) {
+      res.status(500).json({ error: "쿠폰 삭제 실패" });
+    }
+  });
+
+  // Give coupon to users
+  app.post("/api/admin/coupons/:id/give", authenticateAdmin, (req, res) => {
+    const { id } = req.params;
+    const { target } = req.body; // 'all' or specific user email
+    
+    try {
+      const coupon = db.prepare("SELECT * FROM coupons WHERE id = ?").get(id);
+      if (!coupon) return res.status(404).json({ error: "Coupon not found" });
+
+      if (target === 'all') {
+        const users = db.prepare("SELECT id FROM users").all() as any[];
+        const insert = db.prepare("INSERT INTO user_coupons (user_id, coupon_id) VALUES (?, ?)");
+        const transaction = db.transaction((userList) => {
+          for (const user of userList) {
+            insert.run(user.id, id);
+          }
+        });
+        transaction(users);
+      } else {
+        const user = db.prepare("SELECT id FROM users WHERE email = ?").get(target) as any;
+        if (!user) return res.status(404).json({ error: "User not found" });
+        db.prepare("INSERT INTO user_coupons (user_id, coupon_id) VALUES (?, ?)").run(user.id, id);
+      }
+      
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: "쿠폰 지급 실패: " + err.message });
+    }
+  });
+
+  // --- Coupon (User) ---
+  app.get("/api/coupons/me", authenticateUser, (req: any, res) => {
+    try {
+      const coupons = db.prepare(`
+        SELECT uc.*, c.name, c.code, c.type, c.value, c.min_order_amount, c.max_discount_amount
+        FROM user_coupons uc
+        JOIN coupons c ON uc.coupon_id = c.id
+        WHERE uc.user_id = ? AND uc.is_used = 0 AND (uc.expires_at IS NULL OR uc.expires_at > CURRENT_TIMESTAMP)
+        ORDER BY uc.created_at DESC
+      `).all(req.user.id);
+      res.json(coupons);
+    } catch (err) {
+      res.status(500).json({ error: "쿠폰 조회 실패" });
+    }
+  });
+
+  app.get("/api/coupons/notifications", authenticateUser, (req: any, res) => {
+    try {
+      const newCoupons = db.prepare(`
+        SELECT uc.id, c.name, c.type, c.value
+        FROM user_coupons uc
+        JOIN coupons c ON uc.coupon_id = c.id
+        WHERE uc.user_id = ? AND uc.notified = 0 AND uc.is_used = 0
+      `).all(req.user.id) as any[];
+
+      res.json(newCoupons);
+    } catch (err) {
+      res.status(500).json({ error: "알림 조회 실패" });
+    }
+  });
+
+  app.post("/api/coupons/notifications/ack", authenticateUser, (req: any, res) => {
+    const { ids } = req.body;
+    try {
+      const update = db.prepare("UPDATE user_coupons SET notified = 1 WHERE id = ? AND user_id = ?");
+      const transaction = db.transaction((couponIds) => {
+        for (const id of couponIds) {
+          update.run(id, req.user.id);
+        }
+      });
+      transaction(ids);
+      res.json({ success: true });
+    } catch (err) {
+      res.status(500).json({ error: "알림 확인 처리 실패" });
+    }
+  });
+
+  app.post("/api/coupons/validate", authenticateUser, (req: any, res) => {
+    const { code, order_amount } = req.body;
+    try {
+      const coupon = db.prepare(`
+        SELECT uc.id as user_coupon_id, c.*
+        FROM user_coupons uc
+        JOIN coupons c ON uc.coupon_id = c.id
+        WHERE uc.user_id = ? AND (c.code = ? OR c.name = ?) AND uc.is_used = 0 
+        AND (uc.expires_at IS NULL OR uc.expires_at > CURRENT_TIMESTAMP)
+      `).get(req.user.id, code, code) as any;
+
+      if (!coupon) {
+        return res.status(400).json({ error: "유효하지 않거나 이미 사용된 쿠폰입니다." });
+      }
+
+      const minAmount = coupon.min_order_amount || 0;
+      if (order_amount < minAmount) {
+        return res.status(400).json({ error: `최소 주문 금액 ${formatPrice(minAmount)}원 이상 시 사용 가능합니다.` });
+      }
+
+      let discount = 0;
+      if (coupon.type === 'FIXED') {
+        discount = coupon.value;
+      } else if (coupon.type === 'PERCENT') {
+        discount = Math.floor(order_amount * (coupon.value / 100));
+        if (coupon.max_discount_amount > 0 && discount > coupon.max_discount_amount) {
+          discount = coupon.max_discount_amount;
+        }
+      } else if (coupon.type === 'SHIPPING') {
+        // Shipping discount is handled in the frontend by knowing it's a shipping coupon
+        // But for calculation here we'll assume it covers the shipping fee if we knew it
+        // For now, validation just returns the coupon info.
+      }
+
+      res.json({ coupon, discount });
+    } catch (err) {
+      console.error("Coupon validation error:", err);
+      res.status(500).json({ error: "쿠폰 확인 실패" });
     }
   });
 
@@ -761,15 +1024,15 @@ async function startServer() {
 
   // Orders
   app.post("/api/orders", (req, res) => {
-    const { user_id, customer_name, customer_email, shipping_address, total_amount, shipping_fee, items, used_points, used_coupon_id } = req.body;
+    const { user_id, customer_name, customer_email, shipping_address, total_amount, shipping_fee, items, used_points, used_coupon_id, payment_method } = req.body;
     const order_number = `ORD-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
     
     try {
       const transaction = db.transaction(() => {
         // 1. Create Order
         const info = db.prepare(
-          "INSERT INTO orders (order_number, user_id, customer_name, customer_email, shipping_address, total_amount, shipping_fee, used_points, used_coupon_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
-        ).run(order_number, user_id, customer_name, customer_email, shipping_address, total_amount, shipping_fee, used_points || 0, used_coupon_id || null);
+          "INSERT INTO orders (order_number, user_id, customer_name, customer_email, shipping_address, total_amount, shipping_fee, used_points, used_coupon_id, payment_method, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+        ).run(order_number, user_id, customer_name, customer_email, shipping_address, total_amount, shipping_fee, used_points || 0, used_coupon_id || null, payment_method || 'card', 'paid');
         
         const orderId = info.lastInsertRowid;
 
@@ -786,7 +1049,18 @@ async function startServer() {
 
         // 3. Deduct Points
         if (user_id && used_points > 0) {
+            const userRow = db.prepare("SELECT points FROM users WHERE id = ?").get(user_id) as any;
+            if (userRow.points < 1000) throw new Error("포인트는 1,000P 이상 보유 시 사용 가능합니다.");
+            if (used_points > userRow.points) throw new Error("보유 포인트보다 많은 포인트를 사용할 수 없습니다.");
+            if (used_points < 1000) throw new Error("포인트는 최소 1,000P 이상 사용해야 합니다.");
+
             db.prepare("UPDATE users SET points = points - ? WHERE id = ?").run(used_points, user_id);
+            db.prepare("INSERT INTO point_history (user_id, amount, reason, type) VALUES (?, ?, ?, ?)").run(
+                user_id, 
+                -used_points, 
+                `주문 ${order_number} 사용`, 
+                'USED'
+            );
         }
 
         // 4. Mark Coupon Used
@@ -827,8 +1101,9 @@ async function startServer() {
         order.items = db.prepare("SELECT * FROM order_items WHERE order_id = ?").all(order.id);
       }
       res.json(orders);
-    } catch (err) {
-      res.status(500).json({ error: "Failed to fetch orders" });
+    } catch (err: any) {
+      console.error("Admin orders fetch error:", err);
+      res.status(500).json({ error: "Failed to fetch orders: " + err.message });
     }
   });
 
@@ -841,37 +1116,60 @@ async function startServer() {
 
       db.prepare("UPDATE orders SET status = ? WHERE id = ?").run(status, id);
 
-      // Point rewarding on completion
-      if (status === 'completed' && order.user_id) {
+      // Point rewarding on completion (Purchase Confirmation)
+      if (status === 'completed' && order.user_id && order.status !== 'completed') {
           const user = db.prepare("SELECT * FROM users WHERE id = ?").get(order.user_id) as any;
-          let rate = 0.01;
-          if (user.grade === 'Green') rate = 0.03;
-          if (user.grade === 'Black') rate = 0.05;
-          if (user.grade === 'The Black') rate = 0.07;
+          const config = (TIER_CONFIG as any)[user.tier || 'BEIGE'];
+          const rate = config.accrual_rate;
           
-          const earned = Math.floor(order.total_amount * rate);
+          const earned = Math.floor((order.total_amount - order.shipping_fee) * rate);
+          const expires_at = new Date();
+          expires_at.setFullYear(expires_at.getFullYear() + 1);
+
           db.prepare("UPDATE orders SET earned_points = ? WHERE id = ?").run(earned, id);
-          db.prepare("UPDATE users SET points = points + ?, total_spent_6m = total_spent_6m + ? WHERE id = ?").run(earned, order.total_amount, order.user_id);
+          db.prepare("UPDATE users SET points = points + ? WHERE id = ?").run(earned, order.user_id);
+          db.prepare("INSERT INTO point_history (user_id, amount, reason, type, expires_at) VALUES (?, ?, ?, ?, ?)").run(
+            order.user_id,
+            earned,
+            `주문 ${order.order_number} 구매 적립`,
+            'EARNED',
+            expires_at.toISOString()
+          );
           
-          // Re-evaluate Grade
-          const updatedUser = db.prepare("SELECT * FROM users WHERE id = ?").get(order.user_id) as any;
-          let newGrade = 'Sand';
-          if (updatedUser.total_spent_6m >= 1000000) newGrade = 'The Black';
-          else if (updatedUser.total_spent_6m >= 500000) newGrade = 'Black';
-          else if (updatedUser.total_spent_6m >= 100000) newGrade = 'Green';
-          
-          if (newGrade !== updatedUser.grade) {
-              db.prepare("UPDATE users SET grade = ? WHERE id = ?").run(newGrade, order.user_id);
-          }
+          updateUserTierStatus(order.user_id);
       }
       
-      if (status === 'refunded' && order.user_id) {
-          db.prepare("UPDATE users SET points = points - ?, total_spent_6m = total_spent_6m - ? WHERE id = ?").run(order.earned_points || 0, order.total_amount, order.user_id);
+      if (status === 'refunded' && order.user_id && order.status !== 'refunded') {
+          db.prepare("UPDATE users SET points = MAX(0, points - ?) WHERE id = ?").run(order.earned_points || 0, order.user_id);
+          db.prepare("INSERT INTO point_history (user_id, amount, reason, type) VALUES (?, ?, ?, ?)").run(
+            order.user_id,
+            -(order.earned_points || 0),
+            `주문 ${order.order_number} 환불 차감`,
+            'USED'
+          );
+          updateUserTierStatus(order.user_id);
+          
+          // Return stock
+          const items = db.prepare("SELECT * FROM order_items WHERE order_id = ?").all(id) as any[];
+          for (const item of items) {
+              db.prepare("UPDATE products SET stock = stock + ? WHERE id = ?").run(item.quantity, item.product_id);
+          }
       }
 
       res.json({ success: true });
     } catch (err) {
       res.status(500).json({ error: "상태 변경 실패" });
+    }
+  });
+
+  app.post("/api/admin/orders/:id/tracking", authenticateAdmin, (req, res) => {
+    const { id } = req.params;
+    const { tracking_number, shipping_company } = req.body;
+    try {
+      db.prepare("UPDATE orders SET tracking_number = ?, shipping_company = ? WHERE id = ?").run(tracking_number, shipping_company, id);
+      res.json({ success: true });
+    } catch (err) {
+      res.status(500).json({ error: "Failed to update tracking" });
     }
   });
 
@@ -893,29 +1191,157 @@ async function startServer() {
     }
   });
 
-  app.get("/api/coupons/me", (req, res) => {
-      const token = req.cookies.user_token;
-      if (!token) return res.status(401).json({ error: "Unauthorized" });
-      try {
-          const decoded: any = jwt.verify(token, JWT_SECRET);
-          const coupons = db.prepare(`
-              SELECT uc.id as user_coupon_id, c.*, uc.expires_at, uc.is_used 
-              FROM user_coupons uc 
-              JOIN coupons c ON uc.coupon_id = c.id 
-              WHERE uc.user_id = ? AND uc.is_used = 0 AND (uc.expires_at IS NULL OR uc.expires_at > CURRENT_TIMESTAMP)
-          `).all(decoded.id);
-          res.json(coupons);
-      } catch (err) {
-          res.status(500).json({ error: "쿠폰 조회 실패" });
-      }
+  app.post("/api/orders/:id/confirm", authenticateUser, (req: any, res) => {
+    const { id } = req.params;
+    try {
+        const order = db.prepare("SELECT * FROM orders WHERE id = ? AND user_id = ?").get(id, req.user.id) as any;
+        if (!order) return res.status(404).json({ error: "Order not found" });
+        if (order.status === 'completed') return res.status(400).json({ error: "Already confirmed" });
+
+        db.prepare("UPDATE orders SET status = 'completed' WHERE id = ?").run(id);
+        
+        // Point rewarding logic (already integrated in status update handler, but I'll call it explicitly here or trigger it)
+        // I'll reuse the logic from the admin status update
+        const user = db.prepare("SELECT * FROM users WHERE id = ?").get(order.user_id) as any;
+        const config = (TIER_CONFIG as any)[user.tier || 'BEIGE'];
+        const rate = config.accrual_rate;
+        const earned = Math.floor((order.total_amount - order.shipping_fee) * rate);
+        const expires_at = new Date();
+        expires_at.setFullYear(expires_at.getFullYear() + 1);
+
+        db.prepare("UPDATE orders SET earned_points = ? WHERE id = ?").run(earned, id);
+        db.prepare("UPDATE users SET points = points + ? WHERE id = ?").run(earned, order.user_id);
+        db.prepare("INSERT INTO point_history (user_id, amount, reason, type, expires_at) VALUES (?, ?, ?, ?, ?)").run(
+            order.user_id,
+            earned,
+            `주문 ${order.order_number} 구매 확정 적립`,
+            'EARNED',
+            expires_at.toISOString()
+        );
+        
+        updateUserTierStatus(order.user_id);
+        
+        res.json({ success: true, earned });
+    } catch (err) {
+        res.status(500).json({ error: "Confirmation failed" });
+    }
+  });
+
+  app.post("/api/orders/:id/refund-request", authenticateUser, (req: any, res) => {
+    const { id } = req.params;
+    const { reason } = req.body;
+    try {
+        const order = db.prepare("SELECT * FROM orders WHERE id = ? AND user_id = ?").get(id, req.user.id) as any;
+        if (!order) return res.status(404).json({ error: "Order not found" });
+        
+        db.prepare("UPDATE orders SET status = 'refund_requested', refund_reason = ? WHERE id = ?").run(reason, id);
+        res.json({ success: true });
+    } catch (err) {
+        res.status(500).json({ error: "Refund request failed" });
+    }
+  });
+
+  app.get("/api/orders/:id/detail", authenticateUser, (req: any, res) => {
+    const { id } = req.params;
+    try {
+        const order = db.prepare("SELECT * FROM orders WHERE id = ? AND user_id = ?").get(id, req.user.id) as any;
+        if (!order) return res.status(404).json({ error: "Order not found" });
+        const items = db.prepare("SELECT * FROM order_items WHERE order_id = ?").all(id);
+        res.json({ ...order, items });
+    } catch (err) {
+        res.status(500).json({ error: "Search failed" });
+    }
+  });
+
+  app.post("/api/reviews", authenticateUser, (req: any, res) => {
+    const { product_id, order_id, rating, content, image_url } = req.body;
+    try {
+        const order = db.prepare("SELECT * FROM orders WHERE id = ? AND user_id = ?").get(order_id, req.user.id) as any;
+        if (!order || order.status !== 'completed') return res.status(400).json({ error: "Only confirmed orders can be reviewed" });
+        
+        // Check if already reviewed
+        const existing = db.prepare("SELECT id FROM reviews WHERE order_id = ? AND product_id = ?").get(order_id, product_id);
+        if (existing) return res.status(400).json({ error: "Already reviewed" });
+
+        const user = db.prepare("SELECT id, tier FROM users WHERE id = ?").get(req.user.id) as any;
+        const type = image_url ? 'PHOTO' : 'TEXT';
+        
+        // Points logic
+        let points = 0;
+        const isPremium = user.tier === 'BLACK' || user.tier === 'THE_BLACK';
+        if (type === 'TEXT') {
+            points = isPremium ? 500 : 100;
+        } else {
+            points = isPremium ? 2000 : 500;
+        }
+
+        db.transaction(() => {
+            db.prepare(
+                "INSERT INTO reviews (product_id, user_id, order_id, rating, content, image_url, type, points_earned) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+            ).run(product_id, req.user.id, order_id, rating, content, image_url, type, points);
+
+            db.prepare("UPDATE users SET points = points + ? WHERE id = ?").run(points, req.user.id);
+            db.prepare("INSERT INTO point_history (user_id, amount, reason, type) VALUES (?, ?, ?, ?)")
+              .run(req.user.id, points, `상품 리뷰(${type}) 작성 적립`, 'EARNED');
+        });
+
+        res.json({ success: true, points_earned: points });
+    } catch (err) {
+        res.status(500).json({ error: "Review failed" });
+    }
+  });
+
+  app.get("/api/products/:id/reviews", (req, res) => {
+    const { id } = req.params;
+    try {
+        const reviews = db.prepare(`
+            SELECT r.*, u.name as user_name, u.tier as user_tier
+            FROM reviews r
+            JOIN users u ON r.user_id = u.id
+            WHERE r.product_id = ?
+            ORDER BY r.created_at DESC
+        `).all(id);
+        res.json(reviews);
+    } catch (err) {
+        res.status(500).json({ error: "Search failed" });
+    }
+  });
+  app.get("/api/user/coupons", (req, res) => {
+    const token = req.cookies.user_token;
+    if (!token) return res.status(401).json({ error: "Unauthorized" });
+    try {
+        const decoded: any = jwt.verify(token, JWT_SECRET);
+        const coupons = db.prepare(`
+            SELECT uc.id as user_coupon_id, c.*, uc.expires_at, uc.is_used 
+            FROM user_coupons uc 
+            JOIN coupons c ON uc.coupon_id = c.id 
+            WHERE uc.user_id = ? AND uc.is_used = 0 AND (uc.expires_at IS NULL OR uc.expires_at > CURRENT_TIMESTAMP)
+        `).all(decoded.id);
+        res.json(coupons);
+    } catch (err) {
+        res.status(500).json({ error: "쿠폰 조회 실패" });
+    }
   });
 
   app.post("/api/admin/users/points", authenticateAdmin, (req, res) => {
       const { email, amount } = req.body;
       try {
           const user = db.prepare("SELECT * FROM users WHERE email = ?").get(email) as any;
-          if (!user) return res.status(404).json({ error: "User not found" });
+          if (!user) return res.status(404).json({ error: "사용자를 찾을 수 없습니다." });
+
+          const type = amount >= 0 ? 'MANUAL_EARN' : 'MANUAL_DEDUCT';
+          const expires_at = new Date();
+          expires_at.setFullYear(expires_at.getFullYear() + 1);
+
           db.prepare("UPDATE users SET points = points + ? WHERE id = ?").run(amount, user.id);
+          db.prepare("INSERT INTO point_history (user_id, amount, reason, type, expires_at) VALUES (?, ?, ?, ?, ?)").run(
+            user.id, 
+            amount, 
+            "관리자 수동 지급/차감", 
+            type, 
+            expires_at.toISOString()
+          );
+
           res.json({ success: true });
       } catch (err) {
           res.status(500).json({ error: "포인트 지급 실패" });

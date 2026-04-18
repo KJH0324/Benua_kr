@@ -18,6 +18,7 @@ import Privacy from "./pages/Privacy";
 import Checkout from "./pages/Checkout";
 import { motion, AnimatePresence } from "motion/react";
 import ErrorBoundary from "./components/ErrorBoundary";
+import CouponPopup from "./components/CouponPopup";
 
 export default function App() {
   return (
@@ -46,6 +47,7 @@ export default function App() {
             </AnimatePresence>
           </main>
           <Footer />
+          <CouponPopup />
           <Toaster 
             position="top-center" 
             toastOptions={{

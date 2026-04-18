@@ -13,7 +13,17 @@ export default function Checkout() {
   const [isAddressModalOpen, setIsAddressModalOpen] = useState(false);
   const [paymentMethod, setPaymentMethod] = useState("card");
   
-  const { items, subtotal, shipping, total } = location.state || { items: [], subtotal: 0, shipping: 0, total: 0 };
+  const { items, subtotal, shipping, total: initialTotal } = location.state || { items: [], subtotal: 0, shipping: 0, total: 0 };
+
+  const [couponCode, setCouponCode] = useState("");
+  const [discount, setDiscount] = useState(0);
+  const [appliedCoupon, setAppliedCoupon] = useState<any>(null);
+  const [pointUsage, setPointUsage] = useState(0);
+  
+  const isFreeShipping = user?.tier === 'BLACK' || user?.tier === 'THE_BLACK' || appliedCoupon?.type === 'SHIPPING';
+  const effectiveShipping = isFreeShipping ? 0 : shipping;
+  
+  const finalTotal = subtotal + effectiveShipping - discount - pointUsage;
 
   const [formData, setFormData] = useState({
     name: "",
@@ -67,6 +77,31 @@ export default function Checkout() {
     setIsAddressModalOpen(false);
   };
 
+  const handleApplyCoupon = async () => {
+    if (!couponCode) {
+      toast.error("쿠폰 코드를 입력해주세요.");
+      return;
+    }
+    
+    try {
+      const res = await fetch("/api/coupons/validate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code: couponCode, amount: subtotal })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setAppliedCoupon(data.coupon);
+        setDiscount(data.discount);
+        toast.success(`'${data.coupon.name}' 쿠폰이 적용되어 ${formatPrice(data.discount)} 할인이 적용되었습니다.`);
+      } else {
+        toast.error(data.error || "유효하지 않은 쿠폰입니다.");
+      }
+    } catch (err) {
+      toast.error("쿠폰 적용 중 오류가 발생했습니다.");
+    }
+  };
+
   const handlePayment = async () => {
     try {
       const response = await fetch("/api/orders", {
@@ -77,8 +112,12 @@ export default function Checkout() {
           customer_name: formData.name,
           customer_email: user.email,
           shipping_address: `[${formData.zipcode}] ${formData.address} ${formData.detail_address}`,
-          total_amount: total,
-          shipping_fee: shipping,
+          total_amount: finalTotal,
+          shipping_fee: effectiveShipping,
+          discount_amount: discount,
+          used_points: pointUsage,
+          used_coupon_id: appliedCoupon?.user_coupon_id,
+          payment_method: paymentMethod,
           items: items
         })
       });
@@ -245,13 +284,101 @@ export default function Checkout() {
                 </div>
                 <div className="flex justify-between text-sm">
                   <span className="text-venuea-dark/60">배송비</span>
-                  <span className="font-mono">{shipping === 0 ? "무료" : formatPrice(shipping)}</span>
+                  <span className="font-mono">{effectiveShipping === 0 ? "무료" : formatPrice(effectiveShipping)}</span>
+                </div>
+                {discount > 0 && (
+                  <div className="flex justify-between text-sm text-[#FF4000]">
+                    <span className="font-bold">쿠폰 할인 ({appliedCoupon?.name})</span>
+                    <span className="font-mono">-{formatPrice(discount)}</span>
+                  </div>
+                )}
+                {pointUsage > 0 && (
+                  <div className="flex justify-between text-sm text-[#FF4000]">
+                    <span className="font-bold">포인트 사용</span>
+                    <span className="font-mono">-{formatPrice(pointUsage)}</span>
+                  </div>
+                )}
+              </div>
+
+              <div className="space-y-4 mb-6">
+                <div className="p-1 border-b border-venuea-dark/10">
+                  <label className="text-[10px] font-bold uppercase tracking-widest text-venuea-dark/40 mb-1 block">쿠폰 코드</label>
+                  <div className="flex gap-2">
+                    <input 
+                      type="text" 
+                      value={couponCode}
+                      onChange={e => setCouponCode(e.target.value)}
+                      placeholder="쿠폰 코드 입력"
+                      disabled={!!appliedCoupon}
+                      className="flex-grow bg-[#F9F9F9] border border-venuea-dark/10 px-3 py-2 text-xs focus:outline-none focus:border-venuea-gold uppercase tracking-widest disabled:opacity-50"
+                    />
+                    {appliedCoupon ? (
+                      <button 
+                        onClick={() => {
+                          setAppliedCoupon(null);
+                          setDiscount(0);
+                          setCouponCode("");
+                        }}
+                        className="bg-venuea-dark/5 text-venuea-dark/60 px-4 text-[10px] font-bold uppercase tracking-widest hover:bg-venuea-dark/10"
+                      >
+                        취소
+                      </button>
+                    ) : (
+                      <button 
+                        onClick={handleApplyCoupon}
+                        className="bg-venuea-dark text-white px-4 text-[10px] font-bold uppercase tracking-widest hover:bg-venuea-gold"
+                      >
+                        적용
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                <div className="p-1 border-b border-venuea-dark/10">
+                  <label className="text-[10px] font-bold uppercase tracking-widest text-venuea-dark/40 mb-1 block">포인트 사용 (보유: {user.points}P)</label>
+                  <div className="flex gap-2">
+                    <input 
+                      type="number" 
+                      value={pointUsage || ""}
+                      onChange={e => {
+                        const val = parseInt(e.target.value) || 0;
+                        if (val > user.points) setPointUsage(user.points);
+                        else setPointUsage(val);
+                      }}
+                      onBlur={() => {
+                        if (pointUsage > 0 && user.points < 1000) {
+                          toast.error("포인트는 1,000P 이상 보유 시 사용 가능합니다.");
+                          setPointUsage(0);
+                        } else if (pointUsage > 0 && pointUsage < 1000) {
+                          // Note: user requested "1000포인트 이상 사용 시", usually means min usage amount or min balance.
+                          // I'll assume min usage amount of 1000.
+                          toast.error("최소 1,000P 이상부터 사용 가능합니다.");
+                          setPointUsage(0);
+                        }
+                      }}
+                      placeholder="1,000P 이상 사용 가능"
+                      className="flex-grow bg-[#F9F9F9] border border-venuea-dark/10 px-3 py-2 text-xs focus:outline-none focus:border-venuea-gold"
+                    />
+                    <button 
+                      onClick={() => {
+                        if (user.points >= 1000) {
+                          const maxPayable = subtotal + effectiveShipping - discount;
+                          setPointUsage(Math.min(user.points, maxPayable));
+                        } else {
+                          toast.error("사용 가능한 포인트가 부족합니다.");
+                        }
+                      }}
+                      className="bg-venuea-dark text-white px-4 text-[10px] font-bold uppercase tracking-widest hover:bg-venuea-gold"
+                    >
+                      전액 사용
+                    </button>
+                  </div>
                 </div>
               </div>
               
               <div className="flex justify-between items-end border-t border-venuea-dark/10 pt-6 mb-8">
                 <span className="text-sm font-bold text-venuea-dark">총 결제 금액</span>
-                <span className="text-2xl font-bold font-mono text-venuea-gold">{formatPrice(total)}</span>
+                <span className="text-2xl font-bold font-mono text-venuea-gold">{formatPrice(finalTotal)}</span>
               </div>
 
               <button 

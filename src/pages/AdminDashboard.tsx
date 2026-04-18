@@ -20,7 +20,8 @@ import {
   MessageSquare,
   Reply,
   LogOut,
-  ShoppingCart
+  ShoppingCart,
+  Ticket
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { cn, formatPrice } from "../lib/utils";
@@ -77,6 +78,7 @@ export default function AdminDashboard() {
     { name: "주문 내역", path: "/admin/orders", icon: ShoppingBag },
     { name: "고객 문의", path: "/admin/inquiries", icon: MessageSquare },
     { name: "고객 관리", path: "/admin/customers", icon: Users },
+    { name: "쿠폰 관리", path: "/admin/coupons", icon: Ticket },
     { name: "관리자 키", path: "/admin/keys", icon: Settings },
   ];
 
@@ -203,10 +205,261 @@ export default function AdminDashboard() {
           <Route path="/" element={<AdminOverview />} />
           <Route path="/products" element={<AdminProducts />} />
           <Route path="/orders" element={<AdminOrders />} />
+          <Route path="/coupons" element={<AdminCoupons />} />
           <Route path="/inquiries" element={<AdminInquiries />} />
           <Route path="/keys" element={<AdminKeys />} />
         </Routes>
       </main>
+    </div>
+  );
+}
+
+function AdminCoupons() {
+  const [coupons, setCoupons] = useState<any[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isAdding, setIsAdding] = useState(false);
+  const [newCoupon, setNewCoupon] = useState({
+    name: "",
+    code: "",
+    type: "PERCENT",
+    value: 0,
+    min_order_amount: 1,
+    max_discount_amount: 0
+  });
+  const [giveTarget, setGiveTarget] = useState({ id: "", email: "" });
+
+  const fetchCoupons = async () => {
+    setIsLoading(true);
+    try {
+      const res = await fetch("/api/admin/coupons");
+      const data = await res.json();
+      setCoupons(data);
+    } catch {
+      toast.error("쿠폰 목록을 불러오지 못했습니다.");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchCoupons();
+  }, []);
+
+  const handleAddCoupon = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      const res = await fetch("/api/admin/coupons", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(newCoupon)
+      });
+      if (res.ok) {
+        toast.success("쿠폰이 생성되었습니다.");
+        setIsAdding(false);
+        setNewCoupon({
+          name: "",
+          code: "",
+          type: "PERCENT",
+          value: 0,
+          min_order_amount: 1,
+          max_discount_amount: 0
+        });
+        fetchCoupons();
+      } else {
+        const data = await res.json();
+        toast.error(data.error || "생성 실패");
+      }
+    } catch {
+      toast.error("서버 오류");
+    }
+  };
+
+  const handleDeleteCoupon = async (id: number) => {
+    if (!confirm("이 쿠폰을 삭제하시겠습니까?")) return;
+    try {
+      const res = await fetch(`/api/admin/coupons/${id}`, { method: "DELETE" });
+      if (res.ok) {
+        toast.success("쿠폰이 삭제되었습니다.");
+        fetchCoupons();
+      }
+    } catch {
+      toast.error("삭제 실패");
+    }
+  };
+
+  const handleGiveCoupon = async (id: number, target: string) => {
+    try {
+      const res = await fetch(`/api/admin/coupons/${id}/give`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ target })
+      });
+      if (res.ok) {
+        toast.success(target === 'all' ? "모든 사용자에게 지급되었습니다." : `${target}님에게 지급되었습니다.`);
+        setGiveTarget({ id: "", email: "" });
+      } else {
+        const data = await res.json();
+        toast.error(data.error || "지급 실패");
+      }
+    } catch {
+      toast.error("서버 오류");
+    }
+  };
+
+  return (
+    <div className="space-y-8">
+      <header className="flex justify-between items-center">
+        <div>
+          <h1 className="text-2xl font-serif font-bold text-gray-900">쿠폰 관리</h1>
+          <p className="text-sm text-gray-500 mt-1">이벤트 쿠폰을 생성하고 사용자에게 지급합니다.</p>
+        </div>
+        <button 
+          onClick={() => setIsAdding(true)}
+          className="bg-venuea-dark text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center space-x-2 hover:bg-venuea-gold transition-colors"
+        >
+          <Plus size={18} />
+          <span>새 쿠폰 생성</span>
+        </button>
+      </header>
+
+      <AnimatePresence>
+        {isAdding && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/50 overflow-y-auto">
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="bg-white rounded-2xl p-8 max-w-md w-full shadow-2xl my-auto"
+            >
+              <div className="flex justify-between items-center mb-6">
+                <h2 className="text-xl font-bold text-gray-900">새 쿠폰 생성</h2>
+                <button onClick={() => setIsAdding(false)} className="text-gray-400 hover:text-gray-600">
+                  <X size={24} />
+                </button>
+              </div>
+
+              <form onSubmit={handleAddCoupon} className="space-y-4">
+                <div>
+                  <label className="block text-xs font-bold uppercase tracking-widest text-gray-400 mb-1">쿠폰 이름</label>
+                  <input 
+                    type="text" 
+                    required 
+                    value={newCoupon.name}
+                    onChange={e => setNewCoupon({...newCoupon, name: e.target.value})}
+                    placeholder="예: 신규 회원 가입 감사 쿠폰"
+                    className="w-full border border-gray-200 rounded-lg px-4 py-2 focus:border-venuea-gold outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold uppercase tracking-widest text-gray-400 mb-1">쿠폰 코드</label>
+                  <input 
+                    type="text" 
+                    required 
+                    value={newCoupon.code}
+                    onChange={e => setNewCoupon({...newCoupon, code: e.target.value})}
+                    placeholder="예: WELCOME2024"
+                    className="w-full border border-gray-200 rounded-lg px-4 py-2 focus:border-venuea-gold outline-none"
+                  />
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs font-bold uppercase tracking-widest text-gray-400 mb-1">유형</label>
+                    <select 
+                      value={newCoupon.type}
+                      onChange={e => setNewCoupon({...newCoupon, type: e.target.value})}
+                      className="w-full border border-gray-200 rounded-lg px-4 py-2 focus:border-venuea-gold outline-none text-sm"
+                    >
+                      <option value="PERCENT">% 할인</option>
+                      <option value="FIXED">원 할인</option>
+                      <option value="SHIPPING">무료 배송</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold uppercase tracking-widest text-gray-400 mb-1">할인 값</label>
+                    <input 
+                      type="number" 
+                      required 
+                      value={newCoupon.value}
+                      onChange={e => setNewCoupon({...newCoupon, value: parseInt(e.target.value)})}
+                      className="w-full border border-gray-200 rounded-lg px-4 py-2 focus:border-venuea-gold outline-none"
+                    />
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-xs font-bold uppercase tracking-widest text-gray-400 mb-1">최소 주문 금액 (선택)</label>
+                  <input 
+                    type="number" 
+                    value={newCoupon.min_order_amount}
+                    onChange={e => setNewCoupon({...newCoupon, min_order_amount: parseInt(e.target.value)})}
+                    className="w-full border border-gray-200 rounded-lg px-4 py-2 focus:border-venuea-gold outline-none"
+                  />
+                </div>
+                <button type="submit" className="w-full bg-venuea-dark text-white py-3 rounded-lg font-bold uppercase tracking-widest hover:bg-venuea-gold transition-colors">
+                  쿠폰 생성하기
+                </button>
+              </form>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {isLoading ? (
+        <div className="flex justify-center py-20">
+          <Loader2 className="animate-spin text-venuea-gold" size={40} />
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          {coupons.map((coupon) => (
+            <div key={coupon.id} className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm relative group overflow-hidden">
+               <div className="absolute top-0 right-0 w-32 h-32 bg-venuea-gold/5 -mr-16 -mt-16 rounded-full group-hover:scale-110 transition-transform" />
+               <div className="relative">
+                 <div className="flex justify-between items-start mb-4">
+                   <div>
+                     <span className="text-[10px] font-bold uppercase tracking-[2px] text-venuea-gold mb-1 block">
+                       {coupon.type === 'PERCENT' ? `${coupon.value}% 할인` : coupon.type === 'FIXED' ? `${formatPrice(coupon.value)} 할인` : '무료 배송'}
+                     </span>
+                     <h3 className="text-lg font-bold text-gray-900">{coupon.name}</h3>
+                     <code className="text-xs text-gray-400 block mt-1">{coupon.code}</code>
+                   </div>
+                   <button 
+                    onClick={() => handleDeleteCoupon(coupon.id)}
+                    className="text-gray-300 hover:text-red-500 transition-colors"
+                   >
+                     <Trash2 size={18} />
+                   </button>
+                 </div>
+
+                 <div className="pt-4 border-t border-gray-50 mt-4 space-y-4">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                      <button 
+                        onClick={() => handleGiveCoupon(coupon.id, 'all')}
+                        className="text-[11px] font-bold uppercase tracking-widest text-venuea-dark hover:text-venuea-gold transition-colors text-left"
+                      >
+                        전체 사용자에게 지급
+                      </button>
+                      <div className="flex items-center space-x-2">
+                        <input 
+                          type="email" 
+                          placeholder="사용자 이메일"
+                          value={giveTarget.id === coupon.id.toString() ? giveTarget.email : ""}
+                          onChange={(e) => setGiveTarget({ id: coupon.id.toString(), email: e.target.value })}
+                          className="text-xs border border-gray-200 rounded-lg px-3 py-1.5 focus:outline-none focus:border-venuea-gold w-40"
+                        />
+                        <button 
+                          onClick={() => handleGiveCoupon(coupon.id, giveTarget.email)}
+                          disabled={!giveTarget.email || giveTarget.id !== coupon.id.toString()}
+                          className="text-[11px] font-bold uppercase tracking-widest text-venuea-gold disabled:opacity-30 whitespace-nowrap"
+                        >
+                          지급
+                        </button>
+                      </div>
+                    </div>
+                 </div>
+               </div>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -649,13 +902,17 @@ function AdminOrders() {
   const [isLoading, setIsLoading] = useState(true);
 
   const fetchOrders = async () => {
+    setIsLoading(true);
     try {
       const res = await fetch("/api/admin/orders");
-      if (res.ok) {
-        setOrders(await res.json());
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.error || `서버 오류 (${res.status})`);
       }
-    } catch {
-      toast.error("주문 목록을 가져오지 못했습니다.");
+      setOrders(await res.json());
+    } catch (err: any) {
+      toast.error(`주문 목록을 가져오지 못했습니다: ${err.message}`);
+      console.error("Fetch orders error:", err);
     } finally {
       setIsLoading(false);
     }
@@ -745,27 +1002,52 @@ function AdminOrders() {
                 <td className="px-6 py-4">
                   <span className={cn(
                     "px-2 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider",
-                    order.status === 'pending' && "bg-yellow-50 text-yellow-600",
+                    order.status === 'pending' && "bg-gray-50 text-gray-500",
                     order.status === 'paid' && "bg-blue-50 text-blue-600",
-                    order.status === 'shipping' && "bg-purple-50 text-purple-600",
-                    order.status === 'completed' && "bg-green-50 text-green-600",
+                    order.status === 'shipping' && "bg-blue-600 text-white",
+                    order.status === 'delivered' && "bg-green-50 text-green-600",
+                    order.status === 'completed' && "bg-venuea-gold/10 text-venuea-gold",
+                    order.status === 'refund_requested' && "bg-orange-50 text-orange-600",
                     order.status === 'refunded' && "bg-red-50 text-red-600"
                   )}>
-                    {order.status}
+                    {order.status === 'refund_requested' ? '환불요청' : order.status}
                   </span>
+                  {order.refund_reason && (
+                    <p className="text-[10px] text-red-400 mt-1 max-w-[150px] truncate" title={order.refund_reason}>사유: {order.refund_reason}</p>
+                  )}
                 </td>
-                <td className="px-6 py-4 text-right">
+                <td className="px-6 py-4 text-right space-y-2">
                   <select 
                     value={order.status}
                     onChange={(e) => updateStatus(order.id, e.target.value)}
-                    className="border border-gray-200 rounded p-1 text-xs focus:outline-none focus:border-venuea-gold"
+                    className="w-full border border-gray-200 rounded p-1 text-xs focus:outline-none focus:border-venuea-gold mb-2"
                   >
                     <option value="pending">Pending</option>
                     <option value="paid">Paid</option>
                     <option value="shipping">Shipping</option>
-                    <option value="completed">Completed</option>
+                    <option value="delivered">Delivered</option>
+                    <option value="completed">Completed (Confirmed)</option>
+                    <option value="refund_requested">Refund Requested</option>
                     <option value="refunded">Refunded</option>
                   </select>
+                  {order.status === 'shipping' && (
+                    <div className="flex gap-1">
+                      <input 
+                        type="text" 
+                        placeholder="송장번호"
+                        className="w-24 text-[10px] border p-1 rounded"
+                        onBlur={(e) => {
+                          if (e.target.value) {
+                             fetch(`/api/admin/orders/${order.id}/tracking`, {
+                               method: 'POST',
+                               headers: {'Content-Type': 'application/json'},
+                               body: JSON.stringify({ tracking_number: e.target.value, shipping_company: 'CJ대한통운' })
+                             }).then(() => toast.success("송장 저장됨"));
+                          }
+                        }}
+                      />
+                    </div>
+                  )}
                 </td>
               </tr>
             ))}
@@ -774,113 +1056,6 @@ function AdminOrders() {
         {orders.length === 0 && !isLoading && (
           <div className="p-20 text-center text-gray-400">주문 내역이 없습니다.</div>
         )}
-      </div>
-    </div>
-  );
-}
-
-function AdminCoupons() {
-  const [coupons, setCoupons] = useState<any[]>([]);
-  const [newCoupon, setNewCoupon] = useState({
-    name: "",
-    code: "",
-    type: "FIXED",
-    value: 0,
-    min_order_amount: 0,
-    max_discount_amount: 0
-  });
-
-  const fetchCoupons = async () => {
-    const res = await fetch("/api/admin/coupons");
-    if (res.ok) setCoupons(await res.json());
-  };
-
-  useEffect(() => { fetchCoupons(); }, []);
-
-  const handleAddCoupon = async (e: React.FormEvent) => {
-    e.preventDefault();
-    try {
-      const res = await fetch("/api/admin/coupons", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(newCoupon)
-      });
-      if (res.ok) {
-        toast.success("쿠폰이 생성되었습니다.");
-        setNewCoupon({ name: "", code: "", type: "FIXED", value: 0, min_order_amount: 0, max_discount_amount: 0 });
-        fetchCoupons();
-      } else {
-        toast.error("생성 실패");
-      }
-    } catch { toast.error("서버 오류"); }
-  };
-
-  return (
-    <div className="space-y-12">
-      <h1 className="text-2xl font-serif font-bold text-gray-900">쿠폰 관리</h1>
-      
-      <div className="bg-white p-8 rounded-xl border border-gray-200 shadow-sm max-w-2xl">
-        <h2 className="text-sm font-bold uppercase tracking-widest text-gray-400 mb-6">신규 쿠폰 생성</h2>
-        <form onSubmit={handleAddCoupon} className="space-y-4">
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-1">
-              <label className="text-[10px] font-bold text-gray-400 uppercase">쿠폰 이름</label>
-              <input type="text" value={newCoupon.name} onChange={e => setNewCoupon({...newCoupon, name: e.target.value})} className="w-full border p-2 rounded focus:outline-none" required />
-            </div>
-            <div className="space-y-1">
-              <label className="text-[10px] font-bold text-gray-400 uppercase">쿠폰 코드</label>
-              <input type="text" value={newCoupon.code} onChange={e => setNewCoupon({...newCoupon, code: e.target.value})} className="w-full border p-2 rounded focus:outline-none" required />
-            </div>
-          </div>
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-1">
-              <label className="text-[10px] font-bold text-gray-400 uppercase">유형</label>
-              <select value={newCoupon.type} onChange={e => setNewCoupon({...newCoupon, type: e.target.value})} className="w-full border p-2 rounded focus:outline-none">
-                <option value="FIXED">금액 할인</option>
-                <option value="PERCENT">퍼센트 할인</option>
-                <option value="SHIPPING">무료 배송</option>
-              </select>
-            </div>
-            <div className="space-y-1">
-              <label className="text-[10px] font-bold text-gray-400 uppercase">할인 수치 (원/%)</label>
-              <input type="number" value={newCoupon.value} onChange={e => setNewCoupon({...newCoupon, value: parseInt(e.target.value)})} className="w-full border p-2 rounded focus:outline-none" />
-            </div>
-          </div>
-          <button className="w-full bg-venuea-dark text-white py-3 rounded-lg font-bold hover:bg-venuea-gold transition-all mt-4">쿠폰 발행</button>
-        </form>
-      </div>
-
-      <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-        <table className="w-full text-left text-sm">
-          <thead className="bg-gray-50 text-gray-500">
-            <tr>
-              <th className="px-6 py-4 font-medium uppercase tracking-widest text-[10px]">쿠폰명/코드</th>
-              <th className="px-6 py-4 font-medium uppercase tracking-widest text-[10px]">유형/가격</th>
-              <th className="px-6 py-4 font-medium uppercase tracking-widest text-[10px]">상태</th>
-              <th className="px-6 py-4 font-medium uppercase tracking-widest text-[10px] text-right">생성일</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-gray-100">
-            {coupons.map((coupon) => (
-              <tr key={coupon.id}>
-                <td className="px-6 py-4">
-                  <p className="font-bold text-gray-900">{coupon.name}</p>
-                  <p className="text-[10px] font-mono text-gray-400 uppercase">{coupon.code}</p>
-                </td>
-                <td className="px-6 py-4">
-                  <p className="font-medium">{coupon.type === 'PERCENT' ? `${coupon.value}%` : formatPrice(coupon.value)}</p>
-                  <p className="text-[10px] text-gray-400">{coupon.type}</p>
-                </td>
-                <td className="px-6 py-4">
-                  <span className="px-2 py-0.5 rounded-full bg-green-50 text-green-600 text-[10px] font-bold uppercase tracking-wider">Active</span>
-                </td>
-                <td className="px-6 py-4 text-right text-gray-400 text-[10px]">
-                  {new Date(coupon.created_at).toLocaleDateString()}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
       </div>
     </div>
   );
@@ -947,7 +1122,7 @@ function AdminUserPoints() {
           <span>등급 산정 기준 확인</span>
         </h3>
         <ul className="space-y-3 text-sm text-amber-900/70">
-          <li className="flex justify-between"><span>Sand</span> <span>신규 가입</span></li>
+          <li className="flex justify-between"><span>Beige</span> <span>신규 가입</span></li>
           <li className="flex justify-between font-bold border-b border-amber-200 pb-1"><span>Green</span> <span>10만원 이상</span></li>
           <li className="flex justify-between font-bold border-b border-amber-200 pb-1"><span>Black</span> <span>50만원 이상</span></li>
           <li className="flex justify-between font-bold text-black"><span>The Black</span> <span>100만원 이상</span></li>
