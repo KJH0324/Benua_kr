@@ -1522,6 +1522,18 @@ function AdminOrders() {
               </div>
 
               <div className="bottom-0 sticky bg-gray-50 p-6 flex justify-end gap-3 rounded-b-2xl">
+                {selectedOrder.status === 'refund_requested' && (
+                  <button 
+                    onClick={async () => {
+                      if (!confirm("정말 이 환불 요청을 승인하시겠습니까? (환불 완료 처리)")) return;
+                      await updateStatus(selectedOrder.id, 'refunded');
+                      setIsDetailModalOpen(false);
+                    }}
+                    className="px-6 py-2 rounded-lg text-sm font-bold border border-red-200 bg-red-600 text-white hover:bg-red-700 transition-colors"
+                  >
+                    환불 승인
+                  </button>
+                )}
                 <button 
                   onClick={() => setIsDetailModalOpen(false)}
                   className="px-6 py-2 rounded-lg text-sm font-bold border border-gray-200 hover:bg-white transition-colors"
