@@ -1839,6 +1839,7 @@ function AdminUserPoints() {
 function AdminKeys() {
   const [keys, setKeys] = useState<any[]>([]);
   const [newKey, setNewKey] = useState("");
+  const [newKeyRole, setNewKeyRole] = useState("OPERATOR");
 
   const fetchKeys = async () => {
     const res = await fetch("/api/admin/keys");
@@ -1859,10 +1860,10 @@ function AdminKeys() {
       const res = await fetch("/api/admin/keys", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ keyValue: newKey })
+        body: JSON.stringify({ keyValue: newKey, role: newKeyRole })
       });
       if (res.ok) {
-        toast.success("관리자 Key가 추가되었습니다.");
+        toast.success("스태프 Key가 추가되었습니다.");
         setNewKey("");
         fetchKeys();
       } else {
@@ -1875,11 +1876,11 @@ function AdminKeys() {
   };
 
   const handleDeleteKey = async (id: number) => {
-    if (!confirm("이 관리자 Key를 삭제하시겠습니까?")) return;
+    if (!confirm("이 Key를 삭제하시겠습니까?")) return;
     try {
       const res = await fetch(`/api/admin/keys/${id}`, { method: "DELETE" });
       if (res.ok) {
-        toast.success("관리자 Key가 삭제되었습니다.");
+        toast.success("Key가 삭제되었습니다.");
         fetchKeys();
       } else {
         const data = await res.json();
@@ -1890,56 +1891,55 @@ function AdminKeys() {
     }
   };
 
-  const handleUpdateRole = async (email: string, role: string) => {
+  const handleUpdateKeyRole = async (id: number, role: string) => {
     try {
-      const res = await fetch(`/api/admin/users/${email}/role`, {
-        method: "POST",
+      const res = await fetch(`/api/admin/keys/${id}/role`, {
+        method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ role })
       });
-      if(res.ok) {
-        toast.success("권한이 변경되었습니다.");
+      if (res.ok) {
+        toast.success("Key 권한이 변경되었습니다.");
+        fetchKeys();
       } else {
-        toast.error("권한 변경 실패");
+        const data = await res.json();
+        toast.error(data.error || "변경 실패");
       }
-    } catch { toast.error("서버 오류"); }
+    } catch {
+      toast.error("서버 오류");
+    }
   };
 
   return (
     <div className="space-y-6 max-w-4xl">
       <header>
-        <h1 className="text-2xl font-serif font-bold text-gray-900">관리자 Key & 권한 관리</h1>
-        <p className="text-sm text-gray-500 mt-1">시스템에 접근할 수 있는 관리자 Key와 2FA 상태를 관리합니다.</p>
+        <h1 className="text-2xl font-serif font-bold text-gray-900">시스템 Key & 권한 관리</h1>
+        <p className="text-sm text-gray-500 mt-1">이메일 인증 없이, 발급된 Key 값만으로 대시보드에 접근하는 각 직무별 권한을 설정합니다.</p>
       </header>
 
       <div className="bg-white p-6 rounded-xl border border-gray-200">
-        <h2 className="text-sm font-bold uppercase tracking-widest text-gray-400 mb-4">권한 즉시 변경</h2>
-        <div className="flex gap-4">
-          <input type="text" id="role-email" placeholder="이메일" className="border rounded px-4 py-2 flex-1" />
-          <select id="role-select" className="border rounded px-4 py-2">
-            <option value="USER">USER</option>
-            <option value="OPERATOR">OPERATOR</option>
-            <option value="CS">CS</option>
-            <option value="ADMIN">ADMIN</option>
-          </select>
-          <button onClick={() => {
-            const email = (document.getElementById('role-email') as HTMLInputElement).value;
-            const role = (document.getElementById('role-select') as HTMLSelectElement).value;
-            handleUpdateRole(email, role);
-          }} className="bg-venuea-gold text-white px-6 py-2 rounded-lg font-medium">부여</button>
+        <div className="mb-4">
+          <h2 className="text-sm font-bold uppercase tracking-widest text-gray-800">새로운 스태프 Key 생성</h2>
+          <p className="text-xs text-gray-500 mt-1">직원에게 부여할 Key 문자열과 해당 직원의 직무 등급(권한)을 선택하세요.</p>
         </div>
-      </div>
-
-      <div className="bg-white p-6 rounded-xl border border-gray-200">
-        <h2 className="text-sm font-bold uppercase tracking-widest text-gray-400 mb-4">새 Key 추가</h2>
         <form onSubmit={handleAddKey} className="flex gap-4">
           <input 
             type="text" 
             value={newKey}
             onChange={e => setNewKey(e.target.value)}
-            placeholder="새로운 관리자 Key 입력"
+            placeholder="새로운 Key 입력 (예: CS-STAFF-123)"
             className="flex-1 border border-gray-200 rounded-lg px-4 py-2 focus:outline-none focus:border-venuea-gold transition-colors"
           />
+          <select 
+            value={newKeyRole}
+            onChange={(e) => setNewKeyRole(e.target.value)}
+            className="border border-gray-200 rounded-lg px-4 py-2 focus:outline-none bg-white min-w-[200px]"
+          >
+            <option value="CS">CS (리뷰, 문의 전용)</option>
+            <option value="OPERATOR">OPERATOR (주문, 상품 전용)</option>
+            <option value="ADMIN">ADMIN (로그, 설정 외 전권한)</option>
+            <option value="MASTER">MASTER (최고 권한)</option>
+          </select>
           <button type="submit" className="bg-venuea-dark text-white px-6 py-2 rounded-lg font-medium hover:bg-venuea-gold transition-colors">
             추가
           </button>
@@ -1951,6 +1951,7 @@ function AdminKeys() {
           <thead className="bg-gray-50 text-gray-500">
             <tr>
               <th className="px-6 py-4 font-medium">관리자 Key</th>
+              <th className="px-6 py-4 font-medium">부여된 권한 (Role)</th>
               <th className="px-6 py-4 font-medium">2FA 상태</th>
               <th className="px-6 py-4 font-medium">생성일</th>
               <th className="px-6 py-4 font-medium text-right">관리</th>
@@ -1960,6 +1961,24 @@ function AdminKeys() {
             {keys.map((key) => (
               <tr key={key.id} className="hover:bg-gray-50/50">
                 <td className="px-6 py-4 font-mono text-venuea-dark">{key.key_value}</td>
+                <td className="px-6 py-4">
+                  <select
+                    value={key.role || 'MASTER'}
+                    onChange={(e) => handleUpdateKeyRole(key.id, e.target.value)}
+                    className={cn(
+                      "outline-none px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-widest cursor-pointer text-center appearance-none",
+                      key.role === 'MASTER' ? "bg-purple-100 text-purple-700" :
+                      key.role === 'ADMIN' ? "bg-red-100 text-red-700" :
+                      key.role === 'OPERATOR' ? "bg-blue-100 text-blue-700" :
+                      "bg-green-100 text-green-700"
+                    )}
+                  >
+                    <option value="MASTER" className="bg-white text-black">MASTER</option>
+                    <option value="ADMIN" className="bg-white text-black">ADMIN</option>
+                    <option value="OPERATOR" className="bg-white text-black">OPERATOR</option>
+                    <option value="CS" className="bg-white text-black">CS</option>
+                  </select>
+                </td>
                 <td className="px-6 py-4">
                   {key.has_2fa ? (
                     <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-green-50 text-green-700">

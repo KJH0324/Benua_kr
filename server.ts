@@ -412,6 +412,7 @@ migrate(`ALTER TABLE inquiries ADD COLUMN reply_message TEXT`);
 migrate(`ALTER TABLE inquiries ADD COLUMN replied_at DATETIME`);
 migrate(`ALTER TABLE user_coupons ADD COLUMN notified INTEGER DEFAULT 0`);
 
+migrate(`ALTER TABLE admin_keys ADD COLUMN role TEXT DEFAULT 'MASTER'`);
 const JWT_SECRET = process.env.JWT_SECRET || "benua-secret-key-2024";
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "benua-admin-123";
 
@@ -468,8 +469,12 @@ async function startServer() {
       const decoded = jwt.verify(token, JWT_SECRET) as any;
       
       // Admin token bypass
-      if (decoded.role === "admin") {
-        req.admin = { id: null, role: "MASTER" }; // Use null for logged in via Admin Key to prevent FK error
+      if (decoded.isKey || decoded.role === "admin") {
+        const activeRole = decoded.isKey ? decoded.role : "MASTER";
+        if (!allowedRoles.includes(activeRole)) {
+          return res.status(403).json({ error: "Forbidden: Insufficient permissions" });
+        }
+        req.admin = { id: null, role: activeRole }; // Use null for logged in via Admin Key to prevent FK error
         return next();
       }
 
@@ -1170,7 +1175,11 @@ async function startServer() {
       db.prepare("UPDATE admin_keys SET totp_secret = ? WHERE id = ?").run(totpSecret, keyRecord.id);
     }
 
-    const jwtToken = jwt.sign({ role: "admin", keyId: keyRecord.id }, JWT_SECRET, { expiresIn: "24h" });
+    const jwtToken = jwt.sign({ 
+      isKey: true, 
+      role: keyRecord.role || "MASTER", 
+      keyId: keyRecord.id 
+    }, JWT_SECRET, { expiresIn: "24h" });
     const isProduction = process.env.NODE_ENV === "production";
     res.cookie("admin_token", jwtToken, {
       httpOnly: true,
@@ -1194,22 +1203,40 @@ async function startServer() {
 
   // Admin Keys Management
   app.get("/api/admin/keys", authenticateAdmin, (req, res) => {
-    const keys = db.prepare("SELECT id, key_value, CASE WHEN totp_secret IS NULL THEN 0 ELSE 1 END as has_2fa, created_at FROM admin_keys ORDER BY created_at DESC").all() as any[];
+    const keys = db.prepare("SELECT id, key_value, role, CASE WHEN totp_secret IS NULL THEN 0 ELSE 1 END as has_2fa, created_at FROM admin_keys ORDER BY created_at DESC").all() as any[];
     const defaultAdminKey = process.env.ADMIN_PASSWORD || 'benua-admin-123';
     const filteredKeys = keys.filter(k => k.key_value !== defaultAdminKey);
     res.json(filteredKeys);
   });
 
   app.post("/api/admin/keys", authenticateAdmin, (req, res) => {
-    const { keyValue } = req.body;
+    const { keyValue, role } = req.body;
     if (!keyValue) return res.status(400).json({ error: "Key 값을 입력해주세요." });
     try {
-      db.prepare("INSERT INTO admin_keys (key_value) VALUES (?)").run(keyValue);
+      db.prepare("INSERT INTO admin_keys (key_value, role) VALUES (?, ?)").run(keyValue, role || 'MASTER');
       res.json({ success: true });
     } catch (err: any) {
       if (err.code === "SQLITE_CONSTRAINT_UNIQUE") {
         return res.status(400).json({ error: "이미 존재하는 Key입니다." });
       }
+    }
+  });
+
+  app.put("/api/admin/keys/:id/role", authenticateAdmin, (req: any, res) => {
+    const { id } = req.params;
+    const { role } = req.body;
+    
+    if (!["MASTER", "ADMIN", "OPERATOR", "CS"].includes(role)) {
+      return res.status(400).json({ error: "유효하지 않은 직무 등급입니다." });
+    }
+
+    try {
+      db.prepare("UPDATE admin_keys SET role = ? WHERE id = ?").run(role, id);
+      logAdminAction(req.admin.id, "UPDATE_KEY_ROLE", "admin_keys", parseInt(id), `Key role updated to ${role}`);
+      res.json({ success: true });
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ error: "Key 권한 변경 실패" });
     }
   });
 
