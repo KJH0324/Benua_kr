@@ -457,6 +457,14 @@ async function startServer() {
 
     try {
       const decoded = jwt.verify(token, JWT_SECRET) as any;
+      
+      // Admin token bypass
+      if (decoded.role === "admin") {
+        req.admin = decoded;
+        req.admin.role = "MASTER";
+        return next();
+      }
+
       const user = db.prepare("SELECT role FROM users WHERE id = ?").get(decoded.id) as any;
       
       if (!user || !allowedRoles.includes(user.role)) {
