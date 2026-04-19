@@ -13,7 +13,7 @@ export default function Checkout() {
   const [isAddressModalOpen, setIsAddressModalOpen] = useState(false);
   const [paymentMethod, setPaymentMethod] = useState("card");
   
-  const { items, subtotal, shipping, total: initialTotal } = location.state || { items: [], subtotal: 0, shipping: 0, total: 0 };
+  const { items, subtotal, shipping: baseShipping, total: initialTotal } = location.state || { items: [], subtotal: 0, shipping: 0, total: 0 };
 
   const [couponCode, setCouponCode] = useState("");
   const [discount, setDiscount] = useState(0);
@@ -21,11 +21,26 @@ export default function Checkout() {
   const [pointUsage, setPointUsage] = useState(0);
   const [myCoupons, setMyCoupons] = useState<any[]>([]);
   const [isCouponListOpen, setIsCouponListOpen] = useState(false);
+  const [isJeju, setIsJeju] = useState(false);
   
   const isFreeShipping = user?.tier === 'BLACK' || user?.tier === 'THE_BLACK' || appliedCoupon?.type === 'SHIPPING';
-  const effectiveShipping = isFreeShipping ? 0 : shipping;
+  const islandFee = isJeju ? 3000 : 0;
+  const effectiveShipping = isFreeShipping ? 0 : (baseShipping + islandFee);
   
   const finalTotal = subtotal + effectiveShipping - discount - pointUsage;
+
+  const getAccrualRate = () => {
+    if (!user) return 0.01;
+    const tier = (user.tier || 'BEIGE').toUpperCase();
+    switch (tier) {
+      case 'GREEN': return 0.03;
+      case 'BLACK': return 0.05;
+      case 'THE_BLACK': return 0.07;
+      default: return 0.01;
+    }
+  };
+
+  const expectedPoints = Math.round(finalTotal * getAccrualRate());
 
   const [formData, setFormData] = useState({
     name: "",
@@ -81,6 +96,7 @@ export default function Checkout() {
       zipcode: data.zonecode,
       address: fullAddress,
     });
+    setIsJeju(data.sido === '제주특별자치도' || data.address.includes('제주') || data.zonecode.startsWith('63'));
     setIsAddressModalOpen(false);
   };
 
@@ -324,7 +340,16 @@ export default function Checkout() {
                 </div>
                 <div className="flex justify-between text-sm">
                   <span className="text-venuea-dark/60">배송비</span>
-                  <span className="font-mono">{effectiveShipping === 0 ? "무료" : formatPrice(effectiveShipping)}</span>
+                  <span className="font-mono">
+                    {effectiveShipping === 0 ? (
+                      <span className="text-venuea-gold font-bold">무료</span>
+                    ) : (
+                      <>
+                        {formatPrice(baseShipping)}
+                        {islandFee > 0 && <span className="ml-1 text-[10px] text-red-500 font-bold">(제주/도서 +{formatPrice(islandFee)})</span>}
+                      </>
+                    )}
+                  </span>
                 </div>
                 {discount > 0 && (
                   <div className="flex justify-between text-sm text-[#FF4000]">
@@ -424,9 +449,14 @@ export default function Checkout() {
                 </div>
               </div>
               
-              <div className="flex justify-between items-end border-t border-venuea-dark/10 pt-6 mb-8">
+              <div className="flex justify-between items-end border-t border-venuea-dark/10 pt-6 mb-2">
                 <span className="text-sm font-bold text-venuea-dark">총 결제 금액</span>
                 <span className="text-2xl font-bold font-mono text-venuea-gold">{formatPrice(finalTotal)}</span>
+              </div>
+              
+              <div className="flex justify-between items-center mb-8 px-1">
+                <span className="text-[10px] font-bold text-venuea-dark/40 uppercase tracking-widest">적립 예정 포인트</span>
+                <span className="text-xs font-bold text-venuea-gold font-mono">+{expectedPoints.toLocaleString()} P</span>
               </div>
 
               <button 

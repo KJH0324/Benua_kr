@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "motion/react";
-import { User, Mail, Shield, LogOut, Package, CreditCard, ExternalLink, ChevronRight, Edit3, X, Check, Search, Ticket } from "lucide-react";
+import { User, Mail, Shield, LogOut, Package, CreditCard, ExternalLink, ChevronRight, Edit3, X, Check, Search, Ticket, Heart } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
 import { cn, formatPrice } from "../lib/utils";
 import { toast } from "sonner";
@@ -10,7 +10,8 @@ export default function Profile() {
   const [user, setUser] = useState<any>(null);
   const [orders, setOrders] = useState<any[]>([]);
   const [coupons, setCoupons] = useState<any[]>([]);
-  const [activeTab, setActiveTab] = useState<'info' | 'orders' | 'coupons'>('info');
+  const [wishlists, setWishlists] = useState<any[]>([]);
+  const [activeTab, setActiveTab] = useState<'info' | 'orders' | 'coupons' | 'wishlists'>('info');
   const [isLoading, setIsLoading] = useState(true);
   const [isEditing, setIsEditing] = useState(false);
   
@@ -75,6 +76,11 @@ export default function Profile() {
       const couponsRes = await fetch("/api/coupons/me");
       if (couponsRes.ok) {
         setCoupons(await couponsRes.ok ? await couponsRes.json() : []);
+      }
+
+      const wishlistRes = await fetch("/api/wishlists");
+      if (wishlistRes.ok) {
+        setWishlists(await wishlistRes.json());
       }
     } catch (error) {
       toast.error("데이터를 불러오는데 실패했습니다.");
@@ -196,6 +202,25 @@ export default function Profile() {
       if (res.ok) {
         toast.success("구매 확정되었습니다. 포인트가 적립되었습니다.");
         fetchData();
+        
+        // Open review modal for the items in the order
+        const orderDataRes = await fetch(`/api/orders/${id}`);
+        if (orderDataRes.ok) {
+          const detail = await orderDataRes.json();
+          if (detail.items && detail.items.length > 0) {
+            setReviewForm({
+              order_id: id,
+              product_id: detail.items[0].product_id,
+              product_name: detail.items[0].name,
+              rating: 5,
+              content: "",
+              image_url: ""
+            });
+            setIsReviewModalOpen(true);
+            toast.info("상품이 마음에 드셨나요? 리뷰를 남겨주시면 포인트를 드립니다!");
+          }
+        }
+
         if (isDetailModalOpen) fetchOrderDetail(id);
       }
     } catch {
@@ -221,7 +246,8 @@ export default function Profile() {
         if (data.status === 'refunded') {
           toast.success("취소 및 환불 처리가 완료되었습니다.");
         } else {
-          toast.success("환불 요청이 접수되었습니다. (배송 후 반품비 5,000원 제외)");
+          const isShippingDeducted = ["단순 변심", "주문 실수"].includes(refundReason);
+          toast.success(`환불 요청이 접수되었습니다.${isShippingDeducted ? " (배송 후 반품비 5,000원 제외)" : ""}`);
         }
         setIsRefundModalOpen(false);
         setRefundReason("");
@@ -470,6 +496,22 @@ export default function Profile() {
                   <span className="text-sm font-bold uppercase tracking-widest">주문 내역</span>
                 </div>
                 <ChevronRight size={16} className={cn(activeTab === 'orders' ? "text-white/40" : "text-venuea-dark/20 group-hover:translate-x-1 transition-transform")} />
+              </button>
+
+              <button 
+                onClick={() => setActiveTab('wishlists')}
+                className={cn(
+                  "w-full flex items-center justify-between p-5 transition-all group border",
+                  activeTab === 'wishlists' ? "bg-venuea-dark border-venuea-dark text-white" : "bg-white border-venuea-dark/5 hover:border-venuea-gold"
+                )}
+              >
+                <div className="flex items-center space-x-4">
+                  <div className={cn("p-2", activeTab === 'wishlists' ? "bg-white/10 text-white" : "bg-[#F9F9F9] text-venuea-dark group-hover:text-venuea-gold")}>
+                    <Heart size={20} />
+                  </div>
+                  <span className="text-sm font-bold uppercase tracking-widest">찜한 상품</span>
+                </div>
+                <ChevronRight size={16} className={cn(activeTab === 'wishlists' ? "text-white/40" : "text-venuea-dark/20 group-hover:translate-x-1 transition-transform")} />
               </button>
 
               <button 
@@ -751,7 +793,7 @@ export default function Profile() {
                     </div>
                   )}
                 </motion.div>
-              ) : (
+              ) : activeTab === 'coupons' ? (
                 <motion.div 
                   key="coupons-tab"
                   initial={{ opacity: 0 }}
@@ -819,7 +861,54 @@ export default function Profile() {
                     )}
                   </div>
                 </motion.div>
-              )}
+              ) : activeTab === 'wishlists' ? (
+                <motion.div 
+                  key="wishlists-tab"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  className="space-y-12"
+                >
+                  <div className="bg-white p-8 border border-venuea-dark/5 shadow-[0_20px_40px_rgba(0,0,0,0.03)]">
+                    <header className="mb-10">
+                      <h3 className="text-lg font-bold text-venuea-dark uppercase tracking-widest flex items-center space-x-3">
+                        <div className="w-1.5 h-6 bg-venuea-gold" />
+                        <span>찜한 상품</span>
+                      </h3>
+                      <p className="text-[10px] text-venuea-dark/40 uppercase tracking-widest mt-1">고객님이 선택하신 관심 상품 목록입니다.</p>
+                    </header>
+
+                    {wishlists.length === 0 ? (
+                      <div className="py-20 text-center border-2 border-dashed border-venuea-dark/5">
+                        <Heart size={40} className="mx-auto text-venuea-dark/10 mb-4" />
+                        <p className="text-sm text-venuea-muted uppercase tracking-widest border-0">찜한 상품이 없습니다.</p>
+                        <Link to="/shop" className="mt-6 inline-block bg-venuea-dark text-white px-8 py-3 text-[10px] font-bold uppercase tracking-widest hover:bg-venuea-gold transition-colors">
+                          쇼핑 구경하기
+                        </Link>
+                      </div>
+                    ) : (
+                      <div className="grid grid-cols-2 md:grid-cols-3 gap-6">
+                        {wishlists.map((product) => (
+                          <Link key={product.id} to={`/product/${product.id}`} className="group block">
+                            <div className="relative aspect-[3/4] bg-[#F9F9F9] overflow-hidden mb-4">
+                              <img 
+                                src={product.image_url} 
+                                alt={product.name}
+                                referrerPolicy="no-referrer"
+                                className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700"
+                              />
+                            </div>
+                            <div className="space-y-1">
+                              <h3 className="text-xs font-bold text-venuea-dark uppercase tracking-widest line-clamp-1 group-hover:text-venuea-gold transition-colors">{product.name}</h3>
+                              <p className="text-xs text-venuea-muted">{formatPrice(product.price)}</p>
+                            </div>
+                          </Link>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </motion.div>
+              ) : null}
             </AnimatePresence>
           </div>
         </div>
@@ -893,7 +982,7 @@ export default function Profile() {
                             <h5 className="font-bold text-venuea-dark line-clamp-1">{item.name}</h5>
                             <p className="text-xs text-venuea-muted mt-1">{formatPrice(item.price)} x {item.quantity}</p>
                           </div>
-                          {orderDetail.status === 'completed' && (
+                          {orderDetail.status === 'completed' && orderDetail.confirmed_at && (new Date().getTime() - new Date(orderDetail.confirmed_at).getTime() <= 3 * 24 * 60 * 60 * 1000) && (
                             <button 
                               onClick={() => {
                                 setReviewForm({
@@ -908,6 +997,11 @@ export default function Profile() {
                             >
                               리뷰 작성 +
                             </button>
+                          )}
+                          {orderDetail.status === 'completed' && orderDetail.confirmed_at && (new Date().getTime() - new Date(orderDetail.confirmed_at).getTime() > 3 * 24 * 60 * 60 * 1000) && (
+                            <span className="text-[10px] font-bold uppercase tracking-widest text-gray-400">
+                              작성 기간 만료
+                            </span>
                           )}
                         </div>
                       </div>
@@ -1022,7 +1116,9 @@ export default function Profile() {
                 <p className="text-[10px] text-venuea-muted mt-2 uppercase tracking-widest">
                   {['pending', 'paid'].includes(selectedRefundOrder.status) 
                     ? "배송 전 단계로 전액 즉시 환불이 가능합니다." 
-                    : "배송 후 단계로 반품 배송비 5,000원을 제외하고 환불됩니다."}
+                    : (["단순 변심", "주문 실수"].includes(refundReason) 
+                        ? "배송 후 단계로 반품 배송비 5,000원을 제외하고 환불됩니다." 
+                        : "사유 확인 후 전액 환불 절차가 진행됩니다.")}
                 </p>
               </div>
 
@@ -1051,7 +1147,9 @@ export default function Profile() {
                     <span className="text-venuea-gold font-bold font-mono">
                       {formatPrice(['pending', 'paid'].includes(selectedRefundOrder.status) 
                         ? selectedRefundOrder.total_amount 
-                        : Math.max(0, selectedRefundOrder.total_amount - 5000))}
+                        : (["단순 변심", "주문 실수"].includes(refundReason) 
+                            ? Math.max(0, selectedRefundOrder.total_amount - 5000)
+                            : selectedRefundOrder.total_amount))}
                     </span>
                   </div>
                   <button 

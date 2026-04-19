@@ -81,8 +81,8 @@ export default function Unsubscribe() {
           <div className="flex flex-col items-center justify-center space-y-6 py-4">
             <CheckCircle className="w-16 h-16 text-green-500" />
             <div>
-              <h2 className="text-xl font-bold text-venuea-dark mb-2">수신 거부가 완료되었습니다</h2>
-              <p className="text-sm text-gray-500 mb-6">그동안 베뉴아의 소식을 구독해 주셔서 감사합니다.</p>
+              <h2 className="text-xl font-bold text-venuea-dark mb-2">구독이 취소되었습니다</h2>
+              <p className="text-sm text-gray-500 mb-6">다시 만날 그 날을 기다리겠습니다.</p>
             </div>
             <Link 
               to="/" 

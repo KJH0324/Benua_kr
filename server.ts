@@ -220,6 +220,8 @@ db.exec(`
     tracking_number TEXT,
     shipping_company TEXT,
     refund_reason TEXT,
+    confirmed_at DATETIME,
+    status_updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
 
@@ -239,6 +241,16 @@ db.exec(`
     key_value TEXT UNIQUE NOT NULL,
     totp_secret TEXT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
+  CREATE TABLE IF NOT EXISTS wishlists (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    product_id INTEGER NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(user_id, product_id),
+    FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY(product_id) REFERENCES products(id) ON DELETE CASCADE
   );
 
   CREATE TABLE IF NOT EXISTS inquiries (
@@ -323,7 +335,7 @@ const checkAndMigrateUsers = () => {
     }
 
     // Ensure no NULL values for new mandatory fields
-    db.prepare("UPDATE users SET tier = 'Beige' WHERE tier IS NULL").run();
+    db.prepare("UPDATE users SET tier = 'BEIGE' WHERE tier IS NULL").run();
     db.prepare("UPDATE users SET tier_updated_at = CURRENT_TIMESTAMP WHERE tier_updated_at IS NULL").run();
     console.log("[DEBUG][DB] Users migration check complete");
 
@@ -402,6 +414,11 @@ const checkAndMigrateOrders = () => {
       db.exec(`ALTER TABLE orders ADD COLUMN status_updated_at DATETIME DEFAULT '2024-01-01 00:00:00'`);
       db.prepare("UPDATE orders SET status_updated_at = created_at WHERE status_updated_at = '2024-01-01 00:00:00'").run();
       console.log("[DEBUG][DB] Added status_updated_at to orders");
+    }
+    if (!columns.includes('confirmed_at')) {
+      db.exec(`ALTER TABLE orders ADD COLUMN confirmed_at DATETIME`);
+      db.prepare("UPDATE orders SET confirmed_at = status_updated_at WHERE status = 'completed'").run();
+      console.log("[DEBUG][DB] Added confirmed_at to orders");
     }
     console.log("[DEBUG][DB] Orders migration check complete");
   } catch (err: any) {
@@ -773,10 +790,10 @@ async function startServer() {
                     // Award points logic (same as manual confirmation)
                     if (order.user_id) {
                         const user = db.prepare("SELECT * FROM users WHERE id = ?").get(order.user_id) as any;
-                        const config = (TIER_CONFIG as any)[user.tier || 'BEIGE'];
+                        const config = (TIER_CONFIG as any)[(user.tier || 'BEIGE').toUpperCase()];
                         const rate = config.accrual_rate;
                         
-                        const earned = Math.floor((order.total_amount - order.shipping_fee) * rate);
+                        const earned = Math.round(order.total_amount * rate);
                         const expires_at = new Date();
                         expires_at.setFullYear(expires_at.getFullYear() + 1);
 
@@ -1429,6 +1446,40 @@ async function startServer() {
     }
   });
 
+  // --- Wishlist API ---
+  app.get("/api/wishlists", authenticateUser, (req: any, res) => {
+    try {
+      const items = db.prepare(`
+        SELECT p.*, w.created_at as w_created_at
+        FROM wishlists w
+        JOIN products p ON w.product_id = p.id
+        WHERE w.user_id = ?
+        ORDER BY w.created_at DESC
+      `).all(req.user.id);
+      res.json(items);
+    } catch (err) {
+      res.status(500).json({ error: "Failed to fetch wishlist" });
+    }
+  });
+
+  app.post("/api/wishlists/:productId/toggle", authenticateUser, (req: any, res) => {
+    const productId = req.params.productId;
+    const userId = req.user.id;
+    try {
+      const existing = db.prepare("SELECT * FROM wishlists WHERE user_id = ? AND product_id = ?").get(userId, productId);
+      
+      if (existing) {
+        db.prepare("DELETE FROM wishlists WHERE user_id = ? AND product_id = ?").run(userId, productId);
+        res.json({ success: true, isWished: false });
+      } else {
+        db.prepare("INSERT INTO wishlists (user_id, product_id) VALUES (?, ?)").run(userId, productId);
+        res.json({ success: true, isWished: true });
+      }
+    } catch (err) {
+      res.status(500).json({ error: "Failed to toggle wishlist" });
+    }
+  });
+
   app.get("/api/coupons/notifications", authenticateUser, (req: any, res) => {
     try {
       const newCoupons = db.prepare(`
@@ -1831,10 +1882,10 @@ async function startServer() {
       // Point rewarding on completion (Purchase Confirmation)
       if (status === 'completed' && order.user_id && order.status !== 'completed') {
           const user = db.prepare("SELECT * FROM users WHERE id = ?").get(order.user_id) as any;
-          const config = (TIER_CONFIG as any)[user.tier || 'BEIGE'];
+          const config = (TIER_CONFIG as any)[(user.tier || 'BEIGE').toUpperCase()];
           const rate = config.accrual_rate;
           
-          const earned = Math.floor((order.total_amount - order.shipping_fee) * rate);
+          const earned = Math.round(order.total_amount * rate);
           const expires_at = new Date();
           expires_at.setFullYear(expires_at.getFullYear() + 1);
 
@@ -1899,14 +1950,15 @@ async function startServer() {
         if (!order) return res.status(404).json({ error: "Order not found" });
         if (order.status === 'completed') return res.status(400).json({ error: "Already confirmed" });
 
-        db.prepare("UPDATE orders SET status = 'completed', status_updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(id);
+        db.prepare("UPDATE orders SET status = 'completed', status_updated_at = CURRENT_TIMESTAMP, confirmed_at = CURRENT_TIMESTAMP WHERE id = ?").run(id);
         
         // Point rewarding logic (already integrated in status update handler, but I'll call it explicitly here or trigger it)
         // I'll reuse the logic from the admin status update
         const user = db.prepare("SELECT * FROM users WHERE id = ?").get(order.user_id) as any;
-        const config = (TIER_CONFIG as any)[user.tier || 'BEIGE'];
+        const tier = (user.tier || 'BEIGE').toUpperCase();
+        const config = (TIER_CONFIG as any)[tier];
         const rate = config.accrual_rate;
-        const earned = Math.floor((order.total_amount - order.shipping_fee) * rate);
+        const earned = Math.round(order.total_amount * rate);
         const expires_at = new Date();
         expires_at.setFullYear(expires_at.getFullYear() + 1);
 
@@ -1924,7 +1976,8 @@ async function startServer() {
         
         res.json({ success: true, earned });
     } catch (err) {
-        res.status(500).json({ error: "Confirmation failed" });
+        console.error(err);
+        res.status(500).json({ error: "구매 확정 처리 실패" });
     }
   });
 
@@ -2100,6 +2153,21 @@ async function startServer() {
           const decoded: any = jwt.verify(token, JWT_SECRET);
           const user = db.prepare("SELECT * FROM users WHERE id = ?").get(decoded.id) as any;
           
+          const order = db.prepare("SELECT * FROM orders WHERE id = ? AND user_id = ?").get(order_id, decoded.id) as any;
+          if (!order) return res.status(404).json({ error: "주문을 찾을 수 없습니다." });
+          if (order.status !== 'completed') return res.status(400).json({ error: "구매 확정 후에만 리뷰 작성이 가능합니다." });
+
+          // 3-day constraint
+          const confirmedAt = new Date(order.confirmed_at);
+          const now = new Date();
+          const threeDaysInMs = 3 * 24 * 60 * 60 * 1000;
+          if (now.getTime() - confirmedAt.getTime() > threeDaysInMs) {
+              return res.status(400).json({ error: "리뷰는 구매 확정 후 3일 이내에만 작성이 가능합니다." });
+          }
+
+          const existingReview = db.prepare("SELECT id FROM reviews WHERE order_id = ? AND product_id = ? AND user_id = ?").get(order_id, product_id, decoded.id);
+          if (existingReview) return res.status(400).json({ error: "이미 해당 상품의 리뷰를 작성하셨습니다." });
+          
           let points = 100;
           if (image_url) points = 500;
           if (user.grade === 'Black' || user.grade === 'The Black') {
@@ -2113,6 +2181,7 @@ async function startServer() {
           db.prepare("UPDATE users SET points = points + ? WHERE id = ?").run(points, user.id);
           res.json({ success: true, points_earned: points });
       } catch (err) {
+          console.error(err);
           res.status(500).json({ error: "리뷰 작성 실패" });
       }
   });
@@ -2134,9 +2203,15 @@ async function startServer() {
 
   app.delete("/api/admin/orders/test", authenticateAdmin, (req, res) => {
     try {
-      db.prepare("DELETE FROM orders").run();
+      db.transaction(() => {
+        db.prepare("DELETE FROM order_items").run();
+        db.prepare("DELETE FROM point_history WHERE reason LIKE '%주문%'").run();
+        db.prepare("DELETE FROM reviews").run();
+        db.prepare("DELETE FROM orders").run();
+      })();
       res.json({ success: true });
     } catch (err) {
+      console.error(err);
       res.status(500).json({ error: "테스트 주문 삭제 실패" });
     }
   });
@@ -2462,10 +2537,13 @@ async function startServer() {
 
       console.log(`[NEWSLETTER] Sending mass mail to ${allEmails.length} subscribers`);
       
+      const host = req.get('host');
+      const mainDomainHost = host.startsWith('dash.') ? host.replace('dash.', '') : host;
+
       for (const email of allEmails) {
         // Generate a simple base64 encoded token or just pass email to frontend
         const encodedEmail = Buffer.from(email).toString('base64');
-        const unsubLink = `https://${req.get('host')}/unsubscribe?token=${encodedEmail}`;
+        const unsubLink = `https://${mainDomainHost}/unsubscribe?token=${encodedEmail}`;
 
         await sendMail(
           email,

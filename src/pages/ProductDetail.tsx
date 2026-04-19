@@ -27,6 +27,9 @@ export default function ProductDetail() {
   const [product, setProduct] = useState<Product | null>(null);
   const [reviews, setReviews] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [isWished, setIsWished] = useState(false);
+  const [isWishLoading, setIsWishLoading] = useState(false);
+  const [user, setUser] = useState<any>(null);
 
   useEffect(() => {
     window.scrollTo(0, 0);
@@ -43,6 +46,21 @@ export default function ProductDetail() {
 
         const revRes = await fetch(`/api/products/${id}/reviews`);
         if (revRes.ok) setReviews(await revRes.json());
+        
+        // Fetch wishlists to check status 
+        const wishRes = await fetch("/api/wishlists");
+        if (wishRes.ok) {
+          const wishData = await wishRes.json();
+          const inWishlist = wishData.some((w: any) => w.id === parseInt(id || "0"));
+          setIsWished(inWishlist);
+        }
+
+        // Fetch user info for tier points
+        const userRes = await fetch("/api/auth/me");
+        if (userRes.ok) {
+          const userData = await userRes.json();
+          setUser(userData.user);
+        }
       } catch (error) {
         toast.error("상품 정보를 불러오지 못했습니다.");
       } finally {
@@ -51,6 +69,48 @@ export default function ProductDetail() {
     };
     fetchProduct();
   }, [id]);
+
+  const getAccrualRate = () => {
+    if (!user) return 0.01; // Default to Beige rate if not logged in
+    const tier = (user.tier || 'BEIGE').toUpperCase();
+    switch (tier) {
+      case 'GREEN': return 0.03;
+      case 'BLACK': return 0.05;
+      case 'THE_BLACK': return 0.07;
+      default: return 0.01;
+    }
+  };
+
+  const calculatePoints = () => {
+    if (!product) return 0;
+    const finalPrice = product.discount_rate && product.discount_rate > 0
+      ? product.price * (1 - product.discount_rate / 100)
+      : product.price;
+    return Math.round(finalPrice * getAccrualRate());
+  };
+
+  const handleToggleWish = async () => {
+    if (!product) return;
+    setIsWishLoading(true);
+    try {
+      const res = await fetch(`/api/wishlists/${id}/toggle`, { method: "POST" });
+      if (res.ok) {
+        const data = await res.json();
+        setIsWished(data.isWished);
+        toast.success(data.isWished ? "찜 목록에 추가되었습니다." : "찜 목록에서 삭제되었습니다.");
+      } else {
+        if (res.status === 401 || res.status === 403) {
+          toast.error("로그인이 필요한 기능입니다.");
+        } else {
+          toast.error("처리 중 오류가 발생했습니다.");
+        }
+      }
+    } catch {
+      toast.error("서버 연결 실패");
+    } finally {
+      setIsWishLoading(false);
+    }
+  };
 
   if (isLoading) {
     return (
@@ -181,13 +241,13 @@ export default function ProductDetail() {
             <div className="bg-[#F9F9F9] p-4 text-xs space-y-2">
               <div className="flex justify-between">
                 <span className="text-venuea-dark font-bold">적립 예정 포인트</span>
-                <span className="font-mono">{Math.floor(product.price * 0.03)} P</span>
+                <span className="font-mono">{calculatePoints().toLocaleString()} P</span>
               </div>
               <div className="flex justify-between text-venuea-gold">
                 <span className="font-bold">회원 추가 혜택</span>
-                <span>신규 등급 기준 적용</span>
+                <span>{user ? `${user.tier || 'BEIGE'} 등급 ${Math.round(getAccrualRate() * 100)}% 적립` : "로그인 시 등급별 최대 7% 적립"}</span>
               </div>
-              <p className="text-[10px] text-gray-400 pt-2 border-t border-gray-200">* 구매 확정 시 포인트가 적립됩니다.</p>
+              <p className="text-[10px] text-gray-400 pt-2 border-t border-gray-200">* 구매 확정 시 실 결제 금액 기준으로 적립됩니다.</p>
             </div>
 
             <div className="pt-8 border-t border-venuea-dark/10 space-y-6">
@@ -227,10 +287,15 @@ export default function ProductDetail() {
                   <span>{product.stock !== undefined && product.stock <= 0 ? "품절" : "장바구니 담기"}</span>
                 </button>
                 <button 
-                  onClick={() => toast.success("찜 목록에 추가되었습니다. (기능 구현 예정)")}
-                  className="w-14 h-14 border border-venuea-dark/20 flex items-center justify-center text-venuea-dark hover:bg-[#F9F9F9] transition-colors"
+                  onClick={handleToggleWish}
+                  disabled={isWishLoading}
+                  className={cn(
+                    "w-14 h-14 border border-venuea-dark/20 flex items-center justify-center transition-colors",
+                    isWished ? "text-red-500 bg-red-50 border-red-200" : "text-venuea-dark hover:bg-[#F9F9F9]",
+                    isWishLoading && "opacity-50 cursor-not-allowed"
+                  )}
                 >
-                  <Heart size={20} />
+                  <Heart size={20} fill={isWished ? "currentColor" : "none"} />
                 </button>
               </div>
             </div>

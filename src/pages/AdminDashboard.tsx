@@ -999,6 +999,7 @@ function AdminProducts() {
     formData.append("material", newProduct.material);
     formData.append("dimensions", newProduct.dimensions);
     formData.append("origin", newProduct.origin);
+    formData.append("manufacturer", newProduct.manufacturer);
     if (mainImage) formData.append("image", mainImage);
     if (descImage) formData.append("description_image", descImage);
 
@@ -1524,6 +1525,11 @@ function AdminOrders() {
                 <td className="px-6 py-4">
                   <p className="font-bold text-venuea-dark">{formatPrice(order.total_amount)}</p>
                   {order.used_points > 0 && <p className="text-[10px] text-red-500 font-medium">-{formatPrice(order.used_points)} (Point)</p>}
+                  {order.status === 'completed' && order.earned_points > 0 && (
+                    <p className="text-[10px] text-green-600 font-medium leading-none mt-1">
+                      +{order.earned_points.toLocaleString()}P 적립됨
+                    </p>
+                  )}
                 </td>
                 <td className="px-6 py-4">
                   <span className={cn(
@@ -1933,10 +1939,10 @@ function AdminUserPoints({ adminRole }: { adminRole?: string }) {
           <span>등급 산정 기준 확인</span>
         </h3>
         <ul className="space-y-3 text-sm text-amber-900/70">
-          <li className="flex justify-between"><span>Beige</span> <span>신규 가입</span></li>
-          <li className="flex justify-between font-bold border-b border-amber-200 pb-1"><span>Green</span> <span>10만원 이상</span></li>
-          <li className="flex justify-between font-bold border-b border-amber-200 pb-1"><span>Black</span> <span>50만원 이상</span></li>
-          <li className="flex justify-between font-bold text-black"><span>The Black</span> <span>100만원 이상</span></li>
+          <li className="flex justify-between"><span>Beige</span> <span>신규 가입 (1% 적립)</span></li>
+          <li className="flex justify-between font-bold border-b border-amber-200 pb-1"><span>Green</span> <span>10만원 이상 (3% 적립)</span></li>
+          <li className="flex justify-between font-bold border-b border-amber-200 pb-1"><span>Black</span> <span>50만원 이상 (5% 적립, 무료 배송)</span></li>
+          <li className="flex justify-between font-bold text-black"><span>The Black</span> <span>100만원 이상 (7% 적립, 무료 배송)</span></li>
         </ul>
       </div>
     </div>
