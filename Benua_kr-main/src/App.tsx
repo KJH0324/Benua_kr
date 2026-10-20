@@ -1,0 +1,124 @@
+import { BrowserRouter as Router, Routes, Route, Navigate, useLocation } from "react-router-dom";
+import { Toaster } from "sonner";
+import { useEffect } from "react";
+import Navbar from "./components/Navbar";
+import Footer from "./components/Footer";
+import ScrollToTop from "./components/ScrollToTop";
+import Home from "./pages/Home";
+import Shop from "./pages/Shop";
+import ProductDetail from "./pages/ProductDetail";
+import Cart from "./pages/Cart";
+import TrackOrder from "./pages/TrackOrder";
+import Profile from "./pages/Profile";
+import Login from "./pages/Login";
+import AdminDashboard from "./pages/AdminDashboard";
+import AdminLogin from "./pages/AdminLogin";
+import About from "./pages/About";
+import Contact from "./pages/Contact";
+import Terms from "./pages/Terms";
+import Privacy from "./pages/Privacy";
+import Checkout from "./pages/Checkout";
+import VerifyEmail from "./pages/VerifyEmail";
+import Unsubscribe from "./pages/Unsubscribe";
+import { motion, AnimatePresence } from "motion/react";
+import ErrorBoundary from "./components/ErrorBoundary";
+import CouponPopup from "./components/CouponPopup";
+import { isAdminSubdomain } from "./lib/subdomain";
+
+function PageTitleHandler() {
+  const location = useLocation();
+
+  useEffect(() => {
+    const path = location.pathname;
+    let title = "Benua";
+
+    if (path === "/shop") title = "Benua | 스토어";
+    else if (path.startsWith("/product/")) title = "Benua | 상품상세";
+    else if (path === "/cart") title = "Benua | 장바구니";
+    else if (path === "/checkout") title = "Benua | 결제";
+    else if (path === "/profile") title = "Benua | 마이페이지";
+    else if (path === "/login") title = "Benua | 로그인";
+    else if (path === "/about") title = "Benua | 브랜드 스토리";
+    else if (path === "/contact") title = "Benua | 고객센터";
+    else if (path === "/track") title = "Benua | 배송조회";
+    
+    if (isAdminSubdomain() || path.includes("/admin")) {
+      title = "Benua | 관리자";
+    }
+
+    document.title = title;
+  }, [location]);
+
+  return null;
+}
+
+export default function App() {
+  const isAdmin = isAdminSubdomain();
+
+  if (isAdmin) {
+    return (
+      <ErrorBoundary>
+        <Router>
+          <PageTitleHandler />
+          <ScrollToTop />
+          <div className="flex flex-col min-h-screen bg-gray-50">
+            <main className="flex-grow">
+              <AnimatePresence mode="wait">
+                <Routes>
+                  <Route path="/login" element={<AdminLogin />} />
+                  <Route path="/*" element={<AdminDashboard />} />
+                </Routes>
+              </AnimatePresence>
+            </main>
+            <Toaster position="top-center" />
+          </div>
+        </Router>
+      </ErrorBoundary>
+    );
+  }
+
+  return (
+    <ErrorBoundary>
+      <Router>
+        <PageTitleHandler />
+        <ScrollToTop />
+        <div className="flex flex-col min-h-screen bg-white">
+          <Navbar />
+          <main className="flex-grow">
+            <AnimatePresence mode="wait">
+              <Routes>
+                <Route path="/" element={<Home />} />
+                <Route path="/shop" element={<Shop />} />
+                <Route path="/product/:id" element={<ProductDetail />} />
+                <Route path="/about" element={<About />} />
+                <Route path="/contact" element={<Contact />} />
+                <Route path="/terms" element={<Terms />} />
+                <Route path="/privacy" element={<Privacy />} />
+                <Route path="/cart" element={<Cart />} />
+                <Route path="/checkout" element={<Checkout />} />
+                <Route path="/track" element={<TrackOrder />} />
+                <Route path="/profile" element={<Profile />} />
+                <Route path="/login" element={<Login />} />
+                <Route path="/verify-email" element={<VerifyEmail />} />
+                <Route path="/unsubscribe" element={<Unsubscribe />} />
+                {/* Legacy redirect for /admin */}
+                <Route path="/admin/*" element={<Navigate to={`https://dash.benua.shop${window.location.pathname.replace('/admin', '')}`} replace />} />
+              </Routes>
+            </AnimatePresence>
+          </main>
+          <Footer />
+          <CouponPopup />
+          <Toaster 
+            position="top-center" 
+            toastOptions={{
+              classNames: {
+                error: 'bg-[#FF4000] text-white border-[#FF4000]',
+                warning: 'bg-[#FF4000] text-white border-[#FF4000]',
+              }
+            }} 
+          />
+        </div>
+      </Router>
+    </ErrorBoundary>
+  );
+}
