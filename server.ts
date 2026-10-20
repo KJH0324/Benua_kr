@@ -1421,7 +1421,9 @@ async function startServer() {
         `<html><body><script>if(window.opener){window.opener.postMessage({type:'OAUTH_ERROR',error:'server_error'},'*');window.close();}else{window.location.href='/login?error=server_error';}</script></body></html>`
       );
     }
-    app.get("/api/auth/kakao/url", (req, res) => {
+  });
+
+  app.get("/api/auth/kakao/url", (req, res) => {
     const clientId = process.env.KAKAO_CLIENT_ID;
     if (!clientId) return res.status(500).json({ error: "Kakao Client ID가 설정되지 않았습니다." });
 
