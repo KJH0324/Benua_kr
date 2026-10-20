@@ -51,7 +51,7 @@ export default function Navbar() {
   return (
     <header className="fixed top-0 left-0 right-0 h-[76px] bg-venuea-beige/95 backdrop-blur-md border-b border-black/5 z-50 px-6 md:px-[60px] flex items-center justify-between">
       <Link to="/" aria-label="베뉴아 홈" className="flex items-center shrink-0">
-        <img src="/logo-dark.png" alt="Benua" className="h-10 w-auto" />
+        <img src="/logo-color.png" alt="Benua" className="h-10 w-auto" />
       </Link>
 
       <nav className="hidden md:flex items-center gap-8">
