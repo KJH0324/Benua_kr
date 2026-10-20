@@ -164,7 +164,7 @@ export default function Cart() {
               <p className="text-xs text-venuea-brown">
                 {freeShippingTier || shipping === 0
                   ? "무료배송이 적용됩니다."
-                  : `${formatPrice(remain)} 더 담으면 무료배송`}
+                  : `${formatPrice(remain)} 더 담으면 무료배송이에요`}
               </p>
             </div>
             <div className="flex justify-between text-sm">

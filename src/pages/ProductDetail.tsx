@@ -15,7 +15,24 @@ export default function ProductDetail() {
   const [others, setOthers] = useState<CardProduct[]>([]);
   const [quantity, setQuantity] = useState(1);
   const [isWished, setIsWished] = useState(false);
+  const [cartGoods, setCartGoods] = useState(0);
   const addingRef = useRef(false);
+  useEffect(() => {
+    const readCart = () => {
+      try {
+        const saved = JSON.parse(localStorage.getItem("benua_cart") || "[]");
+        const sum = Array.isArray(saved)
+          ? saved.reduce((total: number, item: any) => total + Number(item.price) * Number(item.quantity || 1), 0)
+          : 0;
+        setCartGoods(Number.isFinite(sum) ? sum : 0);
+      } catch {
+        setCartGoods(0);
+      }
+    };
+    readCart();
+    window.addEventListener("cart-updated", readCart);
+    return () => window.removeEventListener("cart-updated", readCart);
+  }, []);
 
   useEffect(() => {
     if (!id) return;
@@ -191,6 +208,21 @@ export default function ProductDetail() {
           <p className="text-sm text-venuea-brown">
             배송비 {formatPrice(SHIPPING_FEE)} · {formatPrice(FREE_SHIPPING_MIN)} 이상, 블랙·더 블랙 등급은 무료
           </p>
+          {stock > 0 && (
+            <div className="space-y-2">
+              <div className="h-1.5 rounded-full bg-black/10 overflow-hidden">
+                <div
+                  className="h-full bg-venuea-green"
+                  style={{ width: `${Math.min(100, (cartGoods / FREE_SHIPPING_MIN) * 100)}%` }}
+                />
+              </div>
+              <p className="text-xs text-venuea-brown">
+                {cartGoods >= FREE_SHIPPING_MIN
+                  ? "무료배송이 적용됩니다."
+                  : `${formatPrice(FREE_SHIPPING_MIN - cartGoods)} 더 담으면 무료배송이에요`}
+              </p>
+            </div>
+          )}
 
           <p className="text-sm text-venuea-muted leading-relaxed whitespace-pre-line">
             {product.description}
@@ -224,7 +256,7 @@ export default function ProductDetail() {
           </div>
 
           <p className="text-sm text-venuea-muted">
-            {stock > 0 ? `남은 재고 ${stock}개` : "품절"}
+            {stock > 0 ? `남은 재고 ${stock}개` : "지금은 품절이에요. 입고되면 알려드릴게요."}
           </p>
           <div className="flex items-center gap-4">
             <div className="flex items-center border border-black/10 rounded-xl bg-white">

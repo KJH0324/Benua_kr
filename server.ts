@@ -1443,6 +1443,23 @@ async function startServer() {
     }
   });
 
+  app.get("/api/points/history", authenticateUser, (req: any, res) => {
+    try {
+      const rows = db
+        .prepare(
+          `SELECT id, amount, reason, type, created_at
+           FROM point_history
+           WHERE user_id = ?
+           ORDER BY id DESC
+           LIMIT 50`
+        )
+        .all(req.user.id);
+      res.json(rows);
+    } catch {
+      res.status(500).json({ error: "포인트 내역을 불러오지 못했습니다." });
+    }
+  });
+
   app.delete("/api/auth/me", authenticateUser, (req: any, res) => {
     try {
       const userId = req.user.id;
@@ -3044,6 +3061,19 @@ async function startServer() {
   // ==========================================
   // 12. Reviews APIs
   // ==========================================
+  app.post("/api/reviews/image", authenticateUser, (req: any, res) => {
+    upload.single("image")(req, res, (err: any) => {
+      if (err) return res.status(400).json({ error: "이미지를 올리지 못했습니다." });
+      const file = req.file;
+      if (!file) return res.status(400).json({ error: "이미지 파일을 선택해주세요." });
+      if (!String(file.mimetype || "").startsWith("image/")) {
+        fs.unlink(file.path, () => {});
+        return res.status(400).json({ error: "이미지 파일만 올릴 수 있습니다." });
+      }
+      res.json({ image_url: `/uploads/${file.filename}` });
+    });
+  });
+
   app.post("/api/reviews", authenticateUser, (req: any, res) => {
     const { product_id, order_id, rating, content, image_url } = req.body;
     try {
@@ -3796,12 +3826,17 @@ async function startServer() {
       "/login",
       "/verify-email",
       "/unsubscribe",
+      "/reset-password",
     ]);
     app.get("*", (req, res) => {
+      const host = String(req.hostname || "");
+      const onAdminHost = host.startsWith("dash.") || host.startsWith("admin.");
+      const looksLikeFile = /\.[a-zA-Z0-9]+$/.test(req.path);
       const known =
         spaExact.has(req.path) ||
         req.path.startsWith("/product/") ||
-        req.path.startsWith("/admin");
+        req.path.startsWith("/admin") ||
+        (onAdminHost && !looksLikeFile);
       res.status(known ? 200 : 404).sendFile(path.join(distPath, "index.html"));
     });
   }

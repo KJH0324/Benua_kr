@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { LogOut, Award, Ticket, Package, Star, RotateCcw, X } from "lucide-react";
+import { LogOut, Award, Ticket, Package, Star, RotateCcw, X, Heart, MapPin } from "lucide-react";
+import DaumPostcodeEmbed from "react-daum-postcode";
 import { toast } from "sonner";
 import { apiFetch, authStorage } from "../lib/api";
 import {
@@ -104,6 +105,19 @@ export default function Profile() {
     productName: string;
   } | null>(null);
   const [reviewForm, setReviewForm] = useState({ rating: 5, content: "" });
+  const [reviewImage, setReviewImage] = useState<File | null>(null);
+  const [reviewPreview, setReviewPreview] = useState("");
+  const [wishes, setWishes] = useState<any[]>([]);
+  const [pointHistory, setPointHistory] = useState<any[]>([]);
+  const [addressOpen, setAddressOpen] = useState(false);
+  const [postcodeOpen, setPostcodeOpen] = useState(false);
+  const [addressError, setAddressError] = useState("");
+  const [addressForm, setAddressForm] = useState({
+    phone: "",
+    zipcode: "",
+    address: "",
+    detail_address: "",
+  });
 
   // 자체 인앱 환불 요청 모달 상태
   const [refundModalOrder, setRefundModalOrder] = useState<Order | null>(null);
@@ -121,12 +135,22 @@ export default function Profile() {
     }
     setUser(meData.user);
 
-    const [ordRes, coupRes] = await Promise.all([
+    const [ordRes, coupRes, wishRes, pointRes] = await Promise.all([
       apiFetch("/api/orders/me"),
       apiFetch("/api/coupons/me"),
+      apiFetch("/api/wishlists"),
+      apiFetch("/api/points/history"),
     ]);
     if (ordRes.ok) setOrders(await ordRes.json());
     if (coupRes.ok) setCoupons(await coupRes.json());
+    if (wishRes.ok) {
+      const wishData = await wishRes.json();
+      setWishes(Array.isArray(wishData) ? wishData : []);
+    }
+    if (pointRes.ok) {
+      const pointData = await pointRes.json();
+      setPointHistory(Array.isArray(pointData) ? pointData : []);
+    }
   };
 
   useEffect(() => {
@@ -184,6 +208,18 @@ export default function Profile() {
 
   const handleSubmitReview = async () => {
     if (!reviewModal) return;
+    let image_url = "";
+    if (reviewImage) {
+      const body = new FormData();
+      body.append("image", reviewImage);
+      const uploaded = await apiFetch("/api/reviews/image", { method: "POST", body });
+      const uploadedData = await uploaded.json();
+      if (!uploaded.ok) {
+        toast.error(uploadedData.error || "사진을 올리지 못했습니다.");
+        return;
+      }
+      image_url = uploadedData.image_url || "";
+    }
     const res = await apiFetch("/api/reviews", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -192,17 +228,90 @@ export default function Profile() {
         product_id: reviewModal.productId,
         rating: reviewForm.rating,
         content: reviewForm.content,
+        image_url,
       }),
     });
     const data = await res.json();
     if (res.ok) {
-      toast.success(`리뷰가 등록되어 ${data.points_earned}P가 적립되었습니다!`);
+      toast.success(`리뷰가 등록되어 ${data.points_earned}P가 적립되었습니다.`);
       setReviewModal(null);
       setReviewForm({ rating: 5, content: "" });
+      setReviewImage(null);
+      setReviewPreview("");
       loadProfileData();
     } else {
       toast.error(data.error || "리뷰 등록 실패");
     }
+  };
+
+  const openAddress = () => {
+    const current = user as any;
+    setAddressForm({
+      phone: current?.phone || "",
+      zipcode: current?.zipcode || "",
+      address: current?.address || "",
+      detail_address: current?.detail_address || "",
+    });
+    setAddressError("");
+    setAddressOpen(true);
+  };
+
+  const saveAddress = async () => {
+    const current = user as any;
+    if (!addressForm.phone.trim() || !addressForm.zipcode.trim() || !addressForm.address.trim()) {
+      setAddressError("연락처와 주소를 입력해주세요.");
+      return;
+    }
+    const res = await apiFetch("/api/auth/me", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: current?.name || "",
+        phone: addressForm.phone.trim(),
+        zipcode: addressForm.zipcode.replace(/\D/g, ""),
+        address: addressForm.address.trim(),
+        detail_address: addressForm.detail_address.trim(),
+        newsletter_subscribed: current?.newsletter_subscribed,
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      setAddressError(data.error || "배송지를 저장하지 못했습니다.");
+      return;
+    }
+    setAddressOpen(false);
+    toast.success("기본 배송지를 저장했습니다.");
+    loadProfileData();
+  };
+
+  const addWishToCart = (product: any) => {
+    const stock = Math.max(0, Number(product.stock) || 0);
+    if (stock < 1) {
+      toast.error("지금은 품절이에요. 입고되면 알려드릴게요.");
+      return;
+    }
+    const price =
+      product.discount_rate > 0
+        ? Math.round(product.price * (1 - product.discount_rate / 100))
+        : product.price;
+    const saved = JSON.parse(localStorage.getItem("benua_cart") || "[]");
+    const list = Array.isArray(saved) ? saved : [];
+    const idx = list.findIndex((item: any) => String(item.id) === String(product.id));
+    if (idx >= 0) list[idx].quantity = Math.min(stock, Number(list[idx].quantity || 1) + 1);
+    else {
+      list.push({
+        id: product.id,
+        name: product.name,
+        price,
+        quantity: 1,
+        stock,
+        image: product.image_url,
+        category: product.category,
+      });
+    }
+    localStorage.setItem("benua_cart", JSON.stringify(list));
+    window.dispatchEvent(new Event("cart-updated"));
+    toast.success("쇼핑백에 담았습니다.");
   };
 
   const handleLogout = async () => {
@@ -341,6 +450,84 @@ export default function Profile() {
             </div>
           ))}
         </div>
+      </section>
+
+      <section className="space-y-4">
+        <div className="flex items-center justify-between gap-3">
+          <h2 className="text-lg font-bold flex items-center gap-2">
+            <MapPin size={18} className="text-venuea-gold" />
+            <span>기본 배송지</span>
+          </h2>
+          <button type="button" onClick={openAddress} className="text-sm font-bold text-venuea-green">
+            수정
+          </button>
+        </div>
+        <div className="p-4 rounded-xl border border-gray-200 bg-white text-sm text-venuea-brown">
+          {(user as any).address ? (
+            <p>
+              {(user as any).zipcode} {(user as any).address} {(user as any).detail_address}
+              <br />
+              {(user as any).phone}
+            </p>
+          ) : (
+            <p>저장된 배송지가 없습니다. 다음에 결제할 때 다시 쓰지 않도록 저장해두세요.</p>
+          )}
+        </div>
+      </section>
+
+      <section className="space-y-4">
+        <h2 className="text-lg font-bold flex items-center gap-2">
+          <Heart size={18} className="text-venuea-gold" />
+          <span>찜한 상품</span>
+        </h2>
+        {wishes.length === 0 ? (
+          <p className="text-sm text-gray-400">찜한 상품이 없습니다.</p>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            {wishes.map((item) => (
+              <div key={item.id} className="p-4 rounded-xl border border-gray-200 bg-white flex gap-3">
+                {item.image_url ? (
+                  <img src={item.image_url} alt="" className="w-16 h-20 object-cover rounded-lg bg-gray-100" />
+                ) : (
+                  <div className="w-16 h-20 rounded-lg bg-gray-100" />
+                )}
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-bold text-venuea-dark truncate">{item.name}</p>
+                  <p className="text-sm mt-1">{formatPrice(item.price)}</p>
+                  <button
+                    type="button"
+                    onClick={() => addWishToCart(item)}
+                    className="mt-2 text-xs font-bold text-venuea-green"
+                  >
+                    쇼핑백 담기
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
+
+      <section className="space-y-4">
+        <h2 className="text-lg font-bold">포인트 내역</h2>
+        {pointHistory.length === 0 ? (
+          <p className="text-sm text-gray-400">포인트 내역이 없습니다.</p>
+        ) : (
+          <div className="divide-y divide-black/5 rounded-xl border border-gray-200 bg-white">
+            {pointHistory.map((row) => (
+              <div key={row.id} className="px-4 py-3 flex items-center justify-between gap-3 text-sm">
+                <div>
+                  <p className="font-bold text-venuea-dark">{row.reason || (row.type === "USED" ? "사용" : "적립")}</p>
+                  <p className="text-[11px] text-gray-400">{String(row.created_at || "").slice(0, 16)}</p>
+                </div>
+                <span className={row.type === "USED" ? "text-red-600 font-bold" : "text-venuea-green font-bold"}>
+                  {row.type === "USED" ? "-" : "+"}
+                  {Number(row.amount || 0).toLocaleString()}P
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
       </section>
 
       {/* Orders */}
@@ -562,6 +749,22 @@ export default function Profile() {
               placeholder="상품에 대한 감상을 남겨주세요."
               className="w-full border rounded-xl p-3 text-sm"
             />
+            <label className="block text-xs font-bold text-gray-500">
+              사진 첨부하면 포토 리뷰 포인트가 적립됩니다
+              <input
+                type="file"
+                accept="image/*"
+                className="mt-2 block w-full text-xs"
+                onChange={(e) => {
+                  const file = e.target.files?.[0] || null;
+                  setReviewImage(file);
+                  setReviewPreview(file ? URL.createObjectURL(file) : "");
+                }}
+              />
+            </label>
+            {reviewPreview && (
+              <img src={reviewPreview} alt="리뷰 사진 미리보기" className="w-24 h-24 object-cover rounded-lg" />
+            )}
             <div className="flex gap-2">
               <button
                 onClick={() => setReviewModal(null)}
@@ -576,6 +779,85 @@ export default function Profile() {
                 등록하기
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {addressOpen && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6 space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="font-bold text-lg">기본 배송지</h3>
+              <button type="button" aria-label="배송지 닫기" onClick={() => setAddressOpen(false)}>
+                <X size={18} />
+              </button>
+            </div>
+            {addressError && (
+              <p className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-xs text-red-700">{addressError}</p>
+            )}
+            <input
+              value={addressForm.phone}
+              onChange={(e) => setAddressForm({ ...addressForm, phone: e.target.value })}
+              placeholder="연락처"
+              className="w-full border rounded-xl p-3 text-sm"
+            />
+            <div className="flex gap-2">
+              <input
+                value={addressForm.zipcode}
+                onChange={(e) => setAddressForm({ ...addressForm, zipcode: e.target.value.replace(/\D/g, "") })}
+                placeholder="우편번호"
+                className="flex-1 border rounded-xl p-3 text-sm"
+              />
+              <button
+                type="button"
+                onClick={() => setPostcodeOpen(true)}
+                className="px-4 rounded-xl bg-venuea-dark text-white text-xs font-bold"
+              >
+                주소 검색
+              </button>
+            </div>
+            <input
+              value={addressForm.address}
+              onChange={(e) => setAddressForm({ ...addressForm, address: e.target.value })}
+              placeholder="기본주소"
+              className="w-full border rounded-xl p-3 text-sm"
+            />
+            <input
+              value={addressForm.detail_address}
+              onChange={(e) => setAddressForm({ ...addressForm, detail_address: e.target.value })}
+              placeholder="상세주소"
+              className="w-full border rounded-xl p-3 text-sm"
+            />
+            <button
+              type="button"
+              onClick={saveAddress}
+              className="w-full py-3 bg-venuea-green text-white rounded-xl text-sm font-bold"
+            >
+              저장
+            </button>
+          </div>
+        </div>
+      )}
+
+      {postcodeOpen && (
+        <div className="fixed inset-0 bg-black/50 z-[60] flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-md w-full overflow-hidden">
+            <div className="p-4 border-b flex justify-between items-center">
+              <span className="font-bold text-sm">우편번호 검색</span>
+              <button type="button" aria-label="주소 검색 닫기" onClick={() => setPostcodeOpen(false)}>
+                <X size={20} />
+              </button>
+            </div>
+            <DaumPostcodeEmbed
+              onComplete={(data) => {
+                setAddressForm((prev) => ({
+                  ...prev,
+                  zipcode: data.zonecode,
+                  address: data.address,
+                }));
+                setPostcodeOpen(false);
+              }}
+            />
           </div>
         </div>
       )}

@@ -84,6 +84,7 @@ export default function AdminDashboard() {
   const isAdminSub = isAdminSubdomain();
   const adminPathBase = isAdminSub ? "" : "/admin";
   const [adminRole, setAdminRole] = useState<string>("MASTER");
+  const [unreadMail, setUnreadMail] = useState(0);
 
   useEffect(() => {
     const checkAuth = async () => {
@@ -103,6 +104,16 @@ export default function AdminDashboard() {
     };
     checkAuth();
   }, [navigate, isAdminSub]);
+
+  useEffect(() => {
+    if (isCheckingAuth) return;
+    apiFetch("/api/admin/inbox")
+      .then((r) => (r.ok ? r.json() : []))
+      .then((rows) => {
+        setUnreadMail(Array.isArray(rows) ? rows.filter((mail) => !mail.is_read).length : 0);
+      })
+      .catch(() => {});
+  }, [isCheckingAuth, location.pathname]);
 
   if (isCheckingAuth) {
     return (
@@ -209,7 +220,12 @@ export default function AdminDashboard() {
                       )}
                     >
                       <Icon size={18} />
-                      <span>{link.name}</span>
+                      <span className="flex-1">{link.name}</span>
+                      {link.path.endsWith("/inbox") && unreadMail > 0 && (
+                        <span className="min-w-5 h-5 px-1 rounded-full bg-venuea-green text-white text-[10px] font-bold flex items-center justify-center">
+                          {unreadMail}
+                        </span>
+                      )}
                     </Link>
                   );
                 })}

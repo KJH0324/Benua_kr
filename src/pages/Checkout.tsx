@@ -319,6 +319,21 @@ export default function Checkout() {
         <p className="text-sm text-venuea-muted">
           주문번호: <b className="text-venuea-dark font-mono">{completedOrderNumber}</b>
         </p>
+        <button
+          type="button"
+          onClick={() => {
+            navigator.clipboard.writeText(completedOrderNumber).then(
+              () => toast.success("주문번호를 복사했습니다."),
+              () => toast.error("복사하지 못했습니다. 번호를 직접 적어주세요.")
+            );
+          }}
+          className="px-5 py-3 rounded-full border border-venuea-green text-venuea-green text-sm font-bold"
+        >
+          주문번호 복사
+        </button>
+        <p className="text-xs text-venuea-muted leading-relaxed">
+          비회원 조회는 주문번호와 수령인 연락처가 모두 필요합니다.
+        </p>
 
         {vbankResult && (
           <div className="p-5 bg-amber-50 border border-amber-200 rounded-xl text-left text-xs space-y-1.5">

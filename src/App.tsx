@@ -18,6 +18,7 @@ import Privacy from "./pages/Privacy";
 import Checkout from "./pages/Checkout";
 import VerifyEmail from "./pages/VerifyEmail";
 import Unsubscribe from "./pages/Unsubscribe";
+import ResetPassword from "./pages/ResetPassword";
 import { AnimatePresence } from "motion/react";
 import ErrorBoundary from "./components/ErrorBoundary";
 import CouponPopup from "./components/CouponPopup";
@@ -38,6 +39,7 @@ function PageTitleHandler() {
     else if (path === "/cart") title = "Benua | 장바구니";
     else if (path === "/checkout") title = "Benua | 결제";
     else if (path === "/profile") title = "Benua | 마이페이지";
+    else if (path === "/reset-password") title = "Benua | 비밀번호 재설정";
     else if (path === "/login") title = "Benua | 로그인";
     else if (path === "/about") title = "Benua | 브랜드 스토리";
     else if (path === "/contact") title = "Benua | 고객센터";
@@ -124,6 +126,7 @@ export default function App() {
                 <Route path="/login" element={<Login />} />
                 <Route path="/verify-email" element={<VerifyEmail />} />
                 <Route path="/unsubscribe" element={<Unsubscribe />} />
+                <Route path="/reset-password" element={<ResetPassword />} />
                 <Route path="/admin/*" element={<Navigate to={`https://dash.benua.shop${window.location.pathname.replace('/admin', '')}`} replace />} />
                 <Route path="*" element={<NotFound />} />
               </Routes>
