@@ -2429,9 +2429,17 @@ async function startServer() {
       const orders = db
         .prepare("SELECT * FROM orders WHERE user_id = ? ORDER BY created_at DESC")
         .all(req.user.id) as any[];
-      const getItems = db.prepare("SELECT * FROM order_items WHERE order_id = ?");
+      const getItems = db.prepare(
+        `SELECT oi.*, CASE WHEN r.id IS NOT NULL THEN 1 ELSE 0 END AS reviewed
+         FROM order_items oi
+         LEFT JOIN reviews r
+           ON r.order_id = oi.order_id
+          AND r.product_id = oi.product_id
+          AND r.user_id = ?
+         WHERE oi.order_id = ?`
+      );
       for (const order of orders) {
-        order.items = getItems.all(order.id);
+        order.items = getItems.all(req.user.id, order.id);
       }
       res.json(orders);
     } catch {

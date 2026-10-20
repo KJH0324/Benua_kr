@@ -272,20 +272,23 @@ export default function Profile() {
                       </span>
                       <div className="flex items-center gap-3">
                         <span className="font-bold">{formatPrice(item.price * item.quantity)}</span>
-                        {order.status === "completed" && (
-                          <button
-                            onClick={() =>
-                              setReviewModal({
-                                orderId: order.id,
-                                productId: item.product_id,
-                                productName: item.name,
-                              })
-                            }
-                            className="text-xs font-bold text-venuea-gold underline"
-                          >
-                            리뷰 작성
-                          </button>
-                        )}
+                        {order.status === "completed" &&
+                          (item.reviewed ? (
+                            <span className="text-xs text-gray-400">작성 완료</span>
+                          ) : (
+                            <button
+                              onClick={() =>
+                                setReviewModal({
+                                  orderId: order.id,
+                                  productId: item.product_id,
+                                  productName: item.name,
+                                })
+                              }
+                              className="text-xs font-bold text-venuea-gold underline"
+                            >
+                              리뷰 작성
+                            </button>
+                          ))}
                       </div>
                     </div>
                   ))}

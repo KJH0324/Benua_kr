@@ -214,11 +214,6 @@ export default function ProductDetail() {
                     )}
                     <span className="text-xs font-bold">{rev.user_name}</span>
                     <span className="text-[11px] text-gray-400">({rev.user_tier})</span>
-                    {rev.is_hidden === 1 && (
-                      <span className="px-2 py-0.5 bg-gray-100 text-gray-500 text-[10px] font-bold rounded">
-                        나만 보는 리뷰
-                      </span>
-                    )}
                   </div>
                   <div className="flex text-venuea-gold">
                     {Array.from({ length: rev.rating || 5 }).map((_, i) => (
