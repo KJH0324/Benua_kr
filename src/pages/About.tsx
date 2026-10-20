@@ -2,19 +2,19 @@ export default function About() {
   return (
     <div className="pt-[120px] pb-24 px-6">
       <article className="max-w-[680px] mx-auto">
-        <p className="text-[13px] tracking-[0.18em] text-venuea-green">02 · BRAND STORY</p>
+        <p className="text-[13px] tracking-[0.18em] text-venuea-green">BRAND STORY</p>
 
         <div className="mt-16 mb-8 flex justify-center" aria-hidden="true">
           <span className="block w-10 h-px bg-venuea-gold" />
         </div>
 
-        <h1 className="text-center font-serif font-normal text-[32px] md:text-[40px] leading-[1.45] text-venuea-dark">
+        <h1 className="text-center font-serif font-bold text-[32px] md:text-[40px] leading-[1.45] text-venuea-dark">
           문을 닫는 순간,
           <br />
           하루가 조용해지도록
         </h1>
 
-        <div className="mt-14 space-y-8 text-[16px] leading-[2] text-venuea-brown font-serif font-normal">
+        <div className="mt-14 space-y-8 text-[16px] leading-[1.9] text-venuea-dark font-sans font-bold">
           <p>
             하루는 생각보다 시끄럽습니다. 알림과 약속, 해야 할 일 사이를 지나 집에 돌아오면, 비로소 내
             속도로 숨 쉬는 시간이 시작됩니다.
@@ -34,10 +34,10 @@ export default function About() {
           </p>
         </div>
 
-        <p className="mt-16 text-center font-serif font-normal text-[18px] leading-relaxed text-venuea-green">
+        <p className="mt-16 text-center font-serif font-bold text-[18px] leading-relaxed text-venuea-green">
           오늘도 수고한 당신의 집이, 가장 다정한 쉼이 되기를.
         </p>
-        <p className="mt-4 text-center text-sm font-serif font-normal text-venuea-muted">soft living mood, Benua.</p>
+        <p className="mt-4 text-center text-sm font-sans font-bold text-venuea-dark">soft living mood, Benua.</p>
       </article>
     </div>
   );
