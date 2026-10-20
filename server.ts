@@ -365,6 +365,20 @@ db.exec(`
     email TEXT UNIQUE NOT NULL,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
+
+  CREATE TABLE IF NOT EXISTS inbound_emails (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    resend_id TEXT UNIQUE,
+    from_address TEXT,
+    to_addresses TEXT,
+    subject TEXT,
+    text_body TEXT,
+    html_body TEXT,
+    attachments TEXT,
+    received_at TEXT,
+    is_read INTEGER DEFAULT 0,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
 `);
 
 const ensureColumn = (table: string, column: string, definition: string) => {
@@ -818,6 +832,116 @@ const runAutoCompletion = () => {
 // ==========================================
 // 5. Express Server Setup
 // ==========================================
+const SUPPORT_INBOX = (process.env.INBOUND_ADDRESS || "support@benua.shop").toLowerCase();
+
+const resendApiKey = () => process.env.RESEND_API_KEY || process.env.SMTP_PASS || "";
+
+const asAddressList = (value: unknown): string[] => {
+  if (Array.isArray(value)) return value.map((item) => String(item));
+  if (typeof value === "string" && value.trim()) return [value];
+  return [];
+};
+
+const isSupportInboxMail = (email: any) => {
+  const blob = [
+    ...asAddressList(email?.to),
+    ...asAddressList(email?.cc),
+    ...asAddressList(email?.bcc),
+    ...asAddressList(email?.received_for),
+  ]
+    .join(" ")
+    .toLowerCase();
+  return blob.includes(SUPPORT_INBOX);
+};
+
+const verifyResendWebhook = (rawBody: string, headers: Record<string, unknown>) => {
+  const secret = process.env.RESEND_WEBHOOK_SECRET;
+  if (!secret) return true;
+  const id = String(headers["svix-id"] || "");
+  const timestamp = String(headers["svix-timestamp"] || "");
+  const signature = String(headers["svix-signature"] || "");
+  const ts = Number(timestamp);
+  if (!id || !timestamp || !signature || !Number.isFinite(ts)) return false;
+  if (Math.abs(Date.now() / 1000 - ts) > 5 * 60) return false;
+  const key = Buffer.from(secret.replace(/^whsec_/, ""), "base64");
+  const expected = crypto.createHmac("sha256", key).update(`${id}.${timestamp}.${rawBody}`).digest("base64");
+  return signature.split(" ").some((part) => {
+    const sig = part.startsWith("v1,") ? part.slice(3) : "";
+    if (!sig || sig.length !== expected.length) return false;
+    return crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expected));
+  });
+};
+
+const fetchReceivedEmail = async (emailId: string) => {
+  const key = resendApiKey();
+  if (!key) throw new Error("Resend API 키가 없습니다.");
+  const response = await fetch(`https://api.resend.com/emails/receiving/${encodeURIComponent(emailId)}`, {
+    headers: { Authorization: `Bearer ${key}` },
+  });
+  if (!response.ok) {
+    throw new Error(`받은 메일 조회 실패 (${response.status})`);
+  }
+  return response.json();
+};
+
+const saveInboundEmail = (email: any) => {
+  if (!email?.id || !isSupportInboxMail(email)) return false;
+  db.prepare(
+    `INSERT INTO inbound_emails
+      (resend_id, from_address, to_addresses, subject, text_body, html_body, attachments, received_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(resend_id) DO UPDATE SET
+       from_address = excluded.from_address,
+       to_addresses = excluded.to_addresses,
+       subject = excluded.subject,
+       text_body = excluded.text_body,
+       html_body = excluded.html_body,
+       attachments = excluded.attachments,
+       received_at = excluded.received_at`
+  ).run(
+    email.id,
+    email.from || "",
+    JSON.stringify([
+      ...asAddressList(email.to),
+      ...asAddressList(email.received_for).map((item) => `via:${item}`),
+    ]),
+    email.subject || "(제목 없음)",
+    email.text || "",
+    email.html || "",
+    JSON.stringify(email.attachments || []),
+    email.created_at || new Date().toISOString()
+  );
+  return true;
+};
+
+const listReceivedEmails = async () => {
+  const key = resendApiKey();
+  if (!key) throw new Error("Resend API 키가 없습니다.");
+  const headers = { Authorization: `Bearer ${key}` };
+  const all: any[] = [];
+  let after = "";
+  for (let page = 0; page < 5; page++) {
+    const url = new URL("https://api.resend.com/emails/receiving");
+    if (page > 0) {
+      url.searchParams.set("limit", "100");
+      if (after) url.searchParams.set("after", after);
+    }
+    let response = await fetch(page === 0 ? "https://api.resend.com/emails/receiving" : url, { headers });
+    if (!response.ok && page === 0) {
+      url.searchParams.set("limit", "100");
+      response = await fetch(url, { headers });
+    }
+    if (!response.ok) throw new Error(`받은 메일 목록 조회 실패 (${response.status})`);
+    const data = await response.json();
+    const items = Array.isArray(data) ? data : data.data || [];
+    all.push(...items);
+    if (!data.has_more || items.length === 0) break;
+    after = items[items.length - 1]?.id || "";
+    if (!after) break;
+  }
+  return all;
+};
+
 async function startServer() {
   const app = express();
 
@@ -850,7 +974,16 @@ async function startServer() {
     next();
   });
 
-  app.use(express.json({ limit: "50mb" }));
+  app.use(
+    express.json({
+      limit: "50mb",
+      verify: (req, _res, buf) => {
+        if (req.url?.startsWith("/api/webhooks/resend")) {
+          (req as any).rawBody = buf.toString("utf8");
+        }
+      },
+    })
+  );
   app.use(express.urlencoded({ limit: "50mb", extended: true }));
   app.use(cookieParser());
   app.use("/uploads", express.static(uploadsDir));
@@ -3362,6 +3495,70 @@ async function startServer() {
       res.json({ success: true, count: allEmails.length });
     } catch {
       res.status(500).json({ error: "뉴스레터 발송 실패" });
+    }
+  });
+
+  app.post("/api/webhooks/resend", async (req: any, res) => {
+    try {
+      const raw = req.rawBody || JSON.stringify(req.body || {});
+      if (!verifyResendWebhook(raw, req.headers)) {
+        return res.status(401).json({ error: "서명 확인에 실패했습니다." });
+      }
+      if (req.body?.type !== "email.received") return res.json({ ok: true, ignored: true });
+      const emailId = req.body?.data?.email_id;
+      if (!emailId) return res.status(400).json({ error: "email_id가 없습니다." });
+      const email = await fetchReceivedEmail(emailId);
+      if (!email.received_for && req.body.data.received_for) email.received_for = req.body.data.received_for;
+      if ((!email.to || email.to.length === 0) && req.body.data.to) email.to = req.body.data.to;
+      const saved = saveInboundEmail(email);
+      res.json({ ok: true, saved });
+    } catch (err) {
+      console.error("[INBOUND]", err instanceof Error ? err.message : err);
+      res.status(500).json({ error: "받은 메일 저장에 실패했습니다." });
+    }
+  });
+
+  app.get("/api/admin/inbox", authenticateCS, (_req, res) => {
+    try {
+      const rows = db
+        .prepare(
+          `SELECT id, resend_id, from_address, to_addresses, subject, attachments, received_at, is_read, created_at
+           FROM inbound_emails
+           ORDER BY COALESCE(received_at, created_at) DESC`
+        )
+        .all();
+      res.json(rows);
+    } catch {
+      res.status(500).json({ error: "받은 메일 조회에 실패했습니다." });
+    }
+  });
+
+  app.get("/api/admin/inbox/:id", authenticateCS, (req, res) => {
+    try {
+      const row = db.prepare("SELECT * FROM inbound_emails WHERE id = ?").get(req.params.id) as any;
+      if (!row) return res.status(404).json({ error: "메일을 찾을 수 없습니다." });
+      db.prepare("UPDATE inbound_emails SET is_read = 1 WHERE id = ?").run(req.params.id);
+      res.json({ ...row, is_read: 1 });
+    } catch {
+      res.status(500).json({ error: "메일 조회에 실패했습니다." });
+    }
+  });
+
+  app.post("/api/admin/inbox/sync", authenticateCS, async (_req, res) => {
+    try {
+      const items = await listReceivedEmails();
+      let saved = 0;
+      for (const item of items) {
+        if (!isSupportInboxMail(item)) continue;
+        const full = await fetchReceivedEmail(item.id);
+        if (!full.received_for && item.received_for) full.received_for = item.received_for;
+        if (saveInboundEmail(full)) saved += 1;
+      }
+      res.json({ success: true, saved, scanned: items.length });
+    } catch (err) {
+      res.status(500).json({
+        error: err instanceof Error ? err.message : "받은 메일을 가져오지 못했습니다.",
+      });
     }
   });
 

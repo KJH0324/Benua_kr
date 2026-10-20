@@ -15,6 +15,7 @@ import {
   Loader2,
   X,
   MessageSquare,
+  Mail,
   LogOut,
   Ticket,
   Download,
@@ -120,6 +121,7 @@ export default function AdminDashboard() {
     { name: "리뷰 관리", path: `${adminPathBase}/reviews`, icon: MessageSquare },
     { name: "전시/배너 관리", path: `${adminPathBase}/display`, icon: LayoutDashboard },
     { name: "1:1 문의 관리", path: `${adminPathBase}/inquiries`, icon: MessageSquare },
+    { name: "받은 메일", path: `${adminPathBase}/inbox`, icon: Mail },
     { name: "고객/포인트 관리", path: `${adminPathBase}/customers`, icon: Users },
     { name: "쿠폰 관리", path: `${adminPathBase}/coupons`, icon: Ticket },
     { name: "뉴스레터 발송", path: `${adminPathBase}/newsletter`, icon: FileText },
@@ -282,6 +284,7 @@ export default function AdminDashboard() {
           <Route path="/customers" element={<AdminUserPoints adminRole={adminRole} />} />
           <Route path="/coupons" element={<AdminCoupons />} />
           <Route path="/inquiries" element={<AdminInquiries adminRole={adminRole} />} />
+          <Route path="/inbox" element={<AdminInbox />} />
           <Route path="/newsletter" element={<AdminNewsletter />} />
           {(adminRole === "MASTER" || adminRole === "ADMIN") && (
             <>
@@ -1964,6 +1967,139 @@ function AdminInquiries({ adminRole }: { adminRole: string }) {
           )}
         </div>
       ))}
+    </div>
+  );
+}
+
+function plainMailBody(mail: { text_body?: string; html_body?: string }) {
+  if (mail.text_body?.trim()) return mail.text_body;
+  return String(mail.html_body || "")
+    .replace(/<style[\s\S]*?<\/style>/gi, "")
+    .replace(/<script[\s\S]*?<\/script>/gi, "")
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/p>/gi, "\n")
+    .replace(/<[^>]+>/g, "")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&/g, "&")
+    .replace(/</g, "<")
+    .replace(/>/g, ">")
+    .replace(/"/g, '"');
+}
+
+function AdminInbox() {
+  const [mails, setMails] = useState<any[]>([]);
+  const [selected, setSelected] = useState<any | null>(null);
+  const [syncing, setSyncing] = useState(false);
+
+  const fetchMails = async () => {
+    const res = await apiFetch("/api/admin/inbox");
+    if (res.ok) setMails(await res.json());
+  };
+
+  const syncMails = async () => {
+    setSyncing(true);
+    try {
+      const res = await apiFetch("/api/admin/inbox/sync", { method: "POST" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast.error(data.error || "메일을 가져오지 못했습니다.");
+      }
+      await fetchMails();
+    } finally {
+      setSyncing(false);
+    }
+  };
+
+  useEffect(() => {
+    syncMails();
+  }, []);
+
+  const openMail = async (id: number) => {
+    const res = await apiFetch(`/api/admin/inbox/${id}`);
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) return toast.error(data.error || "메일을 열지 못했습니다.");
+    setSelected(data);
+    setMails((prev) => prev.map((mail) => (mail.id === id ? { ...mail, is_read: 1 } : mail)));
+  };
+
+  const attachmentNames = (raw: string) => {
+    try {
+      const items = JSON.parse(raw || "[]");
+      return Array.isArray(items) ? items.map((item) => item.filename).filter(Boolean) : [];
+    } catch {
+      return [];
+    }
+  };
+
+  return (
+    <div className="space-y-6 animate-in fade-in">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h2 className="text-xl font-bold font-serif">받은 메일</h2>
+          <p className="text-xs text-gray-400 mt-1">support@benua.shop 으로 온 메일만 표시됩니다.</p>
+        </div>
+        <button
+          onClick={syncMails}
+          disabled={syncing}
+          className="bg-venuea-dark text-white px-4 py-2 rounded-lg text-xs font-bold disabled:opacity-40"
+        >
+          {syncing ? "불러오는 중..." : "다시 가져오기"}
+        </button>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
+        <div className="lg:col-span-2 bg-white rounded-2xl border border-gray-100 divide-y max-h-[70vh] overflow-y-auto">
+          {mails.length === 0 ? (
+            <p className="p-6 text-sm text-gray-400">아직 받은 메일이 없습니다.</p>
+          ) : (
+            mails.map((mail) => (
+              <button
+                key={mail.id}
+                onClick={() => openMail(mail.id)}
+                className={cn(
+                  "w-full text-left px-4 py-3 hover:bg-gray-50",
+                  selected?.id === mail.id && "bg-gray-50"
+                )}
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <span className={cn("text-sm truncate", mail.is_read ? "text-gray-600" : "font-bold")}>
+                    {mail.from_address || "알 수 없는 발신자"}
+                  </span>
+                  {!mail.is_read && <span className="w-2 h-2 rounded-full bg-venuea-gold shrink-0" />}
+                </div>
+                <p className="text-xs text-gray-700 truncate mt-1">{mail.subject}</p>
+                <p className="text-[11px] text-gray-400 mt-1">
+                  {mail.received_at ? new Date(mail.received_at).toLocaleString("ko-KR") : ""}
+                </p>
+              </button>
+            ))
+          )}
+        </div>
+
+        <div className="lg:col-span-3 bg-white rounded-2xl border border-gray-100 p-6 min-h-[320px]">
+          {!selected ? (
+            <p className="text-sm text-gray-400">메일을 선택하면 내용이 표시됩니다.</p>
+          ) : (
+            <div className="space-y-4">
+              <div>
+                <h3 className="text-lg font-bold">{selected.subject}</h3>
+                <p className="text-xs text-gray-500 mt-1">보낸 사람 {selected.from_address}</p>
+                <p className="text-[11px] text-gray-400">
+                  {selected.received_at ? new Date(selected.received_at).toLocaleString("ko-KR") : ""}
+                </p>
+              </div>
+              {attachmentNames(selected.attachments).length > 0 && (
+                <p className="text-xs text-gray-500">
+                  첨부: {attachmentNames(selected.attachments).join(", ")}
+                </p>
+              )}
+              <pre className="whitespace-pre-wrap text-sm leading-7 text-gray-800 font-sans">
+                {plainMailBody(selected) || "본문이 없습니다."}
+              </pre>
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
