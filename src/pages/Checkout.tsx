@@ -1,560 +1,500 @@
 import React, { useState, useEffect } from "react";
-import { motion, AnimatePresence } from "motion/react";
-import { useLocation, useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
+import { loadTossPayments } from "@tosspayments/tosspayments-sdk";
+import DaumPostcodeEmbed from "react-daum-postcode";
+import { ShieldCheck, CreditCard, Loader2, CheckCircle2, MapPin, X } from "lucide-react";
 import { toast } from "sonner";
-import { formatPrice } from "../lib/utils";
-import DaumPostcode from "react-daum-postcode";
-import { X, CreditCard, Wallet, Building, Ticket } from "lucide-react";
+import { apiFetch } from "../lib/api";
+import { formatPrice, cn } from "../lib/utils";
+import type { CartItem, UserProfile } from "../types";
+
+const TOSS_CLIENT_KEY =
+  import.meta.env.VITE_TOSS_CLIENT_KEY || "test_ck_D5GePWvyJnrK0W0k6q8gLzN97Eoq";
 
 export default function Checkout() {
-  const location = useLocation();
   const navigate = useNavigate();
-  const [user, setUser] = useState<any>(null);
-  const [isAddressModalOpen, setIsAddressModalOpen] = useState(false);
-  const [paymentMethod, setPaymentMethod] = useState("card");
-  
-  const { items, subtotal, shipping: baseShipping, total: initialTotal } = location.state || { items: [], subtotal: 0, shipping: 0, total: 0 };
+  const [searchParams] = useSearchParams();
 
-  const [couponCode, setCouponCode] = useState("");
-  const [discount, setDiscount] = useState(0);
-  const [appliedCoupon, setAppliedCoupon] = useState<any>(null);
-  const [pointUsage, setPointUsage] = useState(0);
-  const [myCoupons, setMyCoupons] = useState<any[]>([]);
-  const [isCouponListOpen, setIsCouponListOpen] = useState(false);
-  const [isJeju, setIsJeju] = useState(false);
-  
-  const isFreeShipping = user?.tier === 'BLACK' || user?.tier === 'THE_BLACK' || appliedCoupon?.type === 'SHIPPING';
-  const islandFee = isJeju ? 3000 : 0;
-  const effectiveShipping = isFreeShipping ? 0 : (baseShipping + islandFee);
-  
-  const finalTotal = subtotal + effectiveShipping - discount - pointUsage;
+  const [cart, setCart] = useState<CartItem[]>([]);
+  const [user, setUser] = useState<UserProfile | null>(null);
+  const [coupons, setCoupons] = useState<any[]>([]);
+  const [selectedCouponId, setSelectedCouponId] = useState<number | null>(null);
+  const [usePoints, setUsePoints] = useState<number>(0);
 
-  const getAccrualRate = () => {
-    if (!user) return 0.01;
-    const tier = (user.tier || 'BEIGE').toUpperCase();
-    switch (tier) {
-      case 'GREEN': return 0.03;
-      case 'BLACK': return 0.05;
-      case 'THE_BLACK': return 0.07;
-      default: return 0.01;
-    }
-  };
+  const [customerName, setCustomerName] = useState("");
+  const [customerEmail, setCustomerEmail] = useState("");
+  const [customerPhone, setCustomerPhone] = useState("");
+  const [zipcode, setZipcode] = useState("");
+  const [address, setAddress] = useState("");
+  const [detailAddress, setDetailAddress] = useState("");
+  const [isPostcodeOpen, setIsPostcodeOpen] = useState(false);
 
-  const expectedPoints = Math.round(finalTotal * getAccrualRate());
+  const [paymentMethod, setPaymentMethod] = useState<
+    "card" | "kakao_pay" | "naver_pay" | "vbank"
+  >("card");
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [completedOrderNumber, setCompletedOrderNumber] = useState<string | null>(null);
+  const [vbankResult, setVbankResult] = useState<any>(null);
 
-  const [formData, setFormData] = useState({
-    name: "",
-    phone: "",
-    zipcode: "",
-    address: "",
-    detail_address: ""
-  });
-
-  const [isOrderComplete, setIsOrderComplete] = useState(false);
-
+  // 1. Handle Toss Redirect Callback (?paymentKey=...&orderId=...&amount=...)
   useEffect(() => {
-    if (!location.state) {
-      navigate("/cart");
+    const paymentKey = searchParams.get("paymentKey");
+    const orderId = searchParams.get("orderId");
+    const amount = searchParams.get("amount");
+    const failMessage = searchParams.get("message");
+
+    if (failMessage) {
+      toast.error(`결제가 취소되었거나 실패했습니다: ${failMessage}`);
       return;
     }
 
-    fetch("/api/auth/me")
-      .then(res => res.json())
-      .then(data => {
-        if (data.user) {
-          setUser(data.user);
-          setFormData({
-            name: data.user.name,
-            phone: data.user.phone,
-            zipcode: data.user.zipcode,
-            address: data.user.address,
-            detail_address: data.user.detail_address
+    if (paymentKey && orderId && amount) {
+      const confirmPayment = async () => {
+        setIsProcessing(true);
+        try {
+          const res = await apiFetch("/api/payments/toss/confirm", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              paymentKey,
+              orderId,
+              amount: Number(amount),
+            }),
           });
-          
-          // Fetch my coupons
-          fetch("/api/coupons/me")
-            .then(res => res.json())
-            .then(coupons => setMyCoupons(Array.isArray(coupons) ? coupons : []));
-        } else {
-          navigate("/login");
+          const data = await res.json();
+          if (!res.ok) {
+            toast.error(data.error || "결제 승인 검증에 실패했습니다.");
+            return;
+          }
+
+          localStorage.removeItem("benua_cart");
+          window.dispatchEvent(new Event("cart-updated"));
+          setCompletedOrderNumber(data.order_number);
+          if (data.vbank) setVbankResult(data.vbank);
+          toast.success("주문이 성공적으로 완료되었습니다.");
+        } catch {
+          toast.error("결제 승인 처리 중 오류가 발생했습니다.");
+        } finally {
+          setIsProcessing(false);
         }
-      });
-  }, [navigate, location.state]);
+      };
+      confirmPayment();
+    }
+  }, [searchParams]);
 
-  const handleCompleteAddress = (data: any) => {
-    let fullAddress = data.address;
-    let extraAddress = '';
-
-    if (data.addressType === 'R') {
-      if (data.bname !== '') extraAddress += data.bname;
-      if (data.buildingName !== '') extraAddress += extraAddress !== '' ? `, ${data.buildingName}` : data.buildingName;
-      fullAddress += extraAddress !== '' ? ` (${extraAddress})` : '';
+  // 2. Load Cart, User Profile, and Coupons
+  useEffect(() => {
+    try {
+      const savedCart = JSON.parse(localStorage.getItem("benua_cart") || "[]");
+      setCart(Array.isArray(savedCart) ? savedCart : []);
+    } catch {
+      setCart([]);
     }
 
-    setFormData({
-      ...formData,
-      zipcode: data.zonecode,
-      address: fullAddress,
-    });
-    setIsJeju(data.sido === '제주특별자치도' || data.address.includes('제주') || data.zonecode.startsWith('63'));
-    setIsAddressModalOpen(false);
-  };
+    apiFetch("/api/auth/me")
+      .then((r) => r.json())
+      .then((d) => {
+        if (d.user) {
+          setUser(d.user);
+          setCustomerName(d.user.name || "");
+          setCustomerEmail(d.user.email || "");
+          setCustomerPhone(d.user.phone || "");
+          setZipcode(d.user.zipcode || "");
+          setAddress(d.user.address || "");
+          setDetailAddress(d.user.detail_address || "");
+        }
+      })
+      .catch(() => {});
 
-  const handleApplyCoupon = async () => {
-    if (!couponCode) {
-      toast.error("쿠폰 코드를 입력해주세요.");
+    apiFetch("/api/coupons/me")
+      .then((r) => (r.ok ? r.json() : []))
+      .then((list) => setCoupons(Array.isArray(list) ? list : []))
+      .catch(() => {});
+  }, []);
+
+  const subtotal = cart.reduce((sum, item) => sum + item.price * item.quantity, 0);
+  const selectedCoupon = coupons.find((c) => c.id === selectedCouponId);
+
+  let couponDiscount = 0;
+  let isShippingCoupon = false;
+  if (selectedCoupon && subtotal >= (selectedCoupon.min_order_amount || 0)) {
+    if (selectedCoupon.type === "FIXED") {
+      couponDiscount = selectedCoupon.value;
+    } else if (selectedCoupon.type === "PERCENT") {
+      couponDiscount = Math.floor(subtotal * (selectedCoupon.value / 100));
+      if (
+        selectedCoupon.max_discount_amount > 0 &&
+        couponDiscount > selectedCoupon.max_discount_amount
+      ) {
+        couponDiscount = selectedCoupon.max_discount_amount;
+      }
+    } else if (selectedCoupon.type === "SHIPPING") {
+      isShippingCoupon = true;
+    }
+  }
+
+  const isFreeShippingTier =
+    user?.tier === "BLACK" || user?.tier === "THE_BLACK";
+  const baseShippingFee = subtotal >= 50000 || subtotal === 0 ? 0 : 3000;
+  const shippingFee = isFreeShippingTier || isShippingCoupon ? 0 : baseShippingFee;
+
+  const totalAmount = Math.max(0, subtotal + shippingFee - couponDiscount - usePoints);
+
+  const handlePaymentSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (cart.length === 0) {
+      toast.error("쇼핑백이 비어 있습니다.");
       return;
     }
-    
-    try {
-      const res = await fetch("/api/coupons/validate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ code: couponCode, amount: subtotal })
-      });
-      const data = await res.json();
-      if (res.ok) {
-        setAppliedCoupon(data.coupon);
-        setDiscount(data.discount);
-        toast.success(`'${data.coupon.name}' 쿠폰이 적용되어 ${formatPrice(data.discount)} 할인이 적용되었습니다.`);
-      } else {
-        toast.error(data.error || "유효하지 않은 쿠폰입니다.");
-      }
-    } catch (err) {
-      toast.error("쿠폰 적용 중 오류가 발생했습니다.");
+    if (!customerName || !customerEmail || !customerPhone || !address) {
+      toast.error("주문자 정보와 배송지를 모두 입력해주세요.");
+      return;
     }
-  };
-
-  const handleSelectCoupon = (coupon: any) => {
-    let disc = 0;
-    if (coupon.type === 'FIXED') {
-      disc = coupon.value;
-    } else if (coupon.type === 'PERCENT') {
-      disc = Math.floor(subtotal * (coupon.value / 100));
-      if (coupon.max_discount_amount > 0) {
-        disc = Math.min(disc, coupon.max_discount_amount);
-      }
-    }
-    
-    if (coupon.min_order_amount > 0 && subtotal < coupon.min_order_amount) {
-      toast.error(`${formatPrice(coupon.min_order_amount)} 이상 주문 시 사용 가능합니다.`);
+    if (usePoints > 0 && usePoints < 1000) {
+      toast.error("포인트는 최소 1,000P 이상부터 사용 가능합니다.");
       return;
     }
 
-    setAppliedCoupon({
-      ...coupon,
-      user_coupon_id: coupon.id
-    });
-    setDiscount(disc);
-    setIsCouponListOpen(false);
-    toast.success(`'${coupon.name}' 쿠폰이 적용되었습니다.`);
-  };
-
-  const formatDiscount = (coupon: any) => {
-    if (coupon.type === 'FIXED') return `${formatPrice(coupon.value)} 할인`;
-    if (coupon.type === 'PERCENT') return `${coupon.value}% 할인`;
-    if (coupon.type === 'SHIPPING') return `무료 배송`;
-    return '';
-  };
-
-  const handlePayment = async () => {
+    setIsProcessing(true);
     try {
-      const response = await fetch("/api/orders", {
+      const fullAddress = `[${zipcode}] ${address} ${detailAddress}`.trim();
+      const prepRes = await apiFetch("/api/orders/prepare", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          user_id: user.id,
-          customer_name: formData.name,
-          customer_email: user.email,
-          customer_phone: formData.phone,
-          shipping_address: `[${formData.zipcode}] ${formData.address} ${formData.detail_address}`,
-          total_amount: finalTotal,
-          shipping_fee: effectiveShipping,
-          discount_amount: discount,
-          used_points: pointUsage,
-          used_coupon_id: appliedCoupon?.user_coupon_id,
+          user_id: user?.id || null,
+          customer_name: customerName,
+          customer_email: customerEmail,
+          customer_phone: customerPhone,
+          shipping_address: fullAddress,
+          total_amount: totalAmount,
+          shipping_fee: shippingFee,
+          items: cart,
+          used_points: usePoints,
+          used_coupon_id: selectedCouponId,
           payment_method: paymentMethod,
-          items: items
-        })
+        }),
       });
 
-      if (response.ok) {
-        localStorage.removeItem("venuea-cart");
-        setIsOrderComplete(true);
-      } else {
-        toast.error("주문 처리 중 오류가 발생했습니다.");
+      const prepData = await prepRes.json();
+      if (!prepRes.ok) {
+        toast.error(prepData.error || "주문 준비에 실패했습니다.");
+        setIsProcessing(false);
+        return;
       }
-    } catch (error) {
-      toast.error("서버와 통신할 수 없습니다.");
+
+      // If 0 KRW order (paid fully by points/coupon)
+      if (prepData.zeroAmountPaid) {
+        localStorage.removeItem("benua_cart");
+        window.dispatchEvent(new Event("cart-updated"));
+        setCompletedOrderNumber(prepData.order_number);
+        setIsProcessing(false);
+        return;
+      }
+
+      // Launch Toss Payments Standard SDK Window
+      const tossPayments = await loadTossPayments(TOSS_CLIENT_KEY);
+      const customerKey = user?.id ? `USER_${user.id}` : `GUEST_${Date.now()}`;
+      const payment = tossPayments.payment({ customerKey });
+
+      const originUrl = window.location.origin;
+      const successUrl = `${originUrl}/checkout`;
+      const failUrl = `${originUrl}/checkout`;
+
+      if (paymentMethod === "vbank") {
+        await payment.requestPayment({
+          method: "VIRTUAL_ACCOUNT",
+          amount: { currency: "KRW", value: prepData.amount },
+          orderId: prepData.order_number,
+          orderName: prepData.order_name,
+          customerName,
+          customerEmail,
+          successUrl,
+          failUrl,
+          virtualAccount: {
+            cashReceipt: { type: "미발행" },
+            useEscrow: false,
+            validHours: 24,
+          },
+        });
+      } else {
+        await payment.requestPayment({
+          method: "CARD",
+          amount: { currency: "KRW", value: prepData.amount },
+          orderId: prepData.order_number,
+          orderName: prepData.order_name,
+          customerName,
+          customerEmail,
+          successUrl,
+          failUrl,
+          card: {
+            useEscrow: false,
+            flowMode: "DEFAULT",
+            useCardPoint: false,
+            useAppCardOnly: false,
+          },
+        });
+      }
+    } catch (err: any) {
+      if (err?.code !== "USER_CANCEL") {
+        toast.error(err?.message || "결제창 호출 중 오류가 발생했습니다.");
+      }
+      setIsProcessing(false);
     }
   };
 
-  if (!user) return <div className="pt-32 min-h-screen flex justify-center">로딩 중...</div>;
-
-  if (isOrderComplete) {
+  if (completedOrderNumber) {
     return (
-      <div className="pt-32 pb-20 px-6 min-h-screen flex items-center justify-center bg-[#F9F9F9]">
-        <motion.div 
-          initial={{ opacity: 0, scale: 0.95 }}
-          animate={{ opacity: 1, scale: 1 }}
-          className="bg-white p-12 text-center max-w-md w-full shadow-[0_40px_80px_rgba(0,0,0,0.08)] border border-venuea-dark/5"
-        >
-          <div className="w-16 h-16 bg-venuea-gold/10 text-venuea-gold rounded-full flex items-center justify-center mx-auto mb-6">
-            <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-            </svg>
+      <div className="pt-32 pb-24 px-6 max-w-lg mx-auto text-center space-y-6">
+        <div className="w-16 h-16 rounded-full bg-venuea-gold/15 text-venuea-gold flex items-center justify-center mx-auto">
+          <CheckCircle2 size={34} />
+        </div>
+        <h1 className="text-3xl font-serif font-bold text-venuea-dark">
+          주문이 정상 접수되었습니다
+        </h1>
+        <p className="text-sm text-venuea-muted">
+          주문번호: <b className="text-venuea-dark font-mono">{completedOrderNumber}</b>
+        </p>
+
+        {vbankResult && (
+          <div className="p-5 bg-amber-50 border border-amber-200 rounded-xl text-left text-xs space-y-1.5">
+            <p className="font-bold text-amber-900">가상계좌 입금 안내</p>
+            <p>은행코드: {vbankResult.bank}</p>
+            <p>계좌번호: {vbankResult.account}</p>
+            <p>입금기한: {new Date(vbankResult.dueDate).toLocaleString("ko-KR")}</p>
           </div>
-          <h2 className="text-2xl font-bold text-venuea-dark mb-4 uppercase tracking-widest">주문 완료</h2>
-          <p className="text-venuea-muted mb-8 text-sm">
-            고객님의 주문이 성공적으로 완료되었습니다.<br/>
-            주문 내역은 마이페이지에서 확인하실 수 있습니다.
-          </p>
-          <button 
-            onClick={() => navigate("/profile")}
-            className="w-full bg-venuea-dark text-white py-4 font-bold text-sm uppercase tracking-widest hover:bg-venuea-gold transition-colors"
+        )}
+
+        <div className="flex gap-3 pt-4">
+          <button
+            onClick={() => navigate("/track")}
+            className="flex-1 py-3.5 border border-gray-200 rounded-xl text-xs font-bold uppercase tracking-widest"
           >
-            마이페이지로 이동
+            주문 조회
           </button>
-        </motion.div>
+          <button
+            onClick={() => navigate("/shop")}
+            className="flex-1 py-3.5 bg-venuea-dark text-white rounded-xl text-xs font-bold uppercase tracking-widest hover:bg-venuea-gold"
+          >
+            계속 쇼핑하기
+          </button>
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="pt-32 pb-20 px-6">
-      <div className="max-w-5xl mx-auto">
-        <h1 className="text-3xl font-bold text-venuea-dark uppercase tracking-tight mb-12">결제하기</h1>
+    <div className="pt-[110px] pb-24 px-6 md:px-[60px] max-w-6xl mx-auto">
+      <h1 className="text-3xl font-serif font-bold text-venuea-dark mb-10">주문 및 결제</h1>
 
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-12">
-          <div className="lg:col-span-2 space-y-12">
-            
-            {/* Shipping Info */}
-            <section>
-              <h2 className="text-lg font-bold text-venuea-dark mb-6 border-b border-venuea-dark/10 pb-2">배송지 정보</h2>
-              <div className="space-y-4">
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <label className="text-[10px] font-bold uppercase tracking-[2px] text-venuea-dark/60">받는 사람</label>
-                    <input 
-                      type="text" 
-                      value={formData.name}
-                      onChange={e => setFormData({...formData, name: e.target.value})}
-                      className="w-full bg-[#F9F9F9] border border-venuea-dark/10 px-4 py-3 focus:outline-none focus:border-venuea-gold transition-colors"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <label className="text-[10px] font-bold uppercase tracking-[2px] text-venuea-dark/60">연락처</label>
-                    <input 
-                      type="text" 
-                      value={formData.phone}
-                      onChange={e => setFormData({...formData, phone: e.target.value})}
-                      className="w-full bg-[#F9F9F9] border border-venuea-dark/10 px-4 py-3 focus:outline-none focus:border-venuea-gold transition-colors"
-                    />
-                  </div>
-                </div>
-                
-                <div className="space-y-2">
-                  <label className="text-[10px] font-bold uppercase tracking-[2px] text-venuea-dark/60">주소</label>
-                  <div className="flex gap-2">
-                    <input 
-                      type="text" 
-                      readOnly
-                      value={formData.zipcode}
-                      className="w-1/3 bg-[#F9F9F9] border border-venuea-dark/10 px-4 py-3 focus:outline-none text-venuea-dark/60 cursor-not-allowed"
-                      placeholder="우편번호"
-                    />
-                    <button 
-                      type="button"
-                      onClick={() => setIsAddressModalOpen(true)}
-                      className="w-2/3 bg-venuea-dark text-white font-bold text-xs uppercase tracking-widest hover:bg-venuea-gold transition-colors"
-                    >
-                      우편번호 찾기
-                    </button>
-                  </div>
-                  <input 
-                    type="text" 
-                    readOnly
-                    value={formData.address}
-                    className="w-full bg-[#F9F9F9] border border-venuea-dark/10 px-4 py-3 focus:outline-none text-venuea-dark/60 cursor-not-allowed"
-                    placeholder="기본 주소"
-                  />
-                  <input 
-                    type="text" 
-                    value={formData.detail_address}
-                    onChange={e => setFormData({...formData, detail_address: e.target.value})}
-                    className="w-full bg-[#F9F9F9] border border-venuea-dark/10 px-4 py-3 focus:outline-none focus:border-venuea-gold transition-colors"
-                    placeholder="상세 주소"
-                  />
-                </div>
-              </div>
-            </section>
+      <form onSubmit={handlePaymentSubmit} className="grid grid-cols-1 lg:grid-cols-3 gap-10">
+        {/* Left: Shipping & Discounts */}
+        <div className="lg:col-span-2 space-y-8">
+          <section className="bg-white p-6 rounded-2xl border border-gray-200 space-y-4">
+            <h2 className="text-base font-bold text-venuea-dark">주문자 및 배송지 정보</h2>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <input
+                required
+                placeholder="수령인 성함"
+                value={customerName}
+                onChange={(e) => setCustomerName(e.target.value)}
+                className="border border-gray-200 rounded-xl px-4 py-3 text-sm"
+              />
+              <input
+                required
+                placeholder="연락처 (010-0000-0000)"
+                value={customerPhone}
+                onChange={(e) => setCustomerPhone(e.target.value)}
+                className="border border-gray-200 rounded-xl px-4 py-3 text-sm"
+              />
+            </div>
+            <input
+              type="email"
+              required
+              placeholder="이메일 (주문내역 발송용)"
+              value={customerEmail}
+              onChange={(e) => setCustomerEmail(e.target.value)}
+              className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm"
+            />
 
-            {/* Payment Method */}
-            <section>
-              <h2 className="text-lg font-bold text-venuea-dark mb-6 border-b border-venuea-dark/10 pb-2">결제 수단</h2>
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 md:gap-4">
-                <button 
-                  onClick={() => setPaymentMethod("card")}
-                  className={`p-4 border flex flex-col items-center justify-center space-y-2 transition-colors ${paymentMethod === "card" ? "border-venuea-gold bg-venuea-gold/5 text-venuea-gold" : "border-venuea-dark/10 text-venuea-dark/60 hover:border-venuea-dark/30"}`}
-                >
-                  <CreditCard size={24} />
-                  <span className="text-xs font-bold">신용카드</span>
-                </button>
-                <button 
-                  onClick={() => setPaymentMethod("transfer")}
-                  className={`p-4 border flex flex-col items-center justify-center space-y-2 transition-colors ${paymentMethod === "transfer" ? "border-venuea-gold bg-venuea-gold/5 text-venuea-gold" : "border-venuea-dark/10 text-venuea-dark/60 hover:border-venuea-dark/30"}`}
-                >
-                  <Building size={24} />
-                  <span className="text-xs font-bold">계좌이체</span>
-                </button>
-                <button 
-                  onClick={() => setPaymentMethod("virtual")}
-                  className={`p-4 border flex flex-col items-center justify-center space-y-2 transition-colors ${paymentMethod === "virtual" ? "border-venuea-gold bg-venuea-gold/5 text-venuea-gold" : "border-venuea-dark/10 text-venuea-dark/60 hover:border-venuea-dark/30"}`}
-                >
-                  <Wallet size={24} />
-                  <span className="text-xs font-bold">가상계좌</span>
-                </button>
-              </div>
-            </section>
-
-          </div>
-
-          {/* Order Summary */}
-          <div className="lg:col-span-1">
-            <div className="bg-[#F9F9F9] p-8 border border-venuea-dark/5 sticky top-32">
-              <h2 className="text-lg font-bold text-venuea-dark mb-6 uppercase tracking-widest">주문 요약</h2>
-              
-              <div className="space-y-4 mb-6 max-h-60 overflow-y-auto pr-2">
-                {items.map((item: any) => (
-                  <div key={item.id} className="flex justify-between text-sm">
-                    <span className="text-venuea-dark/80 line-clamp-1 flex-1 pr-4">{item.name} x {item.quantity}</span>
-                    <span className="font-mono">{formatPrice(item.price * item.quantity)}</span>
-                  </div>
-                ))}
-              </div>
-
-              <div className="space-y-4 border-t border-venuea-dark/10 pt-6 mb-6">
-                <div className="flex justify-between text-sm">
-                  <span className="text-venuea-dark/60">합계</span>
-                  <span className="font-mono">{formatPrice(subtotal)}</span>
-                </div>
-                <div className="flex justify-between text-sm">
-                  <span className="text-venuea-dark/60">배송비</span>
-                  <span className="font-mono">
-                    {effectiveShipping === 0 ? (
-                      <span className="text-venuea-gold font-bold">무료</span>
-                    ) : (
-                      <>
-                        {formatPrice(baseShipping)}
-                        {islandFee > 0 && <span className="ml-1 text-[10px] text-red-500 font-bold">(제주/도서 +{formatPrice(islandFee)})</span>}
-                      </>
-                    )}
-                  </span>
-                </div>
-                {discount > 0 && (
-                  <div className="flex justify-between text-sm text-[#FF4000]">
-                    <span className="font-bold">쿠폰 할인 ({appliedCoupon?.name})</span>
-                    <span className="font-mono">-{formatPrice(discount)}</span>
-                  </div>
-                )}
-                {pointUsage > 0 && (
-                  <div className="flex justify-between text-sm text-[#FF4000]">
-                    <span className="font-bold">포인트 사용</span>
-                    <span className="font-mono">-{formatPrice(pointUsage)}</span>
-                  </div>
-                )}
-              </div>
-
-              <div className="space-y-4 mb-6">
-                <div className="p-1 border-b border-venuea-dark/10">
-                  <div className="flex justify-between items-center mb-1">
-                    <label className="text-[10px] font-bold uppercase tracking-widest text-venuea-dark/40 block">쿠폰 선택</label>
-                    <button 
-                      onClick={() => setIsCouponListOpen(true)}
-                      className="text-[10px] font-bold text-venuea-gold uppercase tracking-widest hover:underline"
-                    >
-                      보유 쿠폰 보기 ({myCoupons.length})
-                    </button>
-                  </div>
-                  <div className="flex gap-2">
-                    <input 
-                      type="text" 
-                      value={couponCode}
-                      onChange={e => setCouponCode(e.target.value)}
-                      placeholder="직접 입력"
-                      disabled={!!appliedCoupon}
-                      className="flex-grow bg-[#F9F9F9] border border-venuea-dark/10 px-3 py-2 text-xs focus:outline-none focus:border-venuea-gold uppercase tracking-widest disabled:opacity-50"
-                    />
-                    {appliedCoupon ? (
-                      <button 
-                        onClick={() => {
-                          setAppliedCoupon(null);
-                          setDiscount(0);
-                          setCouponCode("");
-                        }}
-                        className="bg-venuea-dark/5 text-venuea-dark/60 px-4 text-[10px] font-bold uppercase tracking-widest hover:bg-venuea-dark/10"
-                      >
-                        취소
-                      </button>
-                    ) : (
-                      <button 
-                        onClick={handleApplyCoupon}
-                        className="bg-venuea-dark text-white px-4 text-[10px] font-bold uppercase tracking-widest hover:bg-venuea-gold"
-                      >
-                        적용
-                      </button>
-                    )}
-                  </div>
-                </div>
-
-                <div className="p-1 border-b border-venuea-dark/10">
-                  <label className="text-[10px] font-bold uppercase tracking-widest text-venuea-dark/40 mb-1 block">포인트 사용 (보유: {user.points}P)</label>
-                  <div className="flex gap-2">
-                    <input 
-                      type="number" 
-                      value={pointUsage || ""}
-                      onChange={e => {
-                        const val = parseInt(e.target.value) || 0;
-                        if (val > user.points) setPointUsage(user.points);
-                        else setPointUsage(val);
-                      }}
-                      onBlur={() => {
-                        if (pointUsage > 0 && user.points < 1000) {
-                          toast.error("포인트는 1,000P 이상 보유 시 사용 가능합니다.");
-                          setPointUsage(0);
-                        } else if (pointUsage > 0 && pointUsage < 1000) {
-                          // Note: user requested "1000포인트 이상 사용 시", usually means min usage amount or min balance.
-                          // I'll assume min usage amount of 1000.
-                          toast.error("최소 1,000P 이상부터 사용 가능합니다.");
-                          setPointUsage(0);
-                        }
-                      }}
-                      placeholder="1,000P 이상 사용 가능"
-                      className="flex-grow bg-[#F9F9F9] border border-venuea-dark/10 px-3 py-2 text-xs focus:outline-none focus:border-venuea-gold"
-                    />
-                    <button 
-                      onClick={() => {
-                        if (user.points >= 1000) {
-                          const maxPayable = subtotal + effectiveShipping - discount;
-                          setPointUsage(Math.min(user.points, maxPayable));
-                        } else {
-                          toast.error("사용 가능한 포인트가 부족합니다.");
-                        }
-                      }}
-                      className="bg-venuea-dark text-white px-4 text-[10px] font-bold uppercase tracking-widest hover:bg-venuea-gold"
-                    >
-                      전액 사용
-                    </button>
-                  </div>
-                </div>
-              </div>
-              
-              <div className="flex justify-between items-end border-t border-venuea-dark/10 pt-6 mb-2">
-                <span className="text-sm font-bold text-venuea-dark">총 결제 금액</span>
-                <span className="text-2xl font-bold font-mono text-venuea-gold">{formatPrice(finalTotal)}</span>
-              </div>
-              
-              <div className="flex justify-between items-center mb-8 px-1">
-                <span className="text-[10px] font-bold text-venuea-dark/40 uppercase tracking-widest">적립 예정 포인트</span>
-                <span className="text-xs font-bold text-venuea-gold font-mono">+{expectedPoints.toLocaleString()} P</span>
-              </div>
-
-              <button 
-                onClick={handlePayment}
-                className="w-full bg-venuea-dark text-white py-4 font-bold text-sm uppercase tracking-widest hover:bg-venuea-gold transition-colors"
+            <div className="flex gap-2">
+              <input
+                readOnly
+                placeholder="우편번호"
+                value={zipcode}
+                className="w-36 border border-gray-200 rounded-xl px-4 py-3 text-sm bg-gray-50"
+              />
+              <button
+                type="button"
+                onClick={() => setIsPostcodeOpen(true)}
+                className="px-4 py-3 bg-venuea-dark text-white rounded-xl text-xs font-bold flex items-center gap-1.5"
               >
-                결제하기
+                <MapPin size={15} />
+                <span>주소 검색</span>
               </button>
             </div>
+            <input
+              required
+              placeholder="기본 주소"
+              value={address}
+              onChange={(e) => setAddress(e.target.value)}
+              className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm"
+            />
+            <input
+              placeholder="상세 주소"
+              value={detailAddress}
+              onChange={(e) => setDetailAddress(e.target.value)}
+              className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm"
+            />
+          </section>
+
+          {user && (
+            <section className="bg-white p-6 rounded-2xl border border-gray-200 space-y-4">
+              <h2 className="text-base font-bold text-venuea-dark">쿠폰 및 포인트 적용</h2>
+              <div>
+                <label className="block text-xs font-bold text-gray-500 mb-1.5">보유 쿠폰 선택</label>
+                <select
+                  value={selectedCouponId || ""}
+                  onChange={(e) =>
+                    setSelectedCouponId(e.target.value ? Number(e.target.value) : null)
+                  }
+                  className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm"
+                >
+                  <option value="">선택 안 함</option>
+                  {coupons.map((c) => (
+                    <option
+                      key={c.id}
+                      value={c.id}
+                      disabled={subtotal < (c.min_order_amount || 0)}
+                    >
+                      {c.name} (최소주문 {formatPrice(c.min_order_amount || 0)})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-gray-500 mb-1.5">
+                  포인트 사용 (보유: {Number(user.points || 0).toLocaleString()}P / 1,000P 이상 사용 가능)
+                </label>
+                <input
+                  type="number"
+                  min={0}
+                  max={user.points || 0}
+                  value={usePoints || ""}
+                  onChange={(e) =>
+                    setUsePoints(Math.min(user.points || 0, Math.max(0, Number(e.target.value))))
+                  }
+                  placeholder="0"
+                  className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm"
+                />
+              </div>
+            </section>
+          )}
+
+          <section className="bg-white p-6 rounded-2xl border border-gray-200 space-y-4">
+            <h2 className="text-base font-bold text-venuea-dark">결제 수단 (Toss Payments)</h2>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              {[
+                { id: "card", label: "신용/체크카드" },
+                { id: "kakao_pay", label: "카카오페이" },
+                { id: "naver_pay", label: "네이버페이" },
+                { id: "vbank", label: "가상계좌" },
+              ].map((m) => (
+                <button
+                  type="button"
+                  key={m.id}
+                  onClick={() => setPaymentMethod(m.id as any)}
+                  className={cn(
+                    "py-3.5 px-3 rounded-xl border text-xs font-bold transition-all",
+                    paymentMethod === m.id
+                      ? "border-venuea-dark bg-venuea-dark text-white"
+                      : "border-gray-200 text-gray-700 hover:bg-gray-50"
+                  )}
+                >
+                  {m.label}
+                </button>
+              ))}
+            </div>
+          </section>
+        </div>
+
+        {/* Right: Summary */}
+        <div className="bg-gray-50 p-6 rounded-2xl border border-gray-200 h-fit space-y-5">
+          <h2 className="text-base font-bold text-venuea-dark">결제 요약</h2>
+          <div className="divide-y divide-gray-200/60 text-sm space-y-3">
+            {cart.map((item) => (
+              <div key={item.id} className="pt-3 first:pt-0 flex justify-between">
+                <span className="text-gray-600">
+                  {item.name} × {item.quantity}
+                </span>
+                <span className="font-bold">{formatPrice(item.price * item.quantity)}</span>
+              </div>
+            ))}
+          </div>
+
+          <div className="border-t border-gray-200 pt-4 space-y-2 text-sm">
+            <div className="flex justify-between text-gray-600">
+              <span>상품 합계</span>
+              <span>{formatPrice(subtotal)}</span>
+            </div>
+            <div className="flex justify-between text-gray-600">
+              <span>배송비</span>
+              <span>{shippingFee === 0 ? "무료" : formatPrice(shippingFee)}</span>
+            </div>
+            {couponDiscount > 0 && (
+              <div className="flex justify-between text-venuea-gold font-bold">
+                <span>쿠폰 할인</span>
+                <span>-{formatPrice(couponDiscount)}</span>
+              </div>
+            )}
+            {usePoints > 0 && (
+              <div className="flex justify-between text-venuea-gold font-bold">
+                <span>포인트 사용</span>
+                <span>-{formatPrice(usePoints)}</span>
+              </div>
+            )}
+            <div className="flex justify-between text-lg font-bold text-venuea-dark pt-3 border-t">
+              <span>최종 결제금액</span>
+              <span>{formatPrice(totalAmount)}</span>
+            </div>
+          </div>
+
+          <button
+            type="submit"
+            disabled={isProcessing || cart.length === 0}
+            className="w-full bg-venuea-dark text-white py-4 rounded-xl text-sm font-bold uppercase tracking-widest hover:bg-venuea-gold transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
+          >
+            {isProcessing ? <Loader2 size={18} className="animate-spin" /> : <CreditCard size={18} />}
+            <span>{formatPrice(totalAmount)} 결제하기</span>
+          </button>
+
+          <div className="flex items-center justify-center gap-1.5 text-[11px] text-gray-400">
+            <ShieldCheck size={14} />
+            <span>토스페이먼츠 안전결제(에스크로)가 적용됩니다</span>
           </div>
         </div>
-      </div>
+      </form>
 
-      <AnimatePresence>
-        {isAddressModalOpen && (
-          <motion.div 
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4"
-            onClick={() => setIsAddressModalOpen(false)}
-          >
-            <motion.div 
-              initial={{ scale: 0.95, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.95, opacity: 0 }}
-              className="bg-white w-full max-w-md overflow-hidden shadow-2xl"
-              onClick={e => e.stopPropagation()}
-            >
-              <div className="flex justify-between items-center p-4 border-b border-gray-100">
-                <h3 className="font-bold text-venuea-dark">주소 검색</h3>
-                <button onClick={() => setIsAddressModalOpen(false)} className="text-gray-400 hover:text-gray-600">
-                  <X size={20} />
-                </button>
-              </div>
-              <div className="h-[400px]">
-                <DaumPostcode onComplete={handleCompleteAddress} style={{ height: '100%' }} />
-              </div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      <AnimatePresence>
-        {isCouponListOpen && (
-          <motion.div 
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4"
-            onClick={() => setIsCouponListOpen(false)}
-          >
-            <motion.div 
-              initial={{ scale: 0.95, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.95, opacity: 0 }}
-              className="bg-white w-full max-w-md overflow-hidden shadow-2xl"
-              onClick={e => e.stopPropagation()}
-            >
-              <div className="flex justify-between items-center p-6 border-b border-gray-100">
-                <h3 className="text-sm font-bold text-venuea-dark uppercase tracking-widest">내 쿠폰 ({myCoupons.length})</h3>
-                <button onClick={() => setIsCouponListOpen(false)} className="text-gray-400 hover:text-gray-600">
-                  <X size={20} />
-                </button>
-              </div>
-              <div className="p-6 max-h-[400px] overflow-y-auto space-y-3">
-                {myCoupons.length === 0 ? (
-                  <div className="py-12 text-center">
-                    <Ticket className="w-8 h-8 mx-auto mb-2 text-gray-300" />
-                    <p className="text-xs text-gray-400 uppercase tracking-widest">사용 가능한 쿠폰이 없습니다.</p>
-                  </div>
-                ) : (
-                  myCoupons.map((coupon) => (
-                    <button
-                      key={coupon.id}
-                      onClick={() => handleSelectCoupon(coupon)}
-                      className="w-full p-4 border border-venuea-dark/10 hover:border-venuea-gold hover:bg-venuea-gold/5 text-left transition-all group"
-                    >
-                      <div className="flex justify-between items-start mb-1">
-                        <span className="text-xs font-bold text-venuea-dark uppercase tracking-tight line-clamp-1">{coupon.name}</span>
-                        <span className="text-[10px] font-mono text-venuea-gold bg-venuea-gold/10 px-1.5 py-0.5 whitespace-nowrap">
-                          {formatDiscount(coupon)}
-                        </span>
-                      </div>
-                      <div className="flex justify-between items-end">
-                        <span className="text-[10px] text-venuea-muted uppercase tracking-widest">
-                          {coupon.min_order_amount > 0 ? `${formatPrice(coupon.min_order_amount)} 이상 구매 시` : '모든 금액 적용'}
-                        </span>
-                        <span className="text-[10px] font-bold text-venuea-dark group-hover:text-venuea-gold uppercase tracking-widest transition-colors font-mono ">건당 1회</span>
-                      </div>
-                    </button>
-                  ))
-                )}
-              </div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+      {isPostcodeOpen && (
+        <div className="fixed inset-0 bg-black/50 z-[100] flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-md w-full overflow-hidden">
+            <div className="p-4 border-b flex justify-between items-center">
+              <span className="font-bold text-sm">우편번호 검색</span>
+              <button onClick={() => setIsPostcodeOpen(false)}>
+                <X size={20} />
+              </button>
+            </div>
+            <DaumPostcodeEmbed
+              onComplete={(data) => {
+                setZipcode(data.zonecode);
+                setAddress(data.address);
+                setIsPostcodeOpen(false);
+              }}
+            />
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -1,19 +1,14 @@
-export const isAdminSubdomain = () => {
+export function isNativeApp(): boolean {
   if (typeof window === "undefined") return false;
-  const hostname = window.location.hostname;
-  return hostname.startsWith("dash.");
-};
+  return (
+    window.location.protocol === "capacitor:" ||
+    Boolean((window as any).Capacitor?.isNativePlatform?.())
+  );
+}
 
-export const getBaseUrl = () => {
-  if (typeof window === "undefined") return "";
-  const { protocol, hostname, port } = window.location;
-  if (hostname === "localhost" || hostname === "127.0.0.1") {
-    return `${protocol}//${hostname}${port ? `:${port}` : ""}`;
-  }
-  // Remove any subdomain to get the base domain
-  const parts = hostname.split(".");
-  if (parts.length > 2) {
-    return `${protocol}//${parts.slice(-2).join(".")}`;
-  }
-  return `${protocol}//${hostname}`;
-};
+export function isAdminSubdomain(): boolean {
+  if (typeof window === "undefined") return false;
+  if (isNativeApp()) return false; // 모바일 앱은 항상 쇼핑몰 스토어프론트로 동작
+  const host = window.location.hostname;
+  return host.startsWith("dash.") || host.startsWith("admin.");
+}

@@ -1,208 +1,119 @@
 import { useState, useEffect } from "react";
-import { motion, AnimatePresence } from "motion/react";
-import { Trash2, Plus, Minus, ArrowRight, ShoppingBag, HelpCircle } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
+import { Trash2, ArrowRight } from "lucide-react";
 import { formatPrice } from "../lib/utils";
-import { toast } from "sonner";
+import type { CartItem } from "../types";
 
 export default function Cart() {
   const navigate = useNavigate();
-  const [items, setItems] = useState<any[]>([]);
-  const [user, setUser] = useState<any>(null);
-  const [showShippingTooltip, setShowShippingTooltip] = useState(false);
+  const [cart, setCart] = useState<CartItem[]>([]);
 
   useEffect(() => {
-    // Load from localStorage
-    const savedCart = localStorage.getItem("venuea-cart");
-    if (savedCart) {
-      try {
-        setItems(JSON.parse(savedCart));
-      } catch (e) {
-        console.error("Failed to parse cart", e);
-      }
+    try {
+      const saved = JSON.parse(localStorage.getItem("benua_cart") || "[]");
+      setCart(Array.isArray(saved) ? saved : []);
+    } catch {
+      setCart([]);
     }
-
-    fetch("/api/auth/me")
-      .then(res => res.json())
-      .then(data => setUser(data.user));
   }, []);
 
-  // Save to localStorage whenever items change
-  useEffect(() => {
-    localStorage.setItem("venuea-cart", JSON.stringify(items));
-    window.dispatchEvent(new Event("cartUpdated"));
-  }, [items]);
-
-  const subtotal = items.reduce((acc, item) => acc + item.price * item.quantity, 0);
-  
-  // Shipping logic
-  const baseShipping = subtotal >= 50000 ? 0 : 3000;
-  const isJejuOrIsland = user?.address?.includes("제주") || user?.address?.includes("도서");
-  const shipping = baseShipping + (isJejuOrIsland ? 5000 : 0);
-  const total = subtotal + shipping;
-
-  const updateQuantity = (id: string, delta: number) => {
-    setItems(items.map(item => {
-      if (item.id === id) {
-        const newQty = item.quantity + delta;
-        if (delta > 0 && item.stock !== undefined && newQty > item.stock) {
-          toast.error(`재고가 부족합니다. (최대 ${item.stock}개)`);
-          return item;
-        }
-        return { ...item, quantity: Math.max(1, newQty) };
-      }
-      return item;
-    }));
+  const updateCart = (next: CartItem[]) => {
+    setCart(next);
+    localStorage.setItem("benua_cart", JSON.stringify(next));
+    window.dispatchEvent(new Event("cart-updated"));
   };
 
-  const removeItem = (id: string) => {
-    setItems(items.filter(item => item.id !== id));
-  };
-
-  const handleCheckout = () => {
-    if (!user) {
-      toast.error("주문을 진행하려면 로그인이 필요합니다.");
-      navigate("/login");
-      return;
-    }
-    navigate("/checkout", { state: { items, subtotal, shipping, total } });
-  };
-
-  if (items.length === 0) {
-    return (
-      <div className="pt-40 pb-20 px-6 text-center">
-        <div className="max-w-md mx-auto space-y-8">
-          <div className="w-20 h-20 bg-[#F9F9F9] rounded-full flex items-center justify-center mx-auto text-venuea-dark/10">
-            <ShoppingBag size={40} />
-          </div>
-          <h1 className="text-3xl font-bold text-venuea-dark uppercase tracking-tight">장바구니가 비어 있습니다</h1>
-          <p className="text-venuea-muted">아직 장바구니에 담은 상품이 없습니다.</p>
-          <Link 
-            to="/shop" 
-            className="inline-block bg-venuea-dark text-white px-8 py-4 font-bold uppercase tracking-widest hover:bg-venuea-gold transition-all"
-          >
-            쇼핑 시작하기
-          </Link>
-        </div>
-      </div>
-    );
-  }
+  const subtotal = cart.reduce((sum, i) => sum + i.price * i.quantity, 0);
 
   return (
-    <div className="pt-32 pb-20 px-6">
-      <div className="max-w-7xl mx-auto">
-        <h1 className="text-4xl md:text-5xl font-bold text-venuea-dark mb-12 uppercase tracking-tight">장바구니</h1>
+    <div className="pt-[110px] pb-24 px-6 md:px-[60px] max-w-5xl mx-auto">
+      <h1 className="text-3xl font-serif font-bold text-venuea-dark mb-10">쇼핑백</h1>
 
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-16">
-          {/* Cart Items */}
-          <div className="lg:col-span-2 space-y-8">
-            {items.map((item) => (
-              <motion.div 
-                key={item.id}
-                layout
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, scale: 0.95 }}
-                className="flex items-center space-x-6 pb-8 border-b border-venuea-dark/5"
-              >
-                <div className="w-20 sm:w-24 h-28 sm:h-32 bg-[#F9F9F9] overflow-hidden flex-shrink-0">
-                  <img src={item.image} alt={item.name} className="w-full h-full object-cover" />
+      {cart.length === 0 ? (
+        <div className="text-center py-20 space-y-4">
+          <p className="text-sm text-gray-400">쇼핑백에 담긴 오브제가 없습니다.</p>
+          <Link
+            to="/shop"
+            className="inline-block bg-venuea-dark text-white px-6 py-3 rounded-xl text-xs font-bold uppercase tracking-widest"
+          >
+            컬렉션 보러가기
+          </Link>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-10">
+          <div className="lg:col-span-2 divide-y border-t border-b">
+            {cart.map((item) => (
+              <div key={item.id} className="py-5 flex items-center justify-between gap-4">
+                <div className="flex items-center gap-4">
+                  <img
+                    src={item.image || "https://picsum.photos/seed/objet/120/120"}
+                    alt={item.name}
+                    className="w-20 h-20 rounded-xl object-cover bg-gray-100"
+                  />
+                  <div>
+                    <h3 className="text-sm font-bold text-venuea-dark">{item.name}</h3>
+                    <p className="text-xs text-gray-500 mt-1">{formatPrice(item.price)}</p>
+                  </div>
                 </div>
-                <div className="flex-grow min-w-0">
-                  <div className="flex justify-between items-start mb-1 md:mb-2">
-                    <h3 className="text-sm md:text-lg font-bold text-venuea-dark uppercase tracking-tight truncate">{item.name}</h3>
-                    <button 
-                      onClick={() => removeItem(item.id)}
-                      className="text-venuea-dark/30 hover:text-red-500 transition-colors"
+
+                <div className="flex items-center gap-4">
+                  <div className="flex items-center border rounded-lg">
+                    <button
+                      onClick={() =>
+                        updateCart(
+                          cart.map((c) =>
+                            c.id === item.id ? { ...c, quantity: Math.max(1, c.quantity - 1) } : c
+                          )
+                        )
+                      }
+                      className="px-2.5 py-1 text-xs font-bold"
                     >
-                      <Trash2 size={18} />
+                      -
+                    </button>
+                    <span className="px-2.5 text-xs font-bold">{item.quantity}</span>
+                    <button
+                      onClick={() =>
+                        updateCart(
+                          cart.map((c) =>
+                            c.id === item.id ? { ...c, quantity: c.quantity + 1 } : c
+                          )
+                        )
+                      }
+                      className="px-2.5 py-1 text-xs font-bold"
+                    >
+                      +
                     </button>
                   </div>
-                  <p className="text-sm text-venuea-muted mb-4">{formatPrice(item.price)}</p>
-                  <div className="flex justify-between items-end">
-                    <div className="flex items-center border border-venuea-dark/10">
-                      <button 
-                        onClick={() => updateQuantity(item.id, -1)}
-                        className="p-2 hover:bg-[#F9F9F9] transition-colors text-venuea-dark"
-                      >
-                        <Minus size={14} />
-                      </button>
-                      <span className="w-8 text-center text-sm font-bold">{item.quantity}</span>
-                      <button 
-                        onClick={() => updateQuantity(item.id, 1)}
-                        className="p-2 hover:bg-[#F9F9F9] transition-colors text-venuea-dark"
-                      >
-                        <Plus size={14} />
-                      </button>
-                    </div>
-                    <p className="text-lg font-bold text-venuea-gold">
-                      {formatPrice(item.price * item.quantity)}
-                    </p>
-                  </div>
+                  <button
+                    onClick={() => updateCart(cart.filter((c) => c.id !== item.id))}
+                    className="text-gray-400 hover:text-red-500"
+                  >
+                    <Trash2 size={18} />
+                  </button>
                 </div>
-              </motion.div>
+              </div>
             ))}
           </div>
 
-          {/* Summary */}
-          <div className="lg:col-span-1">
-            <div className="bg-white p-8 shadow-[0_40px_80px_rgba(0,0,0,0.05)] border border-venuea-dark/5 sticky top-32">
-              <h3 className="text-xl font-bold text-venuea-dark mb-8 border-b border-venuea-dark/10 pb-4 uppercase tracking-widest">주문 요약</h3>
-              <div className="space-y-4 mb-8">
-                <div className="flex justify-between text-sm">
-                  <span className="text-venuea-muted">합계</span>
-                  <span className="font-bold">{formatPrice(subtotal)}</span>
-                </div>
-                <div className="flex justify-between text-sm relative">
-                  <div className="flex items-center space-x-1 text-venuea-muted">
-                    <span>배송비</span>
-                    <button 
-                      onMouseEnter={() => setShowShippingTooltip(true)}
-                      onMouseLeave={() => setShowShippingTooltip(false)}
-                      className="text-venuea-dark/40 hover:text-venuea-dark transition-colors"
-                    >
-                      <HelpCircle size={14} />
-                    </button>
-                    <AnimatePresence>
-                      {showShippingTooltip && (
-                        <motion.div 
-                          initial={{ opacity: 0, y: 5 }}
-                          animate={{ opacity: 1, y: 0 }}
-                          exit={{ opacity: 0, y: 5 }}
-                          className="absolute left-0 top-6 w-48 bg-venuea-dark text-white text-[10px] p-3 rounded shadow-xl z-10"
-                        >
-                          기본 배송비는 3,000원이며, 5만원 이상 구매 시 무료입니다.<br/>
-                          제주 및 도서산간 지역은 5,000원의 추가 배송비가 부과됩니다.
-                        </motion.div>
-                      )}
-                    </AnimatePresence>
-                  </div>
-                  <span className="font-bold">{shipping === 0 ? "무료" : formatPrice(shipping)}</span>
-                </div>
-                {user?.address && (
-                  <div className="text-[10px] text-venuea-muted text-right">
-                    배송지: {user.address}
-                  </div>
-                )}
-                <div className="pt-4 border-t border-venuea-dark/10 flex justify-between items-end">
-                  <span className="text-lg font-bold text-venuea-dark uppercase tracking-widest">총 결제 금액</span>
-                  <span className="text-2xl font-bold text-venuea-gold">{formatPrice(total)}</span>
-                </div>
-              </div>
-              <button 
-                onClick={handleCheckout}
-                className="w-full bg-venuea-dark text-white py-4 font-bold uppercase tracking-widest hover:bg-venuea-gold transition-all flex items-center justify-center space-x-3 group"
-              >
-                <span>결제하기</span>
-                <ArrowRight size={18} className="group-hover:translate-x-1 transition-transform" />
-              </button>
-              <p className="text-[10px] text-center text-venuea-muted uppercase tracking-widest mt-6">
-                보안 결제 시스템이 적용되었습니다.
-              </p>
+          <div className="bg-gray-50 p-6 rounded-2xl h-fit space-y-4">
+            <div className="flex justify-between text-sm">
+              <span className="text-gray-500">상품 금액</span>
+              <span className="font-bold">{formatPrice(subtotal)}</span>
             </div>
+            <div className="flex justify-between text-base font-bold pt-3 border-t">
+              <span>예상 결제금액</span>
+              <span>{formatPrice(subtotal >= 50000 ? subtotal : subtotal + 3000)}</span>
+            </div>
+            <button
+              onClick={() => navigate("/checkout")}
+              className="w-full bg-venuea-dark text-white py-4 rounded-xl text-xs font-bold uppercase tracking-widest hover:bg-venuea-gold flex items-center justify-center gap-2"
+            >
+              <span>주문하기</span>
+              <ArrowRight size={16} />
+            </button>
           </div>
         </div>
-      </div>
+      )}
     </div>
   );
 }
