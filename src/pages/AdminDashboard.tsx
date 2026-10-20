@@ -1538,18 +1538,18 @@ function AdminUserPoints({ adminRole }: { adminRole: string }) {
     }
   };
 
-  const handleRoleChange = async (userId: number, role: string) => {
-    const res = await apiFetch(`/api/admin/users/${userId}/role`, {
+  const handleTierChange = async (userId: number, tier: string) => {
+    const res = await apiFetch(`/api/admin/users/${userId}/tier`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ role }),
+      body: JSON.stringify({ tier }),
     });
     if (res.ok) {
-      toast.success("회원 권한이 변경되었습니다.");
+      toast.success("회원 등급이 변경되었습니다.");
       fetchUsers();
     } else {
       const d = await res.json();
-      toast.error(d.error || "권한 변경 실패");
+      toast.error(d.error || "등급 변경 실패");
     }
   };
 
@@ -1597,7 +1597,6 @@ function AdminUserPoints({ adminRole }: { adminRole: string }) {
               <th className="p-4">이름 / 이메일</th>
               <th className="p-4">등급 (6개월 실적)</th>
               <th className="p-4">보유 포인트</th>
-              <th className="p-4">권한</th>
             </tr>
           </thead>
           <tbody className="divide-y">
@@ -1608,26 +1607,24 @@ function AdminUserPoints({ adminRole }: { adminRole: string }) {
                   <div className="text-xs text-gray-400">{u.email}</div>
                 </td>
                 <td className="p-4">
-                  <span className="font-bold text-venuea-gold">{u.tier}</span>
-                  <span className="text-xs text-gray-400 ml-2">
-                    ({formatPrice(u.total_spent_6m || 0)})
-                  </span>
+                  <div className="flex items-center gap-2">
+                    <select
+                      disabled={adminRole !== "MASTER" && adminRole !== "ADMIN"}
+                      value={(u.tier || "BEIGE").toUpperCase()}
+                      onChange={(e) => handleTierChange(u.id, e.target.value)}
+                      className="border border-gray-200 rounded px-2 py-1 text-xs font-bold text-venuea-gold"
+                    >
+                      <option value="BEIGE">베이지</option>
+                      <option value="GREEN">그린</option>
+                      <option value="BLACK">블랙</option>
+                      <option value="THE_BLACK">더 블랙</option>
+                    </select>
+                    <span className="text-xs text-gray-400">
+                      ({formatPrice(u.total_spent_6m || 0)})
+                    </span>
+                  </div>
                 </td>
                 <td className="p-4 font-bold">{Number(u.points || 0).toLocaleString()} P</td>
-                <td className="p-4">
-                  <select
-                    disabled={adminRole !== "MASTER" && adminRole !== "ADMIN"}
-                    value={u.role || "USER"}
-                    onChange={(e) => handleRoleChange(u.id, e.target.value)}
-                    className="border border-gray-200 rounded px-2 py-1 text-xs"
-                  >
-                    <option value="USER">USER</option>
-                    <option value="CS">CS</option>
-                    <option value="OPERATOR">OPERATOR</option>
-                    <option value="ADMIN">ADMIN</option>
-                    <option value="MASTER">MASTER</option>
-                  </select>
-                </td>
               </tr>
             ))}
           </tbody>
@@ -1979,6 +1976,7 @@ function AdminNewsletter() {
   const [subject, setSubject] = useState("");
   const [content, setContent] = useState("");
   const [isSending, setIsSending] = useState(false);
+  const [pendingEmail, setPendingEmail] = useState<string | null>(null);
 
   const fetchSubscribers = async () => {
     const res = await apiFetch("/api/admin/newsletter/subscribers");
@@ -1988,6 +1986,13 @@ function AdminNewsletter() {
   useEffect(() => {
     fetchSubscribers();
   }, []);
+
+  const recipientRows = [
+    ...subscribers.userSubscribers.map((s) => ({ ...s, kind: "회원" })),
+    ...subscribers.guestSubscribers
+      .filter((g) => !subscribers.userSubscribers.some((u) => u.email === g.email))
+      .map((s) => ({ ...s, kind: "비회원" })),
+  ];
 
   const handleSend = async () => {
     if (!subject || !content) return toast.error("제목과 내용을 모두 입력해주세요.");
@@ -2005,6 +2010,19 @@ function AdminNewsletter() {
       }
     } finally {
       setIsSending(false);
+    }
+  };
+
+  const handleRemove = async (email: string) => {
+    const res = await apiFetch(`/api/admin/newsletter/subscribers/${encodeURIComponent(email)}`, {
+      method: "DELETE",
+    });
+    const data = await res.json().catch(() => ({}));
+    if (res.ok) {
+      setPendingEmail(null);
+      fetchSubscribers();
+    } else {
+      toast.error(data.error || "삭제에 실패했습니다.");
     }
   };
 
@@ -2039,9 +2057,39 @@ function AdminNewsletter() {
           {subscribers.guestSubscribers.length}명)
         </h3>
         <div className="max-h-96 overflow-y-auto divide-y text-sm">
-          {[...subscribers.userSubscribers, ...subscribers.guestSubscribers].map((s, idx) => (
-            <div key={idx} className="py-2.5 flex justify-between">
-              <span>{s.email}</span>
+          {recipientRows.map((s) => (
+            <div key={s.email} className="py-2.5 space-y-2">
+              <div className="flex items-center justify-between gap-3">
+                <span>
+                  {s.email}
+                  <span className="ml-2 text-[11px] text-gray-400">{s.kind}</span>
+                </span>
+                <button
+                  onClick={() => setPendingEmail(s.email)}
+                  className="text-xs text-red-600 underline shrink-0"
+                >
+                  삭제
+                </button>
+              </div>
+              {pendingEmail === s.email && (
+                <div className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700 flex flex-wrap items-center justify-between gap-2">
+                  <span>이 메일을 수신 목록에서 뺄까요?</span>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => setPendingEmail(null)}
+                      className="px-3 py-1.5 rounded-lg border border-red-200 bg-white"
+                    >
+                      취소
+                    </button>
+                    <button
+                      onClick={() => handleRemove(s.email)}
+                      className="px-3 py-1.5 rounded-lg bg-red-600 text-white font-bold"
+                    >
+                      삭제
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           ))}
         </div>

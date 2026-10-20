@@ -91,6 +91,52 @@ const escapeHtml = (value: string) =>
     .replace(/>/g, "&" + "gt;")
     .replace(/"/g, "&" + "quot;");
 
+const ORDER_STATUS_KO: Record<string, string> = {
+  pending: "결제대기",
+  paid: "결제완료",
+  shipping: "배송중",
+  delivered: "배송완료",
+  completed: "구매확정",
+  refund_requested: "환불요청",
+  refunded: "환불완료",
+  cancelled: "주문취소",
+};
+
+const formatWon = (amount: number) =>
+  `${Math.round(Number(amount) || 0).toLocaleString("ko-KR")}원`;
+
+const buildOrderEmailHtml = (order: any, items: any[]) => {
+  const itemRows =
+    items.length > 0
+      ? items
+          .map(
+            (item) => `<tr>
+          <td style="padding: 8px 0; border-bottom: 1px solid #f3f3f3;">${escapeHtml(item.name)}</td>
+          <td style="padding: 8px 0; border-bottom: 1px solid #f3f3f3; text-align: right;">${Number(item.quantity) || 0}</td>
+          <td style="padding: 8px 0; border-bottom: 1px solid #f3f3f3; text-align: right;">${formatWon((item.price || 0) * (item.quantity || 0))}</td>
+        </tr>`
+          )
+          .join("")
+      : `<tr><td style="padding: 8px 0; color: #999;">주문 상품이 없습니다.</td></tr>`;
+  const tracking = order.tracking_number
+    ? `<p style="margin: 4px 0; font-size: 13px; color: #333;">송장: ${escapeHtml(order.shipping_company || "")} ${escapeHtml(order.tracking_number)}</p>`
+    : "";
+  return `
+    <div style="margin-bottom: 24px; padding-bottom: 24px; border-bottom: 1px solid #f0f0f0;">
+      <p style="font-size: 12px; color: #999; margin: 0 0 8px;">주문 내용</p>
+      <p style="margin: 4px 0; font-size: 13px; color: #333;">주문번호: ${escapeHtml(order.order_number)}</p>
+      <p style="margin: 4px 0; font-size: 13px; color: #333;">상태: ${escapeHtml(ORDER_STATUS_KO[order.status] || order.status || "")}</p>
+      <p style="margin: 4px 0; font-size: 13px; color: #333;">주문자: ${escapeHtml(order.customer_name || "")}${order.customer_phone ? ` / ${escapeHtml(order.customer_phone)}` : ""}</p>
+      <p style="margin: 4px 0; font-size: 13px; color: #333;">배송지: ${escapeHtml(order.shipping_address || "-")}</p>
+      ${tracking}
+      <table style="width: 100%; margin-top: 12px; font-size: 13px; color: #333; border-collapse: collapse;">
+        <tbody>${itemRows}</tbody>
+      </table>
+      <p style="margin: 12px 0 0; font-size: 13px; font-weight: bold; color: #1a1a1a;">결제금액 ${formatWon(order.total_amount)}</p>
+    </div>
+  `;
+};
+
 // ==========================================
 // 2. Database Initialization & Migrations
 // ==========================================
@@ -332,6 +378,7 @@ const runMigrations = () => {
   ensureColumn("users", "points", "INTEGER DEFAULT 0");
   ensureColumn("users", "tier", "TEXT DEFAULT 'BEIGE'");
   ensureColumn("users", "tier_updated_at", "DATETIME DEFAULT '2024-01-01 00:00:00'");
+  ensureColumn("users", "tier_manual", "INTEGER DEFAULT 0");
   ensureColumn("users", "total_spent_6m", "INTEGER DEFAULT 0");
   ensureColumn("users", "google_id", "TEXT");
   ensureColumn("users", "naver_id", "TEXT");
@@ -503,7 +550,7 @@ const issueTierCoupons = (userId: number, fromTier: string, toTier: string) => {
 };
 
 const updateUserTierStatus = (userId: number) => {
-  const user = db.prepare("SELECT id, tier FROM users WHERE id = ?").get(userId) as any;
+  const user = db.prepare("SELECT id, tier, tier_manual FROM users WHERE id = ?").get(userId) as any;
   if (!user) return { spent: 0, tier: "BEIGE" };
 
   const sixMonthsAgo = new Date();
@@ -527,6 +574,9 @@ const updateUserTierStatus = (userId: number) => {
   db.prepare("UPDATE users SET total_spent_6m = ? WHERE id = ?").run(spent, userId);
 
   const oldTier = (user.tier || "BEIGE").toUpperCase();
+  if (Number(user.tier_manual) === 1) {
+    return { spent, tier: oldTier };
+  }
   const newTier = calculateUserTier(spent);
 
   if (newTier !== oldTier) {
@@ -2856,6 +2906,34 @@ async function startServer() {
     }
   });
 
+  app.post("/api/admin/users/:id/tier", authenticateAdmin, (req: any, res) => {
+    const tier = String(req.body?.tier || "").toUpperCase();
+    if (!TIER_ORDER.includes(tier)) {
+      return res.status(400).json({ error: "유효하지 않은 회원 등급입니다." });
+    }
+    try {
+      const targetUser = db
+        .prepare("SELECT id, tier FROM users WHERE id = ?")
+        .get(req.params.id) as { id: number; tier: string } | undefined;
+      if (!targetUser) return res.status(404).json({ error: "회원을 찾을 수 없습니다." });
+
+      db.prepare(
+        "UPDATE users SET tier = ?, tier_manual = 1, tier_updated_at = CURRENT_TIMESTAMP WHERE id = ?"
+      ).run(tier, targetUser.id);
+      logAdminAction(
+        req,
+        "UPDATE_USER_TIER",
+        "users",
+        targetUser.id,
+        `Tier set to ${tier}`,
+        { before: targetUser.tier, after: tier }
+      );
+      res.json({ success: true, tier });
+    } catch {
+      res.status(500).json({ error: "회원 등급 변경에 실패했습니다." });
+    }
+  });
+
   app.get("/api/admin/dashboard/stats", authenticateCS, (_req, res) => {
     try {
       const dailySales = db
@@ -3128,6 +3206,18 @@ async function startServer() {
       }
 
       const inquiry = db.prepare("SELECT * FROM inquiries WHERE id = ?").get(id) as any;
+      let orderHtml = "";
+      if (inquiry.order_number) {
+        const order = db
+          .prepare("SELECT * FROM orders WHERE order_number = ?")
+          .get(inquiry.order_number) as any;
+        if (order) {
+          const items = db
+            .prepare("SELECT name, quantity, price FROM order_items WHERE order_id = ?")
+            .all(order.id) as any[];
+          orderHtml = buildOrderEmailHtml(order, items);
+        }
+      }
       const sent = await sendMail(
         inquiry.email,
         `문의하신 내용에 대한 답변입니다: ${inquiry.subject}`,
@@ -3138,6 +3228,7 @@ async function startServer() {
             <p style="font-size: 12px; color: #999;">문의 내용</p>
             <blockquote style="margin: 0; padding: 16px; background-color: #fff; border-left: 2px solid #e5e5e5; font-size: 14px; color: #666;">${escapeHtml(inquiry.message)}</blockquote>
           </div>
+          ${orderHtml}
           <div>
             <p style="font-size: 12px; color: #999;">베뉴아 답변</p>
             <p style="font-size: 15px; line-height: 1.8; color: #1a1a1a; white-space: pre-wrap;">${escapeHtml(replyMessage)}</p>
