@@ -31,7 +31,9 @@ export default function Footer() {
     <footer className="bg-venuea-green text-[#faf2e7] pt-16 pb-12 px-6 md:px-[60px]">
       <div className="max-w-7xl mx-auto grid grid-cols-1 md:grid-cols-4 gap-10 pb-12 border-b border-[#faf2e7]/20">
         <div className="space-y-4">
-          <h2 className="font-logo text-2xl tracking-[0.18em]">BENUA</h2>
+          <Link to="/" className="inline-flex">
+            <img src="/logo-beige.png" alt="Benua" className="h-12 w-auto" />
+          </Link>
           <p className="text-sm text-[#faf2e7]/85 leading-relaxed">
             작은 공간을 위한 감성 소품과 수납용품.
           </p>
