@@ -49,24 +49,21 @@ export default function Navbar() {
   ];
 
   return (
-    <header className="fixed top-0 left-0 right-0 h-[76px] bg-white/90 backdrop-blur-md border-b border-gray-100 z-50 px-6 md:px-[60px] flex items-center justify-between">
-      <Link
-        to="/"
-        className="text-2xl font-bold tracking-[6px] uppercase text-venuea-dark"
-      >
-        Benua
+    <header className="fixed top-0 left-0 right-0 h-[76px] bg-venuea-beige/95 backdrop-blur-md border-b border-black/5 z-50 px-6 md:px-[60px] flex items-center justify-between">
+      <Link to="/" className="text-xl font-bold tracking-[0.18em] text-venuea-dark">
+        BENUA
       </Link>
 
-      <nav className="hidden md:flex items-center space-x-10">
+      <nav className="hidden md:flex items-center gap-8">
         {navLinks.map((link) => (
           <Link
             key={link.path}
             to={link.path}
             className={cn(
-              "text-xs font-bold uppercase tracking-[0.2em] transition-colors",
+              "text-sm font-bold tracking-normal transition-colors",
               location.pathname === link.path
-                ? "text-venuea-gold"
-                : "text-venuea-dark hover:text-venuea-gold"
+                ? "text-venuea-green"
+                : "text-venuea-dark hover:text-venuea-green"
             )}
           >
             {link.name}
@@ -74,11 +71,11 @@ export default function Navbar() {
         ))}
       </nav>
 
-      <div className="flex items-center space-x-5">
+      <div className="flex items-center">
         <Link
           to={user ? "/profile" : "/login"}
           aria-label={user ? "마이페이지" : "로그인"}
-          className="text-venuea-dark hover:text-venuea-gold transition-colors flex items-center gap-1.5 text-xs font-bold"
+          className="min-w-11 h-11 px-2 text-venuea-dark hover:text-venuea-green transition-colors flex items-center justify-center gap-1.5 text-sm font-bold"
         >
           <User size={20} />
           <span className="hidden sm:inline">{user ? user.name : "로그인"}</span>
@@ -87,36 +84,60 @@ export default function Navbar() {
         <Link
           to="/cart"
           aria-label="쇼핑백"
-          className="relative text-venuea-dark hover:text-venuea-gold transition-colors"
+          className="relative w-11 h-11 text-venuea-dark hover:text-venuea-green transition-colors flex items-center justify-center"
         >
           <ShoppingBag size={20} />
           {cartCount > 0 && (
-            <span className="absolute -top-2 -right-2 w-4 h-4 rounded-full bg-venuea-gold text-white text-[10px] font-bold flex items-center justify-center">
+            <span className="absolute top-1 right-0 min-w-4 h-4 px-1 rounded-full bg-venuea-green text-white text-[10px] font-bold flex items-center justify-center">
               {cartCount}
             </span>
           )}
         </Link>
 
         <button
+          type="button"
           aria-label={mobileMenuOpen ? "메뉴 닫기" : "메뉴 열기"}
+          aria-expanded={mobileMenuOpen}
           onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-          className="md:hidden text-venuea-dark p-1"
+          className="md:hidden w-11 h-11 text-venuea-dark flex items-center justify-center"
         >
           {mobileMenuOpen ? <X size={22} /> : <Menu size={22} />}
         </button>
       </div>
 
       {mobileMenuOpen && (
-        <div className="fixed inset-x-0 top-[76px] bg-white border-b border-gray-200 p-6 flex flex-col space-y-4 md:hidden shadow-xl">
-          {navLinks.map((link) => (
-            <Link
-              key={link.path}
-              to={link.path}
-              className="text-sm font-bold text-venuea-dark py-2 border-b border-gray-50"
-            >
-              {link.name}
-            </Link>
-          ))}
+        <div className="md:hidden">
+          <button
+            type="button"
+            aria-label="메뉴 닫기"
+            className="fixed inset-0 top-[76px] bg-black/40"
+            onClick={() => setMobileMenuOpen(false)}
+          />
+          <div className="fixed inset-x-0 top-[76px] bg-venuea-beige border-b border-black/5 px-6 py-4 flex flex-col shadow-xl">
+            {navLinks.map((link) => (
+              <Link
+                key={link.path}
+                to={link.path}
+                className="min-h-[52px] flex items-center text-base font-bold tracking-normal text-venuea-dark border-b border-black/5"
+              >
+                {link.name}
+              </Link>
+            ))}
+            <div className="grid grid-cols-2 gap-3 pt-4">
+              <Link
+                to={user ? "/profile" : "/login"}
+                className="h-12 rounded-xl border border-venuea-green text-venuea-green text-sm font-bold flex items-center justify-center"
+              >
+                {user ? "마이페이지" : "로그인"}
+              </Link>
+              <Link
+                to="/cart"
+                className="h-12 rounded-xl bg-venuea-green text-white text-sm font-bold flex items-center justify-center"
+              >
+                쇼핑백{cartCount > 0 ? ` ${cartCount}` : ""}
+              </Link>
+            </div>
+          </div>
         </div>
       )}
     </header>

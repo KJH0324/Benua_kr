@@ -28,39 +28,35 @@ export default function Footer() {
   };
 
   return (
-    <footer className="bg-[#1A1A1B] text-white pt-16 pb-12 px-6 md:px-[60px]">
-      <div className="max-w-7xl mx-auto grid grid-cols-1 md:grid-cols-4 gap-10 pb-12 border-b border-white/10">
+    <footer className="bg-venuea-green text-[#faf2e7] pt-16 pb-12 px-6 md:px-[60px]">
+      <div className="max-w-7xl mx-auto grid grid-cols-1 md:grid-cols-4 gap-10 pb-12 border-b border-[#faf2e7]/20">
         <div className="space-y-4">
-          <h2 className="text-2xl font-bold tracking-[6px] uppercase">Benua</h2>
-          <p className="text-xs text-gray-400 leading-relaxed">
-            공간의 호흡을 바꾸는 감각적인 오브제 큐레이션.
-            <br />
-            일상에 머무는 조형미와 깊이 있는 여백을 제안합니다.
+          <h2 className="text-2xl font-bold tracking-[0.18em]">BENUA</h2>
+          <p className="text-sm text-[#faf2e7]/85 leading-relaxed">
+            작은 공간을 위한 감성 소품과 수납용품.
           </p>
         </div>
 
         <div className="space-y-3">
-          <h3 className="text-xs font-bold uppercase tracking-widest text-venuea-gold">
-            메뉴
-          </h3>
-          <ul className="space-y-2 text-xs text-gray-400">
+          <h3 className="text-sm font-bold">바로가기</h3>
+          <ul className="space-y-2 text-sm text-[#faf2e7]/85">
             <li>
-              <Link to="/shop" className="hover:text-white transition-colors">
-                오브제 컬렉션
+              <Link to="/shop" className="hover:text-white">
+                컬렉션
               </Link>
             </li>
             <li>
-              <Link to="/about" className="hover:text-white transition-colors">
+              <Link to="/about" className="hover:text-white">
                 브랜드 스토리
               </Link>
             </li>
             <li>
-              <Link to="/track" className="hover:text-white transition-colors">
-                비회원 주문조회
+              <Link to="/track" className="hover:text-white">
+                주문조회
               </Link>
             </li>
             <li>
-              <Link to="/contact" className="hover:text-white transition-colors">
+              <Link to="/contact" className="hover:text-white">
                 고객 문의
               </Link>
             </li>
@@ -68,42 +64,38 @@ export default function Footer() {
         </div>
 
         <div className="space-y-3">
-          <h3 className="text-xs font-bold uppercase tracking-widest text-venuea-gold">
-            약관
-          </h3>
-          <ul className="space-y-2 text-xs text-gray-400">
+          <h3 className="text-sm font-bold">고객정책</h3>
+          <ul className="space-y-2 text-sm text-[#faf2e7]/85">
             <li>
-              <Link to="/terms" className="hover:text-white transition-colors">
+              <Link to="/terms" className="hover:text-white">
                 이용약관
               </Link>
             </li>
             <li>
-              <Link to="/privacy" className="hover:text-white transition-colors">
+              <Link to="/privacy" className="hover:text-white">
                 개인정보처리방침
               </Link>
             </li>
           </ul>
         </div>
 
-        <div className="space-y-3">
-          <h3 className="text-xs font-bold uppercase tracking-widest text-venuea-gold">
-            뉴스레터
-          </h3>
-          <p className="text-xs text-gray-400">
-            새로운 오브제 컬렉션과 프라이빗 혜택을 가장 먼저 받아보세요.
+        <div className="space-y-3 min-w-0">
+          <h3 className="text-sm font-bold">소식 받기</h3>
+          <p className="text-sm text-[#faf2e7]/85">
+            새 상품과 배송 혜택을 메일로 보내드립니다.
           </p>
-          <form onSubmit={handleSubscribe} className="flex gap-2">
+          <form onSubmit={handleSubscribe} className="flex gap-2 min-w-0">
             <input
               type="email"
               required
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               placeholder="이메일 주소"
-              className="bg-white/10 border border-white/15 rounded-lg px-3 py-2 text-xs text-white placeholder:text-gray-500 flex-grow focus:outline-none focus:border-venuea-gold"
+              className="min-w-0 flex-1 bg-transparent border border-[#faf2e7]/40 rounded-lg px-3 py-2 text-sm text-[#faf2e7] placeholder:text-[#faf2e7]/50 focus:outline-none focus:border-[#faf2e7]"
             />
             <button
               type="submit"
-              className="bg-venuea-gold text-white px-4 py-2 rounded-lg text-xs font-bold hover:opacity-90 transition-opacity shrink-0"
+              className="bg-[#faf2e7] text-venuea-green px-4 py-2 rounded-lg text-sm font-bold shrink-0"
             >
               구독
             </button>
@@ -111,7 +103,7 @@ export default function Footer() {
         </div>
       </div>
 
-      <div className="max-w-7xl mx-auto pt-8 text-[11px] text-gray-500 space-y-2">
+      <div className="max-w-7xl mx-auto pt-8 text-[12px] text-[#faf2e7]/80 space-y-2">
         <p className="leading-relaxed">
           상호명 베뉴아 · 대표자 강성달 · 사업자등록번호 574-30-02068 · 통신판매업신고번호
           제2026-인천연수구-1145

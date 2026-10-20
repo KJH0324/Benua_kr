@@ -1,9 +1,10 @@
 import { useState, useEffect, useRef } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { Link, useParams, useNavigate } from "react-router-dom";
 import { Heart, ShoppingBag, Star } from "lucide-react";
 import { toast } from "sonner";
 import { apiFetch } from "../lib/api";
-import { formatPrice } from "../lib/utils";
+import { formatPrice, FREE_SHIPPING_MIN, SHIPPING_FEE } from "../lib/utils";
+import ProductCard, { type CardProduct } from "../components/ProductCard";
 
 export default function ProductDetail() {
   const { id } = useParams();
@@ -11,6 +12,7 @@ export default function ProductDetail() {
   const [product, setProduct] = useState<any>(null);
   const [missing, setMissing] = useState(false);
   const [reviews, setReviews] = useState<any[]>([]);
+  const [others, setOthers] = useState<CardProduct[]>([]);
   const [quantity, setQuantity] = useState(1);
   const [isWished, setIsWished] = useState(false);
   const addingRef = useRef(false);
@@ -35,10 +37,55 @@ export default function ProductDetail() {
       .catch(() => {});
   }, [id]);
 
+  useEffect(() => {
+    if (product?.name) document.title = `${product.name} | 베뉴아`;
+  }, [product]);
+
+  useEffect(() => {
+    if (!missing) return;
+    apiFetch("/api/products")
+      .then((r) => (r.ok ? r.json() : []))
+      .then((d) => setOthers(Array.isArray(d) ? d.slice(0, 2) : []))
+      .catch(() => {});
+  }, [missing]);
+
   if (!product) {
+    if (missing) {
+      return (
+        <div className="pt-32 pb-24 px-6 max-w-3xl mx-auto text-center space-y-8">
+          <div className="space-y-3">
+            <h1 className="text-2xl font-serif font-bold text-venuea-dark">
+              판매가 종료되었거나 없는 상품입니다
+            </h1>
+            <p className="text-sm text-venuea-muted">주소가 바뀌었거나 상품이 내려갔을 수 있어요.</p>
+            <Link
+              to="/shop"
+              className="inline-flex bg-venuea-green text-white px-6 py-3 rounded-full text-sm font-bold"
+            >
+              컬렉션 보기
+            </Link>
+          </div>
+          {others.length > 0 && (
+            <div className="text-left space-y-4">
+              <p className="text-sm font-bold text-venuea-dark">다른 상품은 어때요</p>
+              <div className="grid grid-cols-2 gap-4">
+                {others.map((item) => (
+                  <ProductCard key={item.id} product={item} />
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    }
     return (
-      <div className="pt-32 text-center text-sm text-gray-400">
-        {missing ? "상품을 찾을 수 없습니다." : "오브제 정보를 불러오는 중..."}
+      <div className="pt-[110px] pb-24 px-6 md:px-[60px] max-w-6xl mx-auto grid grid-cols-1 md:grid-cols-2 gap-12">
+        <div className="aspect-square rounded-2xl bg-white animate-pulse" />
+        <div className="space-y-4 pt-6">
+          <div className="h-4 w-24 bg-white rounded animate-pulse" />
+          <div className="h-8 w-2/3 bg-white rounded animate-pulse" />
+          <div className="h-6 w-32 bg-white rounded animate-pulse" />
+        </div>
       </div>
     );
   }
@@ -107,7 +154,7 @@ export default function ProductDetail() {
   };
 
   return (
-    <div className="pt-[110px] pb-24 px-6 md:px-[60px] max-w-6xl mx-auto space-y-20">
+    <div className="pt-[110px] pb-36 md:pb-24 px-6 md:px-[60px] max-w-6xl mx-auto space-y-16">
       <div className="grid grid-cols-1 md:grid-cols-2 gap-12">
         <div className="aspect-square bg-gray-100 rounded-2xl overflow-hidden">
           <img
@@ -119,9 +166,7 @@ export default function ProductDetail() {
 
         <div className="space-y-6 flex flex-col justify-center">
           <div>
-            <span className="text-xs font-bold uppercase tracking-widest text-venuea-gold">
-              {product.category}
-            </span>
+            <span className="text-[13px] font-bold text-venuea-muted">{product.category}</span>
             <h1 className="text-3xl font-serif font-bold text-venuea-dark mt-1">
               {product.name}
             </h1>
@@ -133,19 +178,25 @@ export default function ProductDetail() {
           </div>
 
           <div className="flex items-baseline gap-3">
+            {product.discount_rate > 0 && (
+              <span className="text-lg font-bold text-[#C0392B]">{product.discount_rate}%</span>
+            )}
             <span className="text-2xl font-bold text-venuea-dark">{formatPrice(finalPrice)}</span>
-            {product.discount_rate && product.discount_rate > 0 ? (
-              <span className="text-sm text-gray-400 line-through">
+            {product.discount_rate > 0 && (
+              <span className="text-sm text-venuea-muted line-through">
                 {formatPrice(product.price)}
               </span>
-            ) : null}
+            )}
           </div>
+          <p className="text-sm text-venuea-brown">
+            배송비 {formatPrice(SHIPPING_FEE)} · {formatPrice(FREE_SHIPPING_MIN)} 이상, 블랙·더 블랙 등급은 무료
+          </p>
 
-          <p className="text-sm text-gray-600 leading-relaxed whitespace-pre-line">
+          <p className="text-sm text-venuea-muted leading-relaxed whitespace-pre-line">
             {product.description}
           </p>
 
-          <div className="border-t border-b border-gray-100 py-4 space-y-2 text-xs text-gray-500">
+          <div className="border-t border-b border-black/10 py-4 space-y-2 text-sm text-venuea-muted">
             {product.material && (
               <div className="flex justify-between">
                 <span>소재</span>
@@ -172,34 +223,37 @@ export default function ProductDetail() {
             )}
           </div>
 
-          <p className="text-xs text-gray-500">
+          <p className="text-sm text-venuea-muted">
             {stock > 0 ? `남은 재고 ${stock}개` : "품절"}
           </p>
           <div className="flex items-center gap-4">
-            <div className="flex items-center border border-gray-200 rounded-xl">
+            <div className="flex items-center border border-black/10 rounded-xl bg-white">
               <button
                 type="button"
                 aria-label="수량 줄이기"
+                disabled={quantity <= 1}
                 onClick={() => setQuantity(Math.max(1, quantity - 1))}
-                className="px-4 py-3 text-sm font-bold"
+                className="w-11 h-11 text-sm font-bold disabled:text-gray-300"
               >
                 -
               </button>
-              <span className="px-4 text-sm font-bold">{quantity}</span>
+              <span className="w-8 text-center text-sm font-bold">{quantity}</span>
               <button
                 type="button"
                 aria-label="수량 늘리기"
                 disabled={quantity >= stock}
                 onClick={() => setQuantity(Math.min(stock, quantity + 1))}
-                className="px-4 py-3 text-sm font-bold disabled:text-gray-300"
+                className="w-11 h-11 text-sm font-bold disabled:text-gray-300"
               >
                 +
               </button>
             </div>
 
             <button
+              type="button"
               onClick={() => handleAddToCart(false)}
-              className="flex-1 py-3.5 border border-venuea-dark rounded-xl text-xs font-bold uppercase tracking-widest flex items-center justify-center gap-2 hover:bg-gray-50"
+              disabled={stock < 1}
+              className="hidden md:flex flex-1 h-12 border border-venuea-green text-venuea-green rounded-xl text-sm font-bold items-center justify-center gap-2 disabled:opacity-40"
             >
               <ShoppingBag size={16} />
               <span>쇼핑백 담기</span>
@@ -209,18 +263,31 @@ export default function ProductDetail() {
               type="button"
               aria-label={isWished ? "위시리스트에서 빼기" : "위시리스트에 담기"}
               onClick={handleToggleWishlist}
-              className="p-3.5 border border-gray-200 rounded-xl hover:border-venuea-gold"
+              className="hidden md:flex w-12 h-12 border border-black/10 rounded-xl bg-white items-center justify-center"
             >
-              <Heart size={18} className={isWished ? "fill-red-500 text-red-500" : "text-gray-600"} />
+              <Heart size={18} className={isWished ? "fill-red-500 text-red-500" : "text-venuea-dark"} />
             </button>
           </div>
 
           <button
+            type="button"
             onClick={() => handleAddToCart(true)}
-            className="w-full py-4 bg-venuea-dark text-white rounded-xl text-xs font-bold uppercase tracking-widest hover:bg-venuea-gold transition-colors"
+            disabled={stock < 1}
+            className="hidden md:block w-full py-4 bg-venuea-green text-white rounded-xl text-sm font-bold disabled:opacity-40"
           >
             바로 구매하기
           </button>
+
+          <details className="border-t border-black/10 pt-4">
+            <summary className="cursor-pointer text-sm font-bold text-venuea-dark">배송·교환·반품</summary>
+            <div className="pt-3 space-y-2 text-sm text-venuea-muted leading-relaxed">
+              <p>
+                배송비는 {formatPrice(SHIPPING_FEE)}입니다. 상품 금액이 {formatPrice(FREE_SHIPPING_MIN)} 이상이거나
+                블랙·더 블랙 등급이면 무료입니다.
+              </p>
+              <p>수령일로부터 7일 이내 교환·반품을 요청할 수 있습니다. 단순 변심은 반품 배송비가 들 수 있습니다.</p>
+            </div>
+          </details>
         </div>
       </div>
 
@@ -234,13 +301,12 @@ export default function ProductDetail() {
         </div>
       )}
 
-      {/* Reviews Section */}
-      <section className="border-t pt-12 space-y-6">
-        <h2 className="text-xl font-serif font-bold">리뷰 ({reviews.length})</h2>
+      <section className="border-t border-black/10 pt-8">
         {reviews.length === 0 ? (
-          <p className="text-sm text-gray-400">아직 등록된 리뷰가 없습니다.</p>
+          <p className="text-sm text-venuea-muted">첫 리뷰를 남겨주세요.</p>
         ) : (
           <div className="space-y-4">
+            <h2 className="text-xl font-serif font-bold">리뷰 {reviews.length}</h2>
             {reviews.map((rev) => (
               <div key={rev.id} className="p-5 rounded-xl border border-gray-100 space-y-2">
                 <div className="flex items-center justify-between">
@@ -265,6 +331,33 @@ export default function ProductDetail() {
           </div>
         )}
       </section>
+
+      <div className="md:hidden fixed inset-x-0 bottom-0 z-40 bg-venuea-beige border-t border-black/10 px-4 pt-3 pb-[max(12px,env(safe-area-inset-bottom))] flex items-center gap-2">
+        <button
+          type="button"
+          aria-label={isWished ? "위시리스트에서 빼기" : "위시리스트에 담기"}
+          onClick={handleToggleWishlist}
+          className="w-12 h-12 rounded-xl border border-black/10 bg-white flex items-center justify-center shrink-0"
+        >
+          <Heart size={18} className={isWished ? "fill-red-500 text-red-500" : "text-venuea-dark"} />
+        </button>
+        <button
+          type="button"
+          onClick={() => handleAddToCart(false)}
+          disabled={stock < 1}
+          className="h-12 px-4 rounded-xl border border-venuea-green text-venuea-green text-sm font-bold disabled:opacity-40"
+        >
+          쇼핑백
+        </button>
+        <button
+          type="button"
+          onClick={() => handleAddToCart(true)}
+          disabled={stock < 1}
+          className="flex-1 h-12 rounded-xl bg-venuea-green text-white text-sm font-bold disabled:opacity-40"
+        >
+          바로 구매 {formatPrice(finalPrice)}
+        </button>
+      </div>
     </div>
   );
 }

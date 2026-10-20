@@ -28,6 +28,8 @@ const TIER_BANNERS: Record<
     rate: string;
     shipping: boolean;
     track: string;
+    accent: string;
+    fill: string;
     style: { background?: string; backgroundColor?: string; border?: string; boxShadow?: string };
     button: string;
   }
@@ -39,6 +41,8 @@ const TIER_BANNERS: Record<
     rate: "1%",
     shipping: false,
     track: "bg-black/20",
+    accent: "text-[#385c37]",
+    fill: "bg-[#385c37]",
     style: { backgroundColor: "#faf2e7" },
     button: "border-black/15 hover:bg-black/5",
   },
@@ -49,6 +53,8 @@ const TIER_BANNERS: Record<
     rate: "3%",
     shipping: false,
     track: "bg-white/20",
+    accent: "text-[#f7f3ea]",
+    fill: "bg-[#f7f3ea]",
     style: { backgroundColor: "#385c37" },
     button: "border-white/25 hover:bg-white/10",
   },
@@ -59,6 +65,8 @@ const TIER_BANNERS: Record<
     rate: "5%",
     shipping: true,
     track: "bg-white/15",
+    accent: "text-venuea-gold",
+    fill: "bg-venuea-gold",
     style: {
       background: "linear-gradient(155deg, #2c2c2e 0%, #0c0c0d 48%, #1a1a1c 100%)",
     },
@@ -71,6 +79,8 @@ const TIER_BANNERS: Record<
     rate: "7%",
     shipping: true,
     track: "bg-white/15",
+    accent: "text-[#C5A059]",
+    fill: "bg-[#C5A059]",
     style: {
       background:
         "linear-gradient(118deg, #141416 0%, #3a3228 16%, #090909 48%, #241f19 74%, #050505 100%)",
@@ -244,7 +254,7 @@ export default function Profile() {
       >
         <div className="space-y-1 min-w-0 w-full md:w-auto">
           <div className="flex items-center justify-between gap-3">
-            <div className="flex items-center gap-1.5 text-venuea-gold text-[11px] md:text-xs font-bold uppercase tracking-[0.12em] md:tracking-widest whitespace-nowrap">
+            <div className={cn("flex items-center gap-1.5 text-[11px] md:text-xs font-bold whitespace-nowrap", banner.accent)}>
               <Award size={14} className="shrink-0" />
               <span>멤버십 {banner.label}</span>
             </div>
@@ -276,18 +286,18 @@ export default function Profile() {
               aria-label="다음 등급까지 진행"
             >
               <div
-                className="h-full rounded-full bg-venuea-gold"
+                className={cn("h-full rounded-full", banner.fill)}
                 style={{ width: `${Math.round(progress * 100)}%` }}
               />
             </div>
-            <p className="text-[11px] font-bold text-venuea-gold whitespace-nowrap">{benefitLabel}</p>
+            <p className={cn("text-[11px] font-bold whitespace-nowrap", banner.accent)}>{benefitLabel}</p>
           </div>
         </div>
 
         <div className="flex items-center gap-6 md:gap-8 shrink-0">
           <div className="whitespace-nowrap">
             <span className={cn("text-[11px] block", banner.muted)}>보유 포인트</span>
-            <span className="text-lg md:text-xl font-bold text-venuea-gold">
+            <span className={cn("text-lg md:text-xl font-bold", banner.accent)}>
               {Number(user.points || 0).toLocaleString()} P
             </span>
           </div>

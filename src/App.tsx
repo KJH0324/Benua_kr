@@ -1,6 +1,6 @@
-import { BrowserRouter as Router, Routes, Route, Navigate, useLocation } from "react-router-dom";
+import { BrowserRouter as Router, Routes, Route, Navigate, useLocation, Link } from "react-router-dom";
 import { Toaster } from "sonner";
-import { useEffect } from "react";
+import { lazy, Suspense, useEffect } from "react";
 import Navbar from "./components/Navbar";
 import Footer from "./components/Footer";
 import ScrollToTop from "./components/ScrollToTop";
@@ -11,8 +11,6 @@ import Cart from "./pages/Cart";
 import TrackOrder from "./pages/TrackOrder";
 import Profile from "./pages/Profile";
 import Login from "./pages/Login";
-import AdminDashboard from "./pages/AdminDashboard";
-import AdminLogin from "./pages/AdminLogin";
 import About from "./pages/About";
 import Contact from "./pages/Contact";
 import Terms from "./pages/Terms";
@@ -20,10 +18,13 @@ import Privacy from "./pages/Privacy";
 import Checkout from "./pages/Checkout";
 import VerifyEmail from "./pages/VerifyEmail";
 import Unsubscribe from "./pages/Unsubscribe";
-import { motion, AnimatePresence } from "motion/react";
+import { AnimatePresence } from "motion/react";
 import ErrorBoundary from "./components/ErrorBoundary";
 import CouponPopup from "./components/CouponPopup";
 import { isAdminSubdomain } from "./lib/subdomain";
+
+const AdminDashboard = lazy(() => import("./pages/AdminDashboard"));
+const AdminLogin = lazy(() => import("./pages/AdminLogin"));
 
 function PageTitleHandler() {
   const location = useLocation();
@@ -54,9 +55,20 @@ function PageTitleHandler() {
 
 function NotFound() {
   return (
-    <div className="pt-40 pb-24 text-center space-y-3">
+    <div className="pt-40 pb-24 px-6 text-center space-y-4">
       <h1 className="text-3xl font-serif font-bold text-venuea-dark">페이지를 찾을 수 없습니다</h1>
-      <p className="text-sm text-gray-400">주소를 다시 확인해주세요.</p>
+      <p className="text-sm text-venuea-muted">주소를 다시 확인해주세요.</p>
+      <div className="flex flex-wrap justify-center gap-2">
+        <Link to="/" className="px-5 py-3 rounded-full bg-venuea-green text-white text-sm font-bold">
+          홈으로
+        </Link>
+        <Link to="/shop" className="px-5 py-3 rounded-full bg-white text-venuea-dark text-sm font-bold">
+          컬렉션 보기
+        </Link>
+        <Link to="/contact" className="px-5 py-3 rounded-full bg-white text-venuea-dark text-sm font-bold">
+          문의하기
+        </Link>
+      </div>
     </div>
   );
 }
@@ -73,10 +85,12 @@ export default function App() {
           <div className="flex flex-col min-h-screen bg-gray-50">
             <main className="flex-grow">
               <AnimatePresence mode="wait">
+                <Suspense fallback={null}>
                 <Routes>
                   <Route path="/login" element={<AdminLogin />} />
                   <Route path="/*" element={<AdminDashboard />} />
                 </Routes>
+                </Suspense>
               </AnimatePresence>
             </main>
           <Toaster position="bottom-center" />
@@ -91,7 +105,7 @@ export default function App() {
       <Router>
         <PageTitleHandler />
         <ScrollToTop />
-        <div className="flex flex-col min-h-screen bg-white">
+        <div className="flex flex-col min-h-screen bg-venuea-beige">
           <Navbar />
           <main className="flex-grow">
             <AnimatePresence mode="wait">

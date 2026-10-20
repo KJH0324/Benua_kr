@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { Trash2, ArrowRight } from "lucide-react";
-import { formatPrice } from "../lib/utils";
+import { ArrowRight } from "lucide-react";
+import { formatPrice, shippingFee, FREE_SHIPPING_MIN } from "../lib/utils";
 import { apiFetch } from "../lib/api";
 import type { CartItem } from "../types";
 
@@ -66,7 +66,9 @@ export default function Cart() {
   };
 
   const subtotal = cart.reduce((sum, i) => sum + i.price * i.quantity, 0);
-  const shipping = subtotal === 0 || subtotal >= 50000 || freeShippingTier ? 0 : 3000;
+  const shipping = shippingFee(subtotal, freeShippingTier);
+  const remain = Math.max(0, FREE_SHIPPING_MIN - subtotal);
+  const progress = freeShippingTier || subtotal >= FREE_SHIPPING_MIN ? 100 : Math.min(100, (subtotal / FREE_SHIPPING_MIN) * 100);
 
   return (
     <div className="pt-[110px] pb-24 px-6 md:px-[60px] max-w-5xl mx-auto">
@@ -77,7 +79,7 @@ export default function Cart() {
           <p className="text-sm text-gray-400">쇼핑백에 담긴 오브제가 없습니다.</p>
           <Link
             to="/shop"
-            className="inline-block bg-venuea-dark text-white px-6 py-3 rounded-xl text-xs font-bold uppercase tracking-widest"
+            className="inline-block bg-venuea-green text-white px-6 py-3 rounded-full text-sm font-bold"
           >
             컬렉션 보러가기
           </Link>
@@ -100,10 +102,11 @@ export default function Cart() {
                 </div>
 
                 <div className="flex items-center gap-4">
-                  <div className="flex items-center border rounded-lg">
+                  <div className="flex items-center border border-black/10 rounded-xl bg-white">
                     <button
                       type="button"
                       aria-label="수량 줄이기"
+                      disabled={item.quantity <= 1}
                       onClick={() =>
                         updateCart(
                           cart.map((c) =>
@@ -111,11 +114,11 @@ export default function Cart() {
                           )
                         )
                       }
-                      className="px-2.5 py-1 text-xs font-bold"
+                      className="w-11 h-11 text-sm font-bold disabled:text-gray-300"
                     >
                       -
                     </button>
-                    <span className="px-2.5 text-xs font-bold">{item.quantity}</span>
+                    <span className="w-8 text-center text-sm font-bold">{item.quantity}</span>
                     <button
                       type="button"
                       aria-label="수량 늘리기"
@@ -135,7 +138,7 @@ export default function Cart() {
                           )
                         )
                       }
-                      className="px-2.5 py-1 text-xs font-bold disabled:text-gray-300"
+                      className="w-11 h-11 text-sm font-bold disabled:text-gray-300"
                     >
                       +
                     </button>
@@ -144,34 +147,41 @@ export default function Cart() {
                     type="button"
                     aria-label="쇼핑백에서 삭제"
                     onClick={() => updateCart(cart.filter((c) => c.id !== item.id))}
-                    className="text-gray-400 hover:text-red-500"
+                    className="h-11 px-2 text-sm text-venuea-muted hover:text-red-600"
                   >
-                    <Trash2 size={18} />
+                    삭제
                   </button>
                 </div>
               </div>
             ))}
           </div>
 
-          <div className="bg-gray-50 p-6 rounded-2xl h-fit space-y-4">
+          <div className="bg-white p-6 rounded-2xl h-fit space-y-4">
+            <div className="space-y-2">
+              <div className="h-1.5 rounded-full bg-black/10 overflow-hidden">
+                <div className="h-full bg-venuea-green" style={{ width: `${progress}%` }} />
+              </div>
+              <p className="text-xs text-venuea-brown">
+                {freeShippingTier || shipping === 0
+                  ? "무료배송이 적용됩니다."
+                  : `${formatPrice(remain)} 더 담으면 무료배송`}
+              </p>
+            </div>
             <div className="flex justify-between text-sm">
-              <span className="text-gray-500">상품 금액</span>
+              <span className="text-venuea-muted">상품 금액</span>
               <span className="font-bold">{formatPrice(subtotal)}</span>
             </div>
             <div className="flex justify-between text-sm">
-              <span className="text-gray-500">배송비</span>
+              <span className="text-venuea-muted">배송비</span>
               <span className="font-bold">{shipping === 0 ? "무료" : formatPrice(shipping)}</span>
             </div>
-            <p className="text-[11px] text-gray-400">
-              {freeShippingTier ? "등급 혜택으로 배송비가 무료입니다." : "5만 원 이상 구매 시 배송비 무료"}
-            </p>
-            <div className="flex justify-between text-base font-bold pt-3 border-t">
+            <div className="flex justify-between text-base font-bold pt-3 border-t border-black/10">
               <span>예상 결제금액</span>
               <span>{formatPrice(subtotal + shipping)}</span>
             </div>
             <button
               onClick={() => navigate("/checkout")}
-              className="w-full bg-venuea-dark text-white py-4 rounded-xl text-xs font-bold uppercase tracking-widest hover:bg-venuea-gold flex items-center justify-center gap-2"
+              className="w-full bg-venuea-green text-white py-4 rounded-xl text-sm font-bold hover:bg-[#2d4a2c] flex items-center justify-center gap-2"
             >
               <span>주문하기</span>
               <ArrowRight size={16} />

@@ -452,9 +452,6 @@ const runMigrations = () => {
   ensureColumn("admin_logs", "timestamp_ms", "INTEGER");
 
   db.prepare("UPDATE users SET tier = UPPER(IFNULL(tier, 'BEIGE'))").run();
-  db.prepare(
-    "UPDATE products SET description = '' WHERE description LIKE '%난징%' OR description LIKE '%신청 가이드%'"
-  ).run();
 };
 
 runMigrations();

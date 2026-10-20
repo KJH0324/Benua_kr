@@ -12,6 +12,14 @@ export function formatPrice(price: number): string {
   }).format(Math.round(price || 0));
 }
 
+export const FREE_SHIPPING_MIN = 50000;
+export const SHIPPING_FEE = 3000;
+
+export function shippingFee(goods: number, freeTier = false) {
+  if (goods <= 0 || freeTier || goods >= FREE_SHIPPING_MIN) return 0;
+  return SHIPPING_FEE;
+}
+
 export function formatOrderStatus(status: string): string {
   const map: Record<string, string> = {
     pending: "결제대기",
