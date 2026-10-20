@@ -326,6 +326,7 @@ const runMigrations = () => {
   ensureColumn("users", "total_spent_6m", "INTEGER DEFAULT 0");
   ensureColumn("users", "google_id", "TEXT");
   ensureColumn("users", "naver_id", "TEXT");
+  ensureColumn("users", "kakao_id", "TEXT");
   ensureColumn("users", "is_verified", "INTEGER DEFAULT 0");
   ensureColumn("users", "verification_token", "TEXT");
   ensureColumn("users", "reset_token", "TEXT");
@@ -890,17 +891,90 @@ async function startServer() {
   // ==========================================
   // 6. User Auth & Profile APIs
   // ==========================================
+// [신규] 회원가입용 6자리 이메일 인증번호 발송
+  app.post("/api/auth/send-code", async (req, res) => {
+    const { email } = req.body;
+    if (!email || !email.includes("@")) {
+      return res.status(400).json({ error: "유효한 이메일 주소를 입력해주세요." });
+    }
+
+    const cleanEmail = email.trim();
+    try {
+      const existingUser = db
+        .prepare("SELECT id FROM users WHERE email = ?")
+        .get(cleanEmail);
+      if (existingUser) {
+        return res.status(400).json({ error: "이미 가입된 이메일입니다." });
+      }
+
+      const code = String(Math.floor(100000 + Math.random() * 900000));
+      const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString(); // 10분 유효
+
+      db.prepare(
+        `INSERT INTO email_verification_codes (email, code, expires_at)
+         VALUES (?, ?, ?)
+         ON CONFLICT(email) DO UPDATE SET code = excluded.code, expires_at = excluded.expires_at`
+      ).run(cleanEmail, code, expiresAt);
+
+      await sendMail(
+        cleanEmail,
+        "회원가입 이메일 인증번호 안내",
+        `
+        <h2 style="font-size: 18px; margin-bottom: 20px;">이메일 인증번호</h2>
+        <p style="margin-bottom: 24px; color: #555; line-height: 1.6;">
+          베뉴아 회원가입을 위한 6자리 인증번호입니다.<br/>
+          아래 인증번호를 회원가입 화면에 입력해주세요. (유효시간 10분)
+        </p>
+        <div style="background-color: #f8f8f8; border: 1px solid #eaeaea; border-radius: 8px; padding: 20px; text-align: center; font-size: 28px; font-weight: bold; letter-spacing: 8px; color: #1A1A1B;">
+          ${code}
+        </div>
+        `,
+        "SYSTEM"
+      );
+
+      res.json({ success: true, message: "인증번호가 이메일로 발송되었습니다." });
+    } catch (err) {
+      console.error("Send verification code error:", err);
+      res.status(500).json({ error: "인증번호 발송 중 오류가 발생했습니다." });
+    }
+  });
+
+  // [신규] 회원가입용 6자리 이메일 인증번호 확인
+  app.post("/api/auth/verify-code", (req, res) => {
+    const { email, code } = req.body;
+    if (!email || !code) {
+      return res.status(400).json({ error: "이메일과 인증번호를 입력해주세요." });
+    }
+
+    try {
+      const record = db
+        .prepare(
+          "SELECT * FROM email_verification_codes WHERE email = ? AND code = ? AND expires_at > CURRENT_TIMESTAMP"
+        )
+        .get(email.trim(), String(code).trim()) as any;
+
+      if (!record) {
+        return res.status(400).json({ error: "인증번호가 일치하지 않거나 만료되었습니다." });
+      }
+
+      res.json({ success: true, message: "이메일 인증이 완료되었습니다." });
+    } catch {
+      res.status(500).json({ error: "인증 확인 중 오류가 발생했습니다." });
+    }
+  });
+
+  // [수정] 회원가입 (주소 입력 제거 & 이메일 인증번호 검증 반영)
   app.post("/api/auth/register", async (req, res) => {
     const {
       email,
       password,
       name,
       phone,
-      zipcode,
-      address,
-      detail_address,
+      VerificationCode,
+      verification_code,
       google_id,
       naver_id,
+      kakao_id,
       newsletter_subscribed,
     } = req.body;
 
@@ -908,30 +982,45 @@ async function startServer() {
       return res.status(400).json({ error: "필수 입력 항목을 모두 입력해주세요." });
     }
 
+    const cleanEmail = email.trim();
+    const inputCode = String(verification_code || VerificationCode || "").trim();
+
     try {
+      // 소셜 연동 가입이 아닌 일반 가입 시 이메일 인증코드 확인
+      if (!google_id && !naver_id && !kakao_id) {
+        const verifiedRecord = db
+          .prepare(
+            "SELECT * FROM email_verification_codes WHERE email = ? AND code = ? AND expires_at > CURRENT_TIMESTAMP"
+          )
+          .get(cleanEmail, inputCode);
+
+        if (!verifiedRecord) {
+          return res.status(400).json({ error: "이메일 인증을 먼저 완료해주세요." });
+        }
+      }
+
       const hashedPassword = hashPassword(password);
       const isSubscribed = newsletter_subscribed ? 1 : 0;
-      const verifyToken = crypto.randomBytes(20).toString("hex");
 
       const info = db
         .prepare(
           `INSERT INTO users
-          (email, password, name, phone, zipcode, address, detail_address, google_id, naver_id, newsletter_subscribed, verification_token)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          (email, password, name, phone, zipcode, address, detail_address, google_id, naver_id, kakao_id, newsletter_subscribed, is_verified)
+          VALUES (?, ?, ?, ?, '', '', '', ?, ?, ?, ?, 1)`
         )
         .run(
-          email.trim(),
+          cleanEmail,
           hashedPassword,
           name.trim(),
           phone || "",
-          zipcode || "",
-          address || "",
-          detail_address || "",
           google_id || null,
           naver_id || null,
-          isSubscribed,
-          verifyToken
+          kakao_id || null,
+          isSubscribed
         );
+
+      // 사용한 인증번호 삭제
+      db.prepare("DELETE FROM email_verification_codes WHERE email = ?").run(cleanEmail);
 
       const userId = Number(info.lastInsertRowid);
 
@@ -948,18 +1037,6 @@ async function startServer() {
 
       const token = jwt.sign({ id: userId, role: "user" }, JWT_SECRET, { expiresIn: "24h" });
       setAuthCookie(res, "user_token", token);
-
-      const verifyLink = `https://${req.get("host")}/verify-email?token=${verifyToken}`;
-      await sendMail(
-        email,
-        "이메일 인증을 완료해주세요",
-        `
-        <h2 style="font-size: 18px; margin-bottom: 20px;">환영합니다, ${name}님!</h2>
-        <p style="margin-bottom: 30px;">베뉴아 회원가입을 완료하려면 아래 버튼을 눌러 이메일 인증을 진행해주세요.</p>
-        <a href="${verifyLink}" style="display: inline-block; background-color: #C5A059; color: #fff; padding: 14px 28px; text-decoration: none; border-radius: 4px; font-weight: bold; letter-spacing: 2px; font-size: 12px;">이메일 인증하기</a>
-        `,
-        "SYSTEM"
-      );
 
       res.json({ success: true, token, message: "회원가입이 완료되었습니다." });
     } catch (err: any) {
@@ -1002,7 +1079,7 @@ async function startServer() {
       const user = db
         .prepare(
           `SELECT id, name, email, phone, zipcode, address, detail_address,
-                  google_id, naver_id, points, tier, tier_updated_at,
+                  google_id, naver_id, kakao_id, points, tier, tier_updated_at,
                   newsletter_subscribed, is_verified, role
            FROM users WHERE id = ?`
         )
@@ -1340,6 +1417,102 @@ async function startServer() {
       `);
     } catch (error) {
       console.error("Naver OAuth Error:", error);
+      res.send(
+        `<html><body><script>if(window.opener){window.opener.postMessage({type:'OAUTH_ERROR',error:'server_error'},'*');window.close();}else{window.location.href='/login?error=server_error';}</script></body></html>`
+      );
+    }
+    app.get("/api/auth/kakao/url", (req, res) => {
+    const clientId = process.env.KAKAO_CLIENT_ID;
+    if (!clientId) return res.status(500).json({ error: "Kakao Client ID가 설정되지 않았습니다." });
+
+    const params = new URLSearchParams({
+      client_id: clientId,
+      redirect_uri: getRedirectUri(req, "kakao"),
+      response_type: "code",
+    });
+    res.json({ url: `https://kauth.kakao.com/oauth/authorize?${params}` });
+  });
+
+  app.get("/api/auth/kakao/callback", async (req, res) => {
+    const { code } = req.query;
+    const redirectUri = getRedirectUri(req, "kakao");
+    const existingToken = extractToken(req, "user_token");
+
+    try {
+      const bodyParams: Record<string, string> = {
+        grant_type: "authorization_code",
+        client_id: process.env.KAKAO_CLIENT_ID || "",
+        redirect_uri: redirectUri,
+        code: String(code || ""),
+      };
+      if (process.env.KAKAO_CLIENT_SECRET) {
+        bodyParams.client_secret = process.env.KAKAO_CLIENT_SECRET;
+      }
+
+      const tokenRes = await fetch("https://kauth.kakao.com/oauth/token", {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded;charset=utf-8" },
+        body: new URLSearchParams(bodyParams),
+      });
+      const tokenData = await tokenRes.json();
+      if (!tokenRes.ok || !tokenData.access_token) throw new Error("Kakao token exchange failed");
+
+      const userRes = await fetch("https://kapi.kakao.com/v2/user/me", {
+        headers: { Authorization: `Bearer ${tokenData.access_token}` },
+      });
+      const userData = await userRes.json();
+      if (!userRes.ok || !userData.id) throw new Error("Kakao user info failed");
+
+      const socialId = String(userData.id);
+      const email = userData.kakao_account?.email || "";
+
+      if (existingToken) {
+        try {
+          const decoded = jwt.verify(existingToken, JWT_SECRET) as any;
+          db.prepare("UPDATE users SET kakao_id = ? WHERE id = ?").run(socialId, decoded.id);
+          return res.send(
+            `<html><body><script>if(window.opener){window.opener.postMessage({type:'OAUTH_LINK_SUCCESS',provider:'kakao'},'*');window.close();}</script></body></html>`
+          );
+        } catch {}
+      }
+
+      let user = db.prepare("SELECT * FROM users WHERE kakao_id = ?").get(socialId) as any;
+      if (!user && email) {
+        user = db.prepare("SELECT * FROM users WHERE email = ?").get(email) as any;
+        if (user) {
+          db.prepare("UPDATE users SET kakao_id = ? WHERE id = ?").run(socialId, user.id);
+        }
+      }
+
+      if (!user) {
+        return res.send(`
+          <html><body><script>
+            if (window.opener) {
+              window.opener.postMessage({ type: 'OAUTH_ERROR', error: 'not_registered', email: '${email}', socialId: '${socialId}', provider: 'kakao' }, '*');
+              window.close();
+            } else {
+              window.location.href = '/login?error=not_registered&email=${encodeURIComponent(email)}&socialId=${encodeURIComponent(socialId)}&provider=kakao';
+            }
+          </script></body></html>
+        `);
+      }
+
+      const jwtToken = jwt.sign({ id: user.id, role: "user" }, JWT_SECRET, { expiresIn: "24h" });
+      setAuthCookie(res, "user_token", jwtToken);
+
+      res.send(`
+        <html><body><script>
+          if (window.opener) {
+            window.opener.postMessage({ type: 'OAUTH_SUCCESS', token: '${jwtToken}' }, '*');
+            window.close();
+          } else {
+            localStorage.setItem('benua_user_token', '${jwtToken}');
+            window.location.href = '/profile';
+          }
+        </script></body></html>
+      `);
+    } catch (error) {
+      console.error("Kakao OAuth Error:", error);
       res.send(
         `<html><body><script>if(window.opener){window.opener.postMessage({type:'OAUTH_ERROR',error:'server_error'},'*');window.close();}else{window.location.href='/login?error=server_error';}</script></body></html>`
       );
