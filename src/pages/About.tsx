@@ -1,69 +1,44 @@
-import { Link } from "react-router-dom";
-
-const VALUES = [
-  {
-    title: "여운과 쉼",
-    body: "문을 닫은 뒤에도 방이 조금 더 조용하기를 바랍니다.",
-  },
-  {
-    title: "스며드는 편안함",
-    body: "거창한 인테리어 대신, 손이 가는 자리에 맞게 둡니다.",
-  },
-  {
-    title: "정갈함",
-    body: "필요한 것만 남기고, 두고 봐도 정돈된 형태를 고릅니다.",
-  },
-];
-
 export default function About() {
   return (
-    <div className="pt-[110px] pb-0">
-      <article className="px-6 md:px-[60px] max-w-3xl mx-auto py-16 space-y-8">
-        <p className="text-sm text-venuea-green font-bold">브랜드 스토리</p>
-        <h1 className="text-3xl md:text-5xl font-serif font-bold text-venuea-dark leading-tight">
+    <div className="pt-[120px] pb-24 px-6">
+      <article className="max-w-[680px] mx-auto">
+        <p className="text-[13px] tracking-[0.18em] text-venuea-green">02 · BRAND STORY</p>
+
+        <div className="mt-16 mb-8 flex justify-center" aria-hidden="true">
+          <span className="block w-10 h-px bg-venuea-gold" />
+        </div>
+
+        <h1 className="text-center font-serif font-normal text-[32px] md:text-[40px] leading-[1.45] text-venuea-dark">
           문을 닫는 순간,
           <br />
           하루가 조용해지도록
         </h1>
-        <div className="space-y-6 text-[17px] leading-[2.1] text-venuea-brown">
+
+        <div className="mt-14 space-y-8 text-[16px] leading-[2] text-venuea-brown font-serif font-normal">
           <p>
-            알림과 일정으로 시끄러운 하루를 밖에서 보내고, 문을 닫고 나서야 집이 내 편이 됩니다. 베뉴아는 그 짧은 시간을 위해 작은 공간의 소품을 고릅니다.
+            하루는 생각보다 시끄럽습니다. 알림과 약속, 해야 할 일 사이를 지나 집에 돌아오면, 비로소 내
+            속도로 숨 쉬는 시간이 시작됩니다.
           </p>
           <p>
-            집을 갤러리로 바꿀 필요는 없습니다. 원룸이어도, 둘이 사는 집이어도, 손이 자주 가는 자리와 눈이 쉬는 자리에 하나를 두는 것으로 충분합니다.
+            베뉴아는 그 시간을 위해 만듭니다. 작은 방 한 칸, 원룸 한켠이라도 온전히 나를 위한 쉼터가 될 수
+            있다고 믿기 때문입니다.
           </p>
           <p>
-            주력은 감성 소품과 수납용품입니다. 쓰기 편하고, 며칠이 지나도 질리지 않는지를 기준으로 봅니다.
+            크게 바꾸지 않아도 괜찮습니다. 손끝에 닿는 촉감이 부드러운 소품 하나, 흩어진 물건을 조용히
+            품어주는 수납함 하나. 작은 것들이 공간에 천천히 스며들어, 어느새 집이 편안해지는 순간을
+            만듭니다.
           </p>
           <p>
-            바쁜 하루의 끝이 다시 쉴 곳이 되기를 바랍니다. 베뉴아는 그 방에 조용히 남는 물건을 두고 싶습니다.
+            정갈하게 비워낸 자리에는 여운이 남습니다. 오래 두고 봐도 질리지 않는 형태, 다른 물건과 다투지
+            않는 색, 매일 손이 가는 쓰임. 베뉴아는 그런 기준으로 고르고 만듭니다.
           </p>
         </div>
-      </article>
 
-      <section className="px-6 md:px-[60px] max-w-5xl mx-auto pb-16 grid grid-cols-1 md:grid-cols-3 gap-4">
-        {VALUES.map((item) => (
-          <div key={item.title} className="bg-white rounded-2xl p-6 space-y-2">
-            <h2 className="text-base font-bold text-venuea-dark">{item.title}</h2>
-            <p className="text-sm leading-relaxed text-venuea-muted">{item.body}</p>
-          </div>
-        ))}
-      </section>
-
-      <section className="bg-venuea-green text-[#faf2e7] px-6 md:px-[60px] py-16 text-center space-y-4">
-        <p className="text-xl md:text-2xl font-serif leading-relaxed">
-          오늘도 수고한 당신의 집이,
-          <br />
-          가장 다정한 쉼이 되기를.
+        <p className="mt-16 text-center font-serif font-normal text-[18px] leading-relaxed text-venuea-green">
+          오늘도 수고한 당신의 집이, 가장 다정한 쉼이 되기를.
         </p>
-        <p className="text-sm text-[#faf2e7]/80">soft living mood, 베뉴아.</p>
-        <Link
-          to="/shop"
-          className="inline-flex bg-[#faf2e7] text-venuea-green px-6 py-3 rounded-full text-sm font-bold"
-        >
-          컬렉션 보기
-        </Link>
-      </section>
+        <p className="mt-4 text-center text-sm font-serif font-normal text-venuea-muted">soft living mood, Benua.</p>
+      </article>
     </div>
   );
 }
