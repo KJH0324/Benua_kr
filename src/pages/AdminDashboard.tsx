@@ -1819,7 +1819,6 @@ function AdminInquiries({ adminRole }: { adminRole: string }) {
       });
       const data = await res.json().catch(() => ({}));
       if (res.ok) {
-        toast.success("답변 이메일이 한 번 발송되었습니다.");
         fetchInquiries();
       } else {
         toast.error(data.error || "답변 발송 실패");
