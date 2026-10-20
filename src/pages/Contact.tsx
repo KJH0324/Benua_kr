@@ -1,6 +1,18 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import { apiFetch } from "../lib/api";
+import { formatOrderStatus, formatPrice } from "../lib/utils";
+
+const ORDER_CATEGORIES = ["배송 문의", "교환/환불 문의"];
+
+type OrderOption = {
+  id: number;
+  order_number: string;
+  status: string;
+  total_amount: number;
+  created_at: string;
+};
 
 export default function Contact() {
   const [form, setForm] = useState({
@@ -9,20 +21,73 @@ export default function Contact() {
     email: "",
     subject: "",
     message: "",
+    order_number: "",
   });
+  const [user, setUser] = useState<{ name?: string; email?: string } | null>(null);
+  const [authChecked, setAuthChecked] = useState(false);
+  const [orders, setOrders] = useState<OrderOption[]>([]);
+  const [submitting, setSubmitting] = useState(false);
+
+  const needsOrder = ORDER_CATEGORIES.includes(form.category);
+
+  useEffect(() => {
+    apiFetch("/api/auth/me")
+      .then((r) => (r.ok ? r.json() : null))
+      .then(async (data) => {
+        const me = data?.user || null;
+        setUser(me);
+        if (me) {
+          setForm((prev) => ({
+            ...prev,
+            name: prev.name || me.name || "",
+            email: prev.email || me.email || "",
+          }));
+          const ordRes = await apiFetch("/api/orders/me");
+          if (ordRes.ok) {
+            const list = await ordRes.json();
+            setOrders(Array.isArray(list) ? list : []);
+          }
+        }
+      })
+      .catch(() => {})
+      .finally(() => setAuthChecked(true));
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const res = await apiFetch("/api/inquiries", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(form),
-    });
-    if (res.ok) {
-      toast.success("문의가 접수되었습니다. 입력하신 이메일로 답변을 보내드립니다.");
-      setForm({ category: "오브제 문의", name: "", email: "", subject: "", message: "" });
-    } else {
-      toast.error("문의 접수에 실패했습니다.");
+    if (submitting) return;
+    if (needsOrder && !user) {
+      toast.error("배송·교환/환불 문의는 로그인 후 주문번호를 선택해야 합니다.");
+      return;
+    }
+    if (needsOrder && !form.order_number) {
+      toast.error("문의할 주문번호를 선택해주세요.");
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      const res = await apiFetch("/api/inquiries", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(form),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) {
+        toast.success("문의가 접수되었습니다. 입력하신 이메일로 답변을 보내드립니다.");
+        setForm({
+          category: "오브제 문의",
+          name: user?.name || "",
+          email: user?.email || "",
+          subject: "",
+          message: "",
+          order_number: "",
+        });
+      } else {
+        toast.error(data.error || "문의 접수에 실패했습니다.");
+      }
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -32,7 +97,9 @@ export default function Contact() {
       <form onSubmit={handleSubmit} className="space-y-4">
         <select
           value={form.category}
-          onChange={(e) => setForm({ ...form, category: e.target.value })}
+          onChange={(e) =>
+            setForm({ ...form, category: e.target.value, order_number: "" })
+          }
           className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm"
         >
           <option value="오브제 문의">오브제 문의</option>
@@ -40,6 +107,50 @@ export default function Contact() {
           <option value="교환/환불 문의">교환/환불 문의</option>
           <option value="기타 문의">기타 문의</option>
         </select>
+
+        {needsOrder && authChecked && !user && (
+          <div className="rounded-xl border border-venuea-gold/40 bg-[#fbf7f1] px-4 py-4 text-sm text-venuea-dark space-y-2">
+            <p className="font-bold">로그인이 필요한 문의입니다</p>
+            <p className="text-xs leading-relaxed text-gray-600">
+              배송 문의와 교환/환불 문의는 본인 주문번호를 선택해야 접수됩니다.
+            </p>
+            <Link
+              to="/login?redirect=/contact"
+              className="inline-block text-xs font-bold uppercase tracking-widest text-venuea-gold"
+            >
+              로그인하기
+            </Link>
+          </div>
+        )}
+
+        {needsOrder && user && (
+          <div className="space-y-2">
+            <label className="block text-xs font-bold uppercase tracking-wider text-gray-500">
+              주문번호
+            </label>
+            {orders.length === 0 ? (
+              <p className="text-xs text-gray-500 rounded-xl border border-gray-200 px-4 py-3">
+                연결할 주문 내역이 없습니다. 주문 후 다시 문의해 주세요.
+              </p>
+            ) : (
+              <select
+                required
+                value={form.order_number}
+                onChange={(e) => setForm({ ...form, order_number: e.target.value })}
+                className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm"
+              >
+                <option value="">주문번호를 선택해주세요</option>
+                {orders.map((order) => (
+                  <option key={order.id} value={order.order_number}>
+                    {order.order_number} · {formatOrderStatus(order.status)} ·{" "}
+                    {formatPrice(order.total_amount)}
+                  </option>
+                ))}
+              </select>
+            )}
+          </div>
+        )}
+
         <input
           required
           placeholder="성함"
@@ -72,9 +183,10 @@ export default function Contact() {
         />
         <button
           type="submit"
-          className="w-full bg-venuea-dark text-white py-4 rounded-xl text-xs font-bold uppercase tracking-widest hover:bg-venuea-gold"
+          disabled={submitting || (needsOrder && (!user || orders.length === 0))}
+          className="w-full bg-venuea-dark text-white py-4 rounded-xl text-xs font-bold uppercase tracking-widest hover:bg-venuea-gold disabled:opacity-40"
         >
-          문의 접수하기
+          {submitting ? "접수 중..." : "문의 접수하기"}
         </button>
       </form>
     </div>

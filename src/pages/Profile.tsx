@@ -37,6 +37,7 @@ export default function Profile() {
   const [refundModalOrder, setRefundModalOrder] = useState<Order | null>(null);
   const [refundReasonType, setRefundReasonType] = useState(REFUND_REASONS[0]);
   const [refundDetailText, setRefundDetailText] = useState("");
+  const [refundError, setRefundError] = useState("");
   const [isSubmittingRefund, setIsSubmittingRefund] = useState(false);
 
   const loadProfileData = async () => {
@@ -73,6 +74,11 @@ export default function Profile() {
 
   const handleConfirmRefundSubmit = async () => {
     if (!refundModalOrder) return;
+    if (refundReasonType === "기타 사유" && !refundDetailText.trim()) {
+      setRefundError("환불 요청 사유를 입력해주세요.");
+      return;
+    }
+    setRefundError("");
     const finalReason = refundDetailText.trim()
       ? `${refundReasonType} (${refundDetailText.trim()})`
       : refundReasonType;
@@ -248,6 +254,7 @@ export default function Profile() {
                           setRefundModalOrder(order);
                           setRefundReasonType(REFUND_REASONS[0]);
                           setRefundDetailText("");
+                          setRefundError("");
                         }}
                         className="px-3 py-1 border border-gray-300 rounded-lg text-xs text-gray-600 hover:border-venuea-dark transition-colors"
                       >
@@ -333,7 +340,10 @@ export default function Profile() {
                   <button
                     key={r}
                     type="button"
-                    onClick={() => setRefundReasonType(r)}
+                    onClick={() => {
+                      setRefundReasonType(r);
+                      setRefundError("");
+                    }}
                     className={cn(
                       "text-left px-4 py-2.5 rounded-xl border text-xs font-bold transition-all",
                       refundReasonType === r
@@ -359,6 +369,13 @@ export default function Profile() {
                 className="w-full border border-gray-200 rounded-xl p-3 text-xs focus:outline-none focus:border-venuea-gold"
               />
             </div>
+
+            {refundError && (
+              <div className="rounded-xl border border-venuea-gold/40 bg-[#fbf7f1] px-4 py-3 text-xs text-venuea-dark">
+                <p className="font-bold tracking-wide">안내</p>
+                <p className="mt-1 leading-relaxed">{refundError}</p>
+              </div>
+            )}
 
             {!["pending", "paid"].includes(refundModalOrder.status) &&
               (refundReasonType === "단순 변심" || refundReasonType === "옵션 오선택") && (

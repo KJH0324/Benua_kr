@@ -111,9 +111,17 @@ export default function Footer() {
         </div>
       </div>
 
-      <div className="max-w-7xl mx-auto pt-8 flex flex-col sm:flex-row justify-between items-center text-[11px] text-gray-500 gap-4">
-        <p>© {new Date().getFullYear()} Benua Official. All rights reserved.</p>
-        <p>Customer Center: support@benua.shop</p>
+      <div className="max-w-7xl mx-auto pt-8 text-[11px] text-gray-500 space-y-2">
+        <p className="leading-relaxed">
+          상호명 베뉴아 · 대표자 강성달 · 사업자등록번호 574-30-02068 · 통신판매업신고번호
+          제2026-인천연수구-1145
+          <br />
+          사업장 소재지 인천광역시 연수구 새말로 154, 307동 602호
+        </p>
+        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
+          <p>© {new Date().getFullYear()} Benua Official. All rights reserved.</p>
+          <p>Customer Center: support@benua.shop</p>
+        </div>
       </div>
     </footer>
   );

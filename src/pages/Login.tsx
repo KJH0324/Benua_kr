@@ -7,8 +7,13 @@ import { apiFetch, authStorage } from "../lib/api";
 export default function Login() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const [mode, setMode] = useState<"LOGIN" | "REGISTER" | "FORGOT">("LOGIN");
+  const redirectTo = searchParams.get("redirect");
+  const afterAuthPath =
+    redirectTo && redirectTo.startsWith("/") && !redirectTo.startsWith("//")
+      ? redirectTo
+      : "/profile";
 
+  const [mode, setMode] = useState<"LOGIN" | "REGISTER" | "FORGOT">("LOGIN");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [name, setName] = useState("");
@@ -109,7 +114,7 @@ export default function Login() {
       if (res.ok) {
         if (data.token) authStorage.setUserToken(data.token);
         toast.success("로그인되었습니다.");
-        navigate("/profile");
+        navigate(afterAuthPath);
       } else {
         toast.error(data.error || "로그인에 실패했습니다.");
       }
@@ -140,7 +145,7 @@ export default function Login() {
       if (res.ok) {
         if (data.token) authStorage.setUserToken(data.token);
         toast.success("회원가입이 완료되었습니다! 웰컴 쿠폰이 발급되었습니다.");
-        navigate("/profile");
+        navigate(afterAuthPath);
       } else {
         toast.error(data.error || "회원가입에 실패했습니다.");
       }

@@ -29,7 +29,7 @@ import {
 import AdminLogs from "./AdminLogs";
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
 import { motion, AnimatePresence } from "motion/react";
-import { cn, formatPrice } from "../lib/utils";
+import { cn, formatPrice, formatOrderStatus } from "../lib/utils";
 import { toast } from "sonner";
 import { isAdminSubdomain } from "../lib/subdomain";
 import { apiFetch, authStorage } from "../lib/api";
@@ -281,7 +281,7 @@ export default function AdminDashboard() {
           <Route path="/display" element={<AdminDisplay />} />
           <Route path="/customers" element={<AdminUserPoints adminRole={adminRole} />} />
           <Route path="/coupons" element={<AdminCoupons />} />
-          <Route path="/inquiries" element={<AdminInquiries />} />
+          <Route path="/inquiries" element={<AdminInquiries adminRole={adminRole} />} />
           <Route path="/newsletter" element={<AdminNewsletter />} />
           {(adminRole === "MASTER" || adminRole === "ADMIN") && (
             <>
@@ -1421,6 +1421,22 @@ function AdminReviews() {
       .catch(() => {});
   }, []);
 
+  const toggleHidden = async (id: number, isHidden: boolean) => {
+    const res = await apiFetch(`/api/admin/reviews/${id}/visibility`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ hidden: !isHidden }),
+    });
+    if (res.ok) {
+      setReviews((prev) =>
+        prev.map((r) => (r.id === id ? { ...r, is_hidden: !isHidden ? 1 : 0 } : r))
+      );
+      toast.success(!isHidden ? "작성자에게만 보이도록 숨겼습니다." : "리뷰를 다시 공개했습니다.");
+    } else {
+      toast.error("리뷰 공개 설정에 실패했습니다.");
+    }
+  };
+
   const toggleBest = async (id: number, isBest: boolean) => {
     const res = await apiFetch(`/api/admin/reviews/${id}/best`, {
       method: "POST",
@@ -1445,6 +1461,7 @@ function AdminReviews() {
             <th className="text-left p-3">작성자</th>
             <th className="text-left p-3">내용</th>
             <th className="text-right p-3">평점</th>
+            <th className="text-right p-3">공개</th>
             <th className="text-right p-3">베스트 선정</th>
           </tr>
         </thead>
@@ -1455,6 +1472,17 @@ function AdminReviews() {
               <td className="p-3 text-gray-500">{r.user_name}</td>
               <td className="p-3">{r.content}</td>
               <td className="text-right p-3">★ {r.rating}</td>
+              <td className="text-right p-3">
+                <button
+                  onClick={() => toggleHidden(r.id, Boolean(r.is_hidden))}
+                  className={cn(
+                    "px-3 py-1 rounded text-xs font-bold",
+                    r.is_hidden ? "bg-gray-800 text-white" : "bg-gray-100 text-gray-600"
+                  )}
+                >
+                  {r.is_hidden ? "작성자만 보기" : "전체 공개"}
+                </button>
+              </td>
               <td className="text-right p-3">
                 <button
                   onClick={() => toggleBest(r.id, Boolean(r.is_best))}
@@ -1763,9 +1791,11 @@ function AdminCoupons() {
   );
 }
 
-function AdminInquiries() {
+function AdminInquiries({ adminRole }: { adminRole: string }) {
   const [inquiries, setInquiries] = useState<any[]>([]);
   const [replyMap, setReplyMap] = useState<Record<number, string>>({});
+  const [sendingId, setSendingId] = useState<number | null>(null);
+  const [pendingDeleteId, setPendingDeleteId] = useState<number | null>(null);
 
   const fetchInquiries = async () => {
     const res = await apiFetch("/api/admin/inquiries");
@@ -1777,18 +1807,37 @@ function AdminInquiries() {
   }, []);
 
   const handleReply = async (id: number) => {
+    if (sendingId !== null) return;
     const replyMessage = replyMap[id];
     if (!replyMessage?.trim()) return toast.error("답변 내용을 입력해주세요.");
-    const res = await apiFetch(`/api/admin/inquiries/${id}/reply`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ replyMessage }),
-    });
+    setSendingId(id);
+    try {
+      const res = await apiFetch(`/api/admin/inquiries/${id}/reply`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ replyMessage }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) {
+        toast.success("답변 이메일이 한 번 발송되었습니다.");
+        fetchInquiries();
+      } else {
+        toast.error(data.error || "답변 발송 실패");
+      }
+    } finally {
+      setSendingId(null);
+    }
+  };
+
+  const handleDelete = async (id: number) => {
+    const res = await apiFetch(`/api/admin/inquiries/${id}`, { method: "DELETE" });
+    const data = await res.json().catch(() => ({}));
     if (res.ok) {
-      toast.success("답변 이메일이 발송되었습니다.");
+      toast.success("문의를 삭제했습니다.");
+      setPendingDeleteId(null);
       fetchInquiries();
     } else {
-      toast.error("답변 발송 실패");
+      toast.error(data.error || "문의 삭제에 실패했습니다.");
     }
   };
 
@@ -1797,7 +1846,7 @@ function AdminInquiries() {
       <h2 className="text-xl font-bold font-serif">1:1 고객 문의 관리</h2>
       {inquiries.map((inq) => (
         <div key={inq.id} className="bg-white p-6 rounded-xl border border-gray-200 space-y-3">
-          <div className="flex justify-between">
+          <div className="flex justify-between gap-3">
             <div>
               <span className="text-xs font-bold text-venuea-gold mr-2">[{inq.category}]</span>
               <span className="font-bold">{inq.subject}</span>
@@ -1805,18 +1854,97 @@ function AdminInquiries() {
                 {inq.name} ({inq.email}) · {new Date(inq.created_at).toLocaleString("ko-KR")}
               </p>
             </div>
-            <span
-              className={cn(
-                "px-2.5 py-1 rounded-full text-xs font-bold h-fit",
-                inq.status === "replied"
-                  ? "bg-emerald-50 text-emerald-700"
-                  : "bg-amber-50 text-amber-700"
+            <div className="flex items-start gap-2">
+              <span
+                className={cn(
+                  "px-2.5 py-1 rounded-full text-xs font-bold h-fit",
+                  inq.status === "replied"
+                    ? "bg-emerald-50 text-emerald-700"
+                    : "bg-amber-50 text-amber-700"
+                )}
+              >
+                {inq.status === "replied" ? "답변완료" : "답변대기"}
+              </span>
+              {adminRole === "MASTER" && (
+                <button
+                  onClick={() => setPendingDeleteId(inq.id)}
+                  className="text-gray-400 hover:text-red-500"
+                  aria-label="문의 삭제"
+                >
+                  <Trash2 size={16} />
+                </button>
               )}
-            >
-              {inq.status === "replied" ? "답변완료" : "답변대기"}
-            </span>
+            </div>
           </div>
           <p className="text-sm text-gray-700 bg-gray-50 p-3 rounded-lg">{inq.message}</p>
+
+          {inq.order_number && (
+            <div className="rounded-xl border border-gray-200 bg-[#fbf7f1] p-4 space-y-2 text-sm">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="font-bold text-venuea-dark">
+                  연결 주문 {inq.order_number}
+                </p>
+                <span className="text-xs font-bold text-venuea-gold">
+                  {inq.linked_order_id ? formatOrderStatus(inq.order_status) : "주문을 찾을 수 없음"}
+                </span>
+              </div>
+              {inq.linked_order_id ? (
+                <>
+                  <p className="text-xs text-gray-600">
+                    {inq.order_customer_name}
+                    {inq.order_customer_phone ? ` · ${inq.order_customer_phone}` : ""} ·{" "}
+                    {formatPrice(inq.order_total || 0)}
+                    {inq.order_created_at
+                      ? ` · ${new Date(inq.order_created_at).toLocaleDateString("ko-KR")}`
+                      : ""}
+                  </p>
+                  {(inq.tracking_number || inq.shipping_company) && (
+                    <p className="text-xs text-gray-600">
+                      {inq.shipping_company || "택배"} {inq.tracking_number || ""}
+                    </p>
+                  )}
+                  {inq.shipping_address && (
+                    <p className="text-xs text-gray-500">{inq.shipping_address}</p>
+                  )}
+                  {inq.refund_reason && (
+                    <p className="text-xs text-amber-800">환불 사유: {inq.refund_reason}</p>
+                  )}
+                  {Array.isArray(inq.order_items) && inq.order_items.length > 0 && (
+                    <ul className="text-xs text-gray-700 space-y-1 pt-1">
+                      {inq.order_items.map((item: any, idx: number) => (
+                        <li key={idx}>
+                          {item.name} × {item.quantity} · {formatPrice(item.price * item.quantity)}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </>
+              ) : (
+                <p className="text-xs text-gray-500">이 주문번호와 일치하는 주문이 없습니다.</p>
+              )}
+            </div>
+          )}
+
+          {pendingDeleteId === inq.id && (
+            <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-xs text-red-700 flex flex-wrap items-center justify-between gap-2">
+              <span>이 문의를 삭제할까요? 마스터 계정에서만 삭제됩니다.</span>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setPendingDeleteId(null)}
+                  className="px-3 py-1.5 rounded-lg border border-red-200 bg-white"
+                >
+                  취소
+                </button>
+                <button
+                  onClick={() => handleDelete(inq.id)}
+                  className="px-3 py-1.5 rounded-lg bg-red-600 text-white font-bold"
+                >
+                  삭제
+                </button>
+              </div>
+            </div>
+          )}
+
           {inq.status === "replied" ? (
             <div className="text-xs text-gray-600 border-l-2 border-venuea-gold pl-3">
               <b>발송된 답변:</b> {inq.reply_message}
@@ -1831,9 +1959,10 @@ function AdminInquiries() {
               />
               <button
                 onClick={() => handleReply(inq.id)}
-                className="bg-venuea-dark text-white px-4 py-2 rounded-lg text-xs font-bold"
+                disabled={sendingId !== null}
+                className="bg-venuea-dark text-white px-4 py-2 rounded-lg text-xs font-bold disabled:opacity-40"
               >
-                답변 발송
+                {sendingId === inq.id ? "발송 중..." : "답변 발송"}
               </button>
             </div>
           )}

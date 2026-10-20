@@ -97,6 +97,11 @@ export default function ProductDetail() {
             <h1 className="text-3xl font-serif font-bold text-venuea-dark mt-1">
               {product.name}
             </h1>
+            {product.manufacturer ? (
+              <p className="mt-2 text-sm text-gray-500">
+                제조사 <span className="font-medium text-venuea-dark">{product.manufacturer}</span>
+              </p>
+            ) : null}
           </div>
 
           <div className="flex items-baseline gap-3">
@@ -129,6 +134,12 @@ export default function ProductDetail() {
               <div className="flex justify-between">
                 <span>원산지</span>
                 <span className="font-medium text-gray-800">{product.origin}</span>
+              </div>
+            )}
+            {product.manufacturer && (
+              <div className="flex justify-between">
+                <span>제조사</span>
+                <span className="font-medium text-gray-800">{product.manufacturer}</span>
               </div>
             )}
           </div>
@@ -203,6 +214,11 @@ export default function ProductDetail() {
                     )}
                     <span className="text-xs font-bold">{rev.user_name}</span>
                     <span className="text-[11px] text-gray-400">({rev.user_tier})</span>
+                    {rev.is_hidden === 1 && (
+                      <span className="px-2 py-0.5 bg-gray-100 text-gray-500 text-[10px] font-bold rounded">
+                        나만 보는 리뷰
+                      </span>
+                    )}
                   </div>
                   <div className="flex text-venuea-gold">
                     {Array.from({ length: rev.rating || 5 }).map((_, i) => (

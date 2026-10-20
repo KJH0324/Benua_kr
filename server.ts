@@ -73,14 +73,23 @@ const sendMail = async (
   try {
     if (!process.env.SMTP_USER || !process.env.SMTP_PASS) {
       console.log(`[MAIL][MOCK] To: ${to} | Subject: ${subject}`);
-      return;
+      return true;
     }
     await transporter.sendMail(mailOptions);
     console.log(`[MAIL][SUCCESS] Sent to ${to}: ${subject}`);
+    return true;
   } catch (err) {
     console.error(`[MAIL][ERROR] Failed to send to ${to}:`, err);
+    return false;
   }
 };
+
+const escapeHtml = (value: string) =>
+  String(value ?? "")
+    .replace(/&/g, "&" + "amp;")
+    .replace(/</g, "&" + "lt;")
+    .replace(/>/g, "&" + "gt;")
+    .replace(/"/g, "&" + "quot;");
 
 // ==========================================
 // 2. Database Initialization & Migrations
@@ -356,10 +365,13 @@ const runMigrations = () => {
   ensureColumn("orders", "confirmed_at", "DATETIME");
 
   ensureColumn("reviews", "is_best", "INTEGER DEFAULT 0");
+  ensureColumn("reviews", "is_hidden", "INTEGER DEFAULT 0");
   ensureColumn("inquiries", "category", "TEXT DEFAULT '상품 문의'");
   ensureColumn("inquiries", "status", "TEXT DEFAULT 'pending'");
   ensureColumn("inquiries", "reply_message", "TEXT");
   ensureColumn("inquiries", "replied_at", "DATETIME");
+  ensureColumn("inquiries", "order_number", "TEXT");
+  ensureColumn("inquiries", "user_id", "INTEGER");
   ensureColumn("user_coupons", "notified", "INTEGER DEFAULT 0");
   ensureColumn("admin_keys", "role", "TEXT DEFAULT 'MASTER'");
   ensureColumn("admin_logs", "admin_identifier", "TEXT");
@@ -414,6 +426,16 @@ const extractToken = (req: express.Request, cookieName: "user_token" | "admin_to
     }
   }
   return req.cookies?.[cookieName] || null;
+};
+
+const readOptionalUser = (req: express.Request): { id?: number } | null => {
+  const token = extractToken(req, "user_token");
+  if (!token) return null;
+  try {
+    return jwt.verify(token, JWT_SECRET) as { id?: number };
+  } catch {
+    return null;
+  }
 };
 
 const formatPrice = (price: number) =>
@@ -874,6 +896,7 @@ async function startServer() {
   const authenticateAdmin = authorize(["MASTER", "ADMIN"]);
   const authenticateOperator = authorize(["MASTER", "ADMIN", "OPERATOR"]);
   const authenticateCS = authorize(["MASTER", "ADMIN", "OPERATOR", "CS"]);
+  const authenticateMaster = authorize(["MASTER"]);
 
   const authenticateUser = (req: any, res: any, next: any) => {
     const token = extractToken(req, "user_token");
@@ -2677,15 +2700,17 @@ async function startServer() {
 
   app.get("/api/products/:id/reviews", (req, res) => {
     try {
+      const viewer = readOptionalUser(req);
       const reviews = db
         .prepare(
           `SELECT r.*, IFNULL(u.name, '익명 회원') as user_name, IFNULL(u.tier, 'BEIGE') as user_tier
            FROM reviews r
            LEFT JOIN users u ON r.user_id = u.id
            WHERE r.product_id = ?
+             AND (IFNULL(r.is_hidden, 0) = 0 OR r.user_id = ?)
            ORDER BY r.is_best DESC, r.created_at DESC`
         )
-        .all(req.params.id);
+        .all(req.params.id, viewer?.id ?? -1);
       res.json(reviews);
     } catch {
       res.status(500).json({ error: "리뷰 목록을 불러오지 못했습니다." });
@@ -2719,6 +2744,28 @@ async function startServer() {
       res.json({ success: true });
     } catch {
       res.status(500).json({ error: "베스트 리뷰 설정에 실패했습니다." });
+    }
+  });
+
+  app.post("/api/admin/reviews/:id/visibility", authenticateCS, (req: any, res) => {
+    const hidden = req.body.hidden ? 1 : 0;
+    try {
+      const result = db
+        .prepare("UPDATE reviews SET is_hidden = ? WHERE id = ?")
+        .run(hidden, req.params.id);
+      if (result.changes === 0) {
+        return res.status(404).json({ error: "리뷰를 찾을 수 없습니다." });
+      }
+      logAdminAction(
+        req,
+        hidden ? "HIDE_REVIEW" : "SHOW_REVIEW",
+        "reviews",
+        Number(req.params.id),
+        hidden ? "Hidden from public, visible to author" : "Shown publicly"
+      );
+      res.json({ success: true, is_hidden: hidden });
+    } catch {
+      res.status(500).json({ error: "리뷰 공개 설정에 실패했습니다." });
     }
   });
 
@@ -2970,7 +3017,33 @@ async function startServer() {
 
   app.get("/api/admin/inquiries", authenticateCS, (_req, res) => {
     try {
-      const inquiries = db.prepare("SELECT * FROM inquiries ORDER BY created_at DESC").all();
+      const inquiries = db
+        .prepare(
+          `SELECT i.*,
+                  o.id as linked_order_id,
+                  o.status as order_status,
+                  o.total_amount as order_total,
+                  o.customer_name as order_customer_name,
+                  o.customer_phone as order_customer_phone,
+                  o.tracking_number,
+                  o.shipping_company,
+                  o.shipping_address,
+                  o.refund_reason,
+                  o.refund_amount,
+                  o.created_at as order_created_at
+           FROM inquiries i
+           LEFT JOIN orders o ON o.order_number = i.order_number
+           ORDER BY i.created_at DESC`
+        )
+        .all() as any[];
+      const getItems = db.prepare(
+        "SELECT name, quantity, price FROM order_items WHERE order_id = ?"
+      );
+      for (const inquiry of inquiries) {
+        inquiry.order_items = inquiry.linked_order_id
+          ? getItems.all(inquiry.linked_order_id)
+          : [];
+      }
       res.json(inquiries);
     } catch {
       res.status(500).json({ error: "문의 내역 조회 실패" });
@@ -2978,14 +3051,46 @@ async function startServer() {
   });
 
   app.post("/api/inquiries", (req, res) => {
-    const { name, email, category, subject, message } = req.body;
+    const { name, email, category, subject, message, order_number } = req.body;
     if (!name || !email || !subject || !message) {
       return res.status(400).json({ error: "모든 항목을 입력해주세요." });
     }
+
+    const needsOrder = category === "배송 문의" || category === "교환/환불 문의";
+    let userId: number | null = null;
+    let linkedOrderNumber: string | null = null;
+
+    if (needsOrder) {
+      const viewer = readOptionalUser(req);
+      if (!viewer?.id) {
+        return res.status(401).json({ error: "배송·교환/환불 문의는 로그인 후 이용할 수 있습니다." });
+      }
+      if (!order_number) {
+        return res.status(400).json({ error: "주문번호를 선택해주세요." });
+      }
+      const order = db
+        .prepare("SELECT id, order_number FROM orders WHERE order_number = ? AND user_id = ?")
+        .get(String(order_number), viewer.id) as { id: number; order_number: string } | undefined;
+      if (!order) {
+        return res.status(400).json({ error: "본인 주문만 문의에 연결할 수 있습니다." });
+      }
+      userId = viewer.id;
+      linkedOrderNumber = order.order_number;
+    }
+
     try {
       db.prepare(
-        "INSERT INTO inquiries (category, name, email, subject, message) VALUES (?, ?, ?, ?, ?)"
-      ).run(category || "상품 문의", name, email, subject, message);
+        `INSERT INTO inquiries (category, name, email, subject, message, order_number, user_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`
+      ).run(
+        category || "상품 문의",
+        name,
+        email,
+        subject,
+        message,
+        linkedOrderNumber,
+        userId
+      );
       res.json({ success: true });
     } catch {
       res.status(500).json({ error: "문의 접수에 실패했습니다." });
@@ -2995,37 +3100,76 @@ async function startServer() {
   app.post("/api/admin/inquiries/:id/reply", authenticateCS, async (req: any, res) => {
     const { replyMessage } = req.body;
     const { id } = req.params;
+    if (!String(replyMessage || "").trim()) {
+      return res.status(400).json({ error: "답변 내용을 입력해주세요." });
+    }
+
     try {
+      const claim = db
+        .prepare(
+          `UPDATE inquiries
+           SET status = 'sending', reply_message = ?
+           WHERE id = ? AND IFNULL(status, 'pending') NOT IN ('replied', 'sending')`
+        )
+        .run(replyMessage, id);
+
+      if (claim.changes !== 1) {
+        return res.status(429).json({
+          error: "이미 답변 메일이 발송되었거나 발송 중입니다. 같은 문의에는 한 번만 전송됩니다.",
+        });
+      }
+
       const inquiry = db.prepare("SELECT * FROM inquiries WHERE id = ?").get(id) as any;
-      if (!inquiry) return res.status(404).json({ error: "문의를 찾을 수 없습니다." });
-
-      db.prepare(
-        "UPDATE inquiries SET reply_message = ?, status = 'replied', replied_at = CURRENT_TIMESTAMP WHERE id = ?"
-      ).run(replyMessage, id);
-
-      await sendMail(
+      const sent = await sendMail(
         inquiry.email,
         `문의하신 내용에 대한 답변입니다: ${inquiry.subject}`,
         `
         <div style="padding: 24px; background-color: #fcfcfc; border: 1px solid #f0f0f0; border-radius: 12px;">
-          <h2 style="font-size: 18px; margin-bottom: 24px;">안녕하세요, ${inquiry.name}님.</h2>
+          <h2 style="font-size: 18px; margin-bottom: 24px;">안녕하세요, ${escapeHtml(inquiry.name)}님.</h2>
           <div style="margin-bottom: 24px; padding-bottom: 24px; border-bottom: 1px solid #f0f0f0;">
             <p style="font-size: 12px; color: #999;">문의 내용</p>
-            <blockquote style="margin: 0; padding: 16px; background-color: #fff; border-left: 2px solid #e5e5e5; font-size: 14px; color: #666;">${inquiry.message}</blockquote>
+            <blockquote style="margin: 0; padding: 16px; background-color: #fff; border-left: 2px solid #e5e5e5; font-size: 14px; color: #666;">${escapeHtml(inquiry.message)}</blockquote>
           </div>
           <div>
             <p style="font-size: 12px; color: #999;">베뉴아 답변</p>
-            <p style="font-size: 15px; line-height: 1.8; color: #1a1a1a; white-space: pre-wrap;">${replyMessage}</p>
+            <p style="font-size: 15px; line-height: 1.8; color: #1a1a1a; white-space: pre-wrap;">${escapeHtml(replyMessage)}</p>
           </div>
         </div>
         `,
         "SUPPORT"
       );
 
+      if (!sent) {
+        db.prepare(
+          "UPDATE inquiries SET status = 'pending' WHERE id = ? AND status = 'sending'"
+        ).run(id);
+        return res.status(500).json({ error: "답변 발송에 실패했습니다. 다시 한 번만 시도해주세요." });
+      }
+
+      db.prepare(
+        "UPDATE inquiries SET status = 'replied', replied_at = CURRENT_TIMESTAMP WHERE id = ?"
+      ).run(id);
+
       logAdminAction(req, "REPLY_INQUIRY", "inquiries", Number(id), `Replied to ${inquiry.email}`);
       res.json({ success: true });
     } catch {
+      db.prepare(
+        "UPDATE inquiries SET status = 'pending' WHERE id = ? AND status = 'sending'"
+      ).run(id);
       res.status(500).json({ error: "답변 발송에 실패했습니다." });
+    }
+  });
+
+  app.delete("/api/admin/inquiries/:id", authenticateMaster, (req: any, res) => {
+    try {
+      const result = db.prepare("DELETE FROM inquiries WHERE id = ?").run(req.params.id);
+      if (result.changes === 0) {
+        return res.status(404).json({ error: "문의를 찾을 수 없습니다." });
+      }
+      logAdminAction(req, "DELETE_INQUIRY", "inquiries", Number(req.params.id), "Master deleted inquiry");
+      res.json({ success: true });
+    } catch {
+      res.status(500).json({ error: "문의 삭제에 실패했습니다." });
     }
   });
 
