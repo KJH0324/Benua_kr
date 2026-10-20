@@ -397,6 +397,19 @@ const ensureColumn = (table: string, column: string, definition: string) => {
   }
 };
 
+const ensureWelcomeCoupon = () => {
+  const existing = db.prepare("SELECT id FROM coupons WHERE code = ?").get("WELCOME") as
+    | { id: number }
+    | undefined;
+  if (existing) return existing.id;
+  const info = db
+    .prepare(
+      "INSERT INTO coupons (name, code, type, value, min_order_amount, max_discount_amount) VALUES (?, ?, 'SHIPPING', 0, 0, 0)"
+    )
+    .run("웰컴 무료배송 쿠폰", "WELCOME");
+  return Number(info.lastInsertRowid);
+};
+
 const runMigrations = () => {
   ensureColumn("users", "points", "INTEGER DEFAULT 0");
   ensureColumn("users", "tier", "TEXT DEFAULT 'BEIGE'");
@@ -452,6 +465,31 @@ const runMigrations = () => {
   ensureColumn("admin_logs", "timestamp_ms", "INTEGER");
 
   db.prepare("UPDATE users SET tier = UPPER(IFNULL(tier, 'BEIGE'))").run();
+
+  const welcomeId = ensureWelcomeCoupon();
+  const oldWelcome = db
+    .prepare(
+      "SELECT id FROM coupons WHERE id != ? AND (code LIKE 'WELCOME-%' OR name = '웰컴 무료배송 쿠폰')"
+    )
+    .all(welcomeId) as Array<{ id: number }>;
+  if (oldWelcome.length > 0) {
+    const ids = oldWelcome.map((row) => row.id);
+    const marks = ids.map(() => "?").join(",");
+    db.prepare(`UPDATE user_coupons SET coupon_id = ? WHERE coupon_id IN (${marks})`).run(
+      welcomeId,
+      ...ids
+    );
+    db.prepare(`DELETE FROM coupons WHERE id IN (${marks})`).run(...ids);
+  }
+  db.prepare(
+    `DELETE FROM user_coupons
+     WHERE coupon_id = ?
+       AND is_used = 0
+       AND id NOT IN (SELECT used_coupon_id FROM orders WHERE used_coupon_id IS NOT NULL)
+       AND id NOT IN (
+         SELECT MAX(id) FROM user_coupons WHERE coupon_id = ? AND is_used = 0 GROUP BY user_id
+       )`
+  ).run(welcomeId, welcomeId);
 };
 
 runMigrations();
@@ -1306,15 +1344,11 @@ async function startServer() {
       db.prepare("DELETE FROM email_verification_codes WHERE email = ?").run(cleanEmail);
 
       const userId = Number(info.lastInsertRowid);
-
       const expiresAt = new Date();
       expiresAt.setDate(expiresAt.getDate() + 30);
-      const welcomeCoupon = db
-        .prepare("INSERT INTO coupons (name, code, type, value, min_order_amount) VALUES (?, ?, 'SHIPPING', 0, 0)")
-        .run("웰컴 무료배송 쿠폰", `WELCOME-${userId}-${Date.now()}`);
       db.prepare("INSERT INTO user_coupons (user_id, coupon_id, expires_at) VALUES (?, ?, ?)").run(
         userId,
-        welcomeCoupon.lastInsertRowid,
+        ensureWelcomeCoupon(),
         expiresAt.toISOString()
       );
 
