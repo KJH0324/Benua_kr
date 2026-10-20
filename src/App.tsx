@@ -52,6 +52,15 @@ function PageTitleHandler() {
   return null;
 }
 
+function NotFound() {
+  return (
+    <div className="pt-40 pb-24 text-center space-y-3">
+      <h1 className="text-3xl font-serif font-bold text-venuea-dark">페이지를 찾을 수 없습니다</h1>
+      <p className="text-sm text-gray-400">주소를 다시 확인해주세요.</p>
+    </div>
+  );
+}
+
 export default function App() {
   const isAdmin = isAdminSubdomain();
 
@@ -70,7 +79,7 @@ export default function App() {
                 </Routes>
               </AnimatePresence>
             </main>
-            <Toaster position="top-center" />
+          <Toaster position="bottom-center" />
           </div>
         </Router>
       </ErrorBoundary>
@@ -101,22 +110,14 @@ export default function App() {
                 <Route path="/login" element={<Login />} />
                 <Route path="/verify-email" element={<VerifyEmail />} />
                 <Route path="/unsubscribe" element={<Unsubscribe />} />
-                {/* Legacy redirect for /admin */}
                 <Route path="/admin/*" element={<Navigate to={`https://dash.benua.shop${window.location.pathname.replace('/admin', '')}`} replace />} />
+                <Route path="*" element={<NotFound />} />
               </Routes>
             </AnimatePresence>
           </main>
           <Footer />
           <CouponPopup />
-          <Toaster 
-            position="top-center" 
-            toastOptions={{
-              classNames: {
-                error: 'bg-[#FF4000] text-white border-[#FF4000]',
-                warning: 'bg-[#FF4000] text-white border-[#FF4000]',
-              }
-            }} 
-          />
+          <Toaster position="bottom-center" />
         </div>
       </Router>
     </ErrorBoundary>

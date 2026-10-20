@@ -77,6 +77,7 @@ export default function Navbar() {
       <div className="flex items-center space-x-5">
         <Link
           to={user ? "/profile" : "/login"}
+          aria-label={user ? "마이페이지" : "로그인"}
           className="text-venuea-dark hover:text-venuea-gold transition-colors flex items-center gap-1.5 text-xs font-bold"
         >
           <User size={20} />
@@ -85,6 +86,7 @@ export default function Navbar() {
 
         <Link
           to="/cart"
+          aria-label="쇼핑백"
           className="relative text-venuea-dark hover:text-venuea-gold transition-colors"
         >
           <ShoppingBag size={20} />
@@ -96,6 +98,7 @@ export default function Navbar() {
         </Link>
 
         <button
+          aria-label={mobileMenuOpen ? "메뉴 닫기" : "메뉴 열기"}
           onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
           className="md:hidden text-venuea-dark p-1"
         >

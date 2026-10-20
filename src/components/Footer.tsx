@@ -41,7 +41,7 @@ export default function Footer() {
 
         <div className="space-y-3">
           <h3 className="text-xs font-bold uppercase tracking-widest text-venuea-gold">
-            Navigation
+            메뉴
           </h3>
           <ul className="space-y-2 text-xs text-gray-400">
             <li>
@@ -69,7 +69,7 @@ export default function Footer() {
 
         <div className="space-y-3">
           <h3 className="text-xs font-bold uppercase tracking-widest text-venuea-gold">
-            Legal
+            약관
           </h3>
           <ul className="space-y-2 text-xs text-gray-400">
             <li>
@@ -87,7 +87,7 @@ export default function Footer() {
 
         <div className="space-y-3">
           <h3 className="text-xs font-bold uppercase tracking-widest text-venuea-gold">
-            Newsletter
+            뉴스레터
           </h3>
           <p className="text-xs text-gray-400">
             새로운 오브제 컬렉션과 프라이빗 혜택을 가장 먼저 받아보세요.
@@ -119,8 +119,8 @@ export default function Footer() {
           사업장 소재지 인천광역시 연수구 새말로 154, 307동 602호
         </p>
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
-          <p>© {new Date().getFullYear()} Benua Official. All rights reserved.</p>
-          <p>Customer Center: support@benua.shop</p>
+          <p>© {new Date().getFullYear()} 베뉴아. 무단 전재와 복제를 금합니다.</p>
+          <p>고객센터 support@benua.shop</p>
         </div>
       </div>
     </footer>

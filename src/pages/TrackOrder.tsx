@@ -7,23 +7,29 @@ import {
   getOrderStatusBadgeClass,
   cn,
 } from "../lib/utils";
-import { toast } from "sonner";
 
 export default function TrackOrder() {
   const [orderNumber, setOrderNumber] = useState("");
+  const [phone, setPhone] = useState("");
   const [order, setOrder] = useState<any>(null);
+  const [formError, setFormError] = useState("");
 
   const handleTrack = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!orderNumber.trim()) return;
+    if (!orderNumber.trim() || phone.replace(/\D/g, "").length < 8) {
+      setFormError("주문번호와 주문 시 연락처를 입력해주세요.");
+      return;
+    }
+    setFormError("");
     const res = await apiFetch(
-      `/api/orders/track/${encodeURIComponent(orderNumber.trim())}`
+      `/api/orders/track/${encodeURIComponent(orderNumber.trim())}?phone=${encodeURIComponent(phone)}`
     );
     if (res.ok) {
       setOrder(await res.json());
     } else {
       setOrder(null);
-      toast.error("일치하는 주문번호를 찾을 수 없습니다.");
+      const data = await res.json().catch(() => ({}));
+      setFormError(data.error || "일치하는 주문을 찾을 수 없습니다.");
     }
   };
 
@@ -38,7 +44,9 @@ export default function TrackOrder() {
         </p>
       </div>
 
-      <form onSubmit={handleTrack} className="flex gap-2">
+      <form onSubmit={handleTrack} noValidate className="space-y-2">
+        {formError && <p className="text-xs text-red-600">{formError}</p>}
+        <div className="flex gap-2">
         <input
           required
           value={orderNumber}
@@ -53,6 +61,14 @@ export default function TrackOrder() {
           <Search size={16} />
           <span>조회</span>
         </button>
+        </div>
+        <input
+          inputMode="tel"
+          value={phone}
+          onChange={(e) => setPhone(e.target.value)}
+          placeholder="주문 연락처"
+          className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm"
+        />
       </form>
 
       {order && (

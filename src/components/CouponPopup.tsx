@@ -39,14 +39,20 @@ export default function CouponPopup() {
   return (
     <AnimatePresence>
       {isOpen && (
-        <div className="fixed inset-0 z-[90] flex items-center justify-center p-4 bg-black/50 backdrop-blur-xs">
+        <div
+          className="fixed inset-0 z-[90] flex items-center justify-center p-4 bg-black/50"
+          onClick={handleClose}
+        >
           <motion.div
             initial={{ opacity: 0, y: 20, scale: 0.95 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 20, scale: 0.95 }}
+            onClick={(e) => e.stopPropagation()}
             className="bg-white rounded-2xl max-w-sm w-full p-6 shadow-2xl border border-gray-100 relative"
           >
             <button
+              type="button"
+              aria-label="쿠폰 안내 닫기"
               onClick={handleClose}
               className="absolute top-4 right-4 text-gray-400 hover:text-gray-700"
             >

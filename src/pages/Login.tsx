@@ -18,7 +18,8 @@ export default function Login() {
   const [password, setPassword] = useState("");
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
-  const [newsletter, setNewsletter] = useState(true);
+  const [newsletter, setNewsletter] = useState(false);
+  const [formError, setFormError] = useState("");
 
   // 이메일 인증 상태
   const [verificationCode, setVerificationCode] = useState("");
@@ -104,6 +105,15 @@ export default function Login() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!email.trim() || (mode !== "FORGOT" && !password)) {
+      setFormError(mode === "FORGOT" ? "이메일을 입력해주세요." : "이메일과 비밀번호를 입력해주세요.");
+      return;
+    }
+    if (mode === "REGISTER" && !name.trim()) {
+      setFormError("성함을 입력해주세요.");
+      return;
+    }
+    setFormError("");
     if (mode === "LOGIN") {
       const res = await apiFetch("/api/auth/login", {
         method: "POST",
@@ -120,7 +130,7 @@ export default function Login() {
       }
     } else if (mode === "REGISTER") {
       if (!socialProvider && !isEmailVerified) {
-        toast.error("이메일 인증을 먼저 완료해주세요.");
+        setFormError("이메일 인증을 먼저 완료해주세요.");
         return;
       }
 
@@ -175,7 +185,12 @@ export default function Login() {
         {mode === "LOGIN" ? "로그인" : mode === "REGISTER" ? "회원가입" : "비밀번호 찾기"}
       </h1>
 
-      <form onSubmit={handleSubmit} className="space-y-4">
+      <form onSubmit={handleSubmit} noValidate className="space-y-4">
+        {formError && (
+          <p className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-xs text-red-700">
+            {formError}
+          </p>
+        )}
         <div className="space-y-2">
           <div className="flex gap-2">
             <input

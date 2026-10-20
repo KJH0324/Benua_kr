@@ -1,25 +1,33 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { Heart, ShoppingBag, Star } from "lucide-react";
 import { toast } from "sonner";
 import { apiFetch } from "../lib/api";
 import { formatPrice } from "../lib/utils";
-import type { Product } from "../types";
 
 export default function ProductDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const [product, setProduct] = useState<Product | null>(null);
+  const [product, setProduct] = useState<any>(null);
+  const [missing, setMissing] = useState(false);
   const [reviews, setReviews] = useState<any[]>([]);
   const [quantity, setQuantity] = useState(1);
   const [isWished, setIsWished] = useState(false);
+  const addingRef = useRef(false);
 
   useEffect(() => {
     if (!id) return;
+    setProduct(null);
+    setMissing(false);
     apiFetch(`/api/products/${id}`)
-      .then((r) => (r.ok ? r.json() : null))
-      .then(setProduct)
-      .catch(() => {});
+      .then(async (r) => {
+        if (!r.ok) {
+          setMissing(true);
+          return;
+        }
+        setProduct(await r.json());
+      })
+      .catch(() => setMissing(true));
 
     apiFetch(`/api/products/${id}/reviews`)
       .then((r) => (r.ok ? r.json() : []))
@@ -28,28 +36,48 @@ export default function ProductDetail() {
   }, [id]);
 
   if (!product) {
-    return <div className="pt-32 text-center text-sm text-gray-400">오브제 정보를 불러오는 중...</div>;
+    return (
+      <div className="pt-32 text-center text-sm text-gray-400">
+        {missing ? "상품을 찾을 수 없습니다." : "오브제 정보를 불러오는 중..."}
+      </div>
+    );
   }
 
+  const stock = Math.max(0, Number(product.stock) || 0);
   const finalPrice =
     product.discount_rate && product.discount_rate > 0
       ? Math.round(product.price * (1 - product.discount_rate / 100))
       : product.price;
 
   const handleAddToCart = (buyNow = false) => {
+    if (addingRef.current) return;
+    if (stock < 1 || quantity > stock) {
+      toast.error("재고가 부족합니다.");
+      return;
+    }
+    addingRef.current = true;
+    window.setTimeout(() => {
+      addingRef.current = false;
+    }, 500);
+
     const saved = JSON.parse(localStorage.getItem("benua_cart") || "[]");
     const list = Array.isArray(saved) ? saved : [];
-    const existingIdx = list.findIndex((i: any) => i.id === product.id);
+    const existingIdx = list.findIndex((i: any) => String(i.id) === String(product.id));
+    const nextQty =
+      existingIdx >= 0 ? Math.min(stock, list[existingIdx].quantity + quantity) : quantity;
 
     if (existingIdx >= 0) {
-      list[existingIdx].quantity += quantity;
+      list[existingIdx].quantity = nextQty;
+      list[existingIdx].stock = stock;
+      list[existingIdx].price = finalPrice;
     } else {
       list.push({
         id: product.id,
         name: product.name,
         price: finalPrice,
         originalPrice: product.price,
-        quantity,
+        quantity: nextQty,
+        stock,
         image: product.image_url,
         category: product.category,
       });
@@ -144,9 +172,14 @@ export default function ProductDetail() {
             )}
           </div>
 
+          <p className="text-xs text-gray-500">
+            {stock > 0 ? `남은 재고 ${stock}개` : "품절"}
+          </p>
           <div className="flex items-center gap-4">
             <div className="flex items-center border border-gray-200 rounded-xl">
               <button
+                type="button"
+                aria-label="수량 줄이기"
                 onClick={() => setQuantity(Math.max(1, quantity - 1))}
                 className="px-4 py-3 text-sm font-bold"
               >
@@ -154,8 +187,11 @@ export default function ProductDetail() {
               </button>
               <span className="px-4 text-sm font-bold">{quantity}</span>
               <button
-                onClick={() => setQuantity(quantity + 1)}
-                className="px-4 py-3 text-sm font-bold"
+                type="button"
+                aria-label="수량 늘리기"
+                disabled={quantity >= stock}
+                onClick={() => setQuantity(Math.min(stock, quantity + 1))}
+                className="px-4 py-3 text-sm font-bold disabled:text-gray-300"
               >
                 +
               </button>
@@ -170,6 +206,8 @@ export default function ProductDetail() {
             </button>
 
             <button
+              type="button"
+              aria-label={isWished ? "위시리스트에서 빼기" : "위시리스트에 담기"}
               onClick={handleToggleWishlist}
               className="p-3.5 border border-gray-200 rounded-xl hover:border-venuea-gold"
             >

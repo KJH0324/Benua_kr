@@ -11,6 +11,16 @@ import type { CartItem, UserProfile } from "../types";
 const TOSS_CLIENT_KEY =
   import.meta.env.VITE_TOSS_CLIENT_KEY || "test_ck_D5GePWvyJnrK0W0k6q8gLzN97Eoq";
 
+function readCheckoutDraft(): Record<string, string> {
+  if (typeof sessionStorage === "undefined") return {};
+  try {
+    const parsed = JSON.parse(sessionStorage.getItem("benua_checkout_draft") || "null");
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
 export default function Checkout() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -20,19 +30,21 @@ export default function Checkout() {
   const [coupons, setCoupons] = useState<any[]>([]);
   const [selectedCouponId, setSelectedCouponId] = useState<number | null>(null);
   const [usePoints, setUsePoints] = useState<number>(0);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const draft = readCheckoutDraft();
 
-  const [customerName, setCustomerName] = useState("");
-  const [customerEmail, setCustomerEmail] = useState("");
-  const [customerPhone, setCustomerPhone] = useState("");
-  const [zipcode, setZipcode] = useState("");
-  const [address, setAddress] = useState("");
-  const [detailAddress, setDetailAddress] = useState("");
+  const [customerName, setCustomerName] = useState(draft.customerName || "");
+  const [customerEmail, setCustomerEmail] = useState(draft.customerEmail || "");
+  const [customerPhone, setCustomerPhone] = useState(draft.customerPhone || "");
+  const [zipcode, setZipcode] = useState(draft.zipcode || "");
+  const [address, setAddress] = useState(draft.address || "");
+  const [detailAddress, setDetailAddress] = useState(draft.detailAddress || "");
   const [isPostcodeOpen, setIsPostcodeOpen] = useState(false);
 
   const [paymentMethod, setPaymentMethod] = useState<
     "card" | "kakao_pay" | "naver_pay" | "vbank"
   >("card");
-  const [isProcessing, setIsProcessing] = useState(false);
+  const [formError, setFormError] = useState("");
   const [completedOrderNumber, setCompletedOrderNumber] = useState<string | null>(null);
   const [vbankResult, setVbankResult] = useState<any>(null);
 
@@ -44,6 +56,14 @@ export default function Checkout() {
     const failMessage = searchParams.get("message");
 
     if (failMessage) {
+      const failedOrderId = searchParams.get("orderId");
+      if (failedOrderId) {
+        apiFetch("/api/orders/abandon", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ order_number: failedOrderId }),
+        }).catch(() => {});
+      }
       toast.error(`결제가 취소되었거나 실패했습니다: ${failMessage}`);
       return;
     }
@@ -94,14 +114,27 @@ export default function Checkout() {
     apiFetch("/api/auth/me")
       .then((r) => r.json())
       .then((d) => {
+        let draft: any = null;
+        try {
+          draft = JSON.parse(sessionStorage.getItem("benua_checkout_draft") || "null");
+        } catch {
+          draft = null;
+        }
         if (d.user) {
           setUser(d.user);
-          setCustomerName(d.user.name || "");
-          setCustomerEmail(d.user.email || "");
-          setCustomerPhone(d.user.phone || "");
-          setZipcode(d.user.zipcode || "");
-          setAddress(d.user.address || "");
-          setDetailAddress(d.user.detail_address || "");
+          setCustomerName(draft?.customerName || d.user.name || "");
+          setCustomerEmail(draft?.customerEmail || d.user.email || "");
+          setCustomerPhone(draft?.customerPhone || d.user.phone || "");
+          setZipcode(draft?.zipcode || d.user.zipcode || "");
+          setAddress(draft?.address || d.user.address || "");
+          setDetailAddress(draft?.detailAddress || d.user.detail_address || "");
+        } else if (draft) {
+          setCustomerName(draft.customerName || "");
+          setCustomerEmail(draft.customerEmail || "");
+          setCustomerPhone(draft.customerPhone || "");
+          setZipcode(draft.zipcode || "");
+          setAddress(draft.address || "");
+          setDetailAddress(draft.detailAddress || "");
         }
       })
       .catch(() => {});
@@ -111,6 +144,20 @@ export default function Checkout() {
       .then((list) => setCoupons(Array.isArray(list) ? list : []))
       .catch(() => {});
   }, []);
+
+  useEffect(() => {
+    sessionStorage.setItem(
+      "benua_checkout_draft",
+      JSON.stringify({
+        customerName,
+        customerEmail,
+        customerPhone,
+        zipcode,
+        address,
+        detailAddress,
+      })
+    );
+  }, [customerName, customerEmail, customerPhone, zipcode, address, detailAddress]);
 
   const subtotal = cart.reduce((sum, item) => sum + item.price * item.quantity, 0);
   const selectedCoupon = coupons.find((c) => c.id === selectedCouponId);
@@ -148,10 +195,11 @@ export default function Checkout() {
       toast.error("쇼핑백이 비어 있습니다.");
       return;
     }
-    if (!customerName || !customerEmail || !customerPhone || !address) {
-      toast.error("주문자 정보와 배송지를 모두 입력해주세요.");
+    if (!customerName || !customerEmail || !customerPhone || !zipcode || !address) {
+      setFormError("수령인, 연락처, 이메일, 우편번호, 주소를 모두 입력해주세요.");
       return;
     }
+    setFormError("");
     if (usePoints > maxUsablePoints) {
       toast.error("보유 포인트와 결제 금액 안에서만 사용할 수 있습니다.");
       return;
@@ -162,6 +210,7 @@ export default function Checkout() {
     }
 
     setIsProcessing(true);
+    let prepOrderNumber = "";
     try {
       const fullAddress = `[${zipcode}] ${address} ${detailAddress}`.trim();
       const prepRes = await apiFetch("/api/orders/prepare", {
@@ -184,12 +233,14 @@ export default function Checkout() {
 
       const prepData = await prepRes.json();
       if (!prepRes.ok) {
-        toast.error(prepData.error || "주문 준비에 실패했습니다.");
+        setFormError(prepData.error || "주문 준비에 실패했습니다.");
         setIsProcessing(false);
         return;
       }
 
       // If 0 KRW order (paid fully by points/coupon)
+      if (prepData.order_number) prepOrderNumber = prepData.order_number;
+
       if (prepData.zeroAmountPaid) {
         localStorage.removeItem("benua_cart");
         window.dispatchEvent(new Event("cart-updated"));
@@ -242,8 +293,15 @@ export default function Checkout() {
         });
       }
     } catch (err: any) {
+      if (prepOrderNumber) {
+        apiFetch("/api/orders/abandon", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ order_number: prepOrderNumber }),
+        }).catch(() => {});
+      }
       if (err?.code !== "USER_CANCEL") {
-        toast.error(err?.message || "결제창 호출 중 오류가 발생했습니다.");
+        setFormError(err?.message || "결제창을 열지 못했습니다. 주소와 우편번호를 확인한 뒤 다시 시도해주세요.");
       }
       setIsProcessing(false);
     }
@@ -293,11 +351,16 @@ export default function Checkout() {
     <div className="pt-[110px] pb-24 px-6 md:px-[60px] max-w-6xl mx-auto">
       <h1 className="text-3xl font-serif font-bold text-venuea-dark mb-10">주문 및 결제</h1>
 
-      <form onSubmit={handlePaymentSubmit} className="grid grid-cols-1 lg:grid-cols-3 gap-10">
+      <form onSubmit={handlePaymentSubmit} noValidate className="grid grid-cols-1 lg:grid-cols-3 gap-10">
         {/* Left: Shipping & Discounts */}
         <div className="lg:col-span-2 space-y-8">
           <section className="bg-white p-6 rounded-2xl border border-gray-200 space-y-4">
             <h2 className="text-base font-bold text-venuea-dark">주문자 및 배송지 정보</h2>
+            {formError && (
+              <p className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-xs text-red-700">
+                {formError}
+              </p>
+            )}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <input
                 required
@@ -325,10 +388,11 @@ export default function Checkout() {
 
             <div className="flex gap-2">
               <input
-                readOnly
+                inputMode="numeric"
                 placeholder="우편번호"
                 value={zipcode}
-                className="w-36 border border-gray-200 rounded-xl px-4 py-3 text-sm bg-gray-50"
+                onChange={(e) => setZipcode(e.target.value.replace(/[^\d-]/g, "").slice(0, 7))}
+                className="w-36 border border-gray-200 rounded-xl px-4 py-3 text-sm"
               />
               <button
                 type="button"
@@ -394,15 +458,13 @@ export default function Checkout() {
                   </button>
                 </div>
                 <input
-                  type="number"
-                  min={0}
-                  max={maxUsablePoints}
-                  value={usePoints || ""}
-                  onChange={(e) =>
-                    setUsePoints(
-                      Math.min(maxUsablePoints, Math.max(0, Math.floor(Number(e.target.value) || 0)))
-                    )
-                  }
+                  inputMode="numeric"
+                  value={usePoints ? String(usePoints) : ""}
+                  onChange={(e) => {
+                    const digits = e.target.value.replace(/\D/g, "");
+                    const next = digits ? Number(digits) : 0;
+                    setUsePoints(Math.min(maxUsablePoints, next));
+                  }}
                   placeholder="0"
                   className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm"
                 />
@@ -506,7 +568,7 @@ export default function Checkout() {
           <div className="bg-white rounded-2xl max-w-md w-full overflow-hidden">
             <div className="p-4 border-b flex justify-between items-center">
               <span className="font-bold text-sm">우편번호 검색</span>
-              <button onClick={() => setIsPostcodeOpen(false)}>
+              <button type="button" aria-label="주소 검색 닫기" onClick={() => setIsPostcodeOpen(false)}>
                 <X size={20} />
               </button>
             </div>

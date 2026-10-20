@@ -2,19 +2,61 @@ import { useState, useEffect } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Trash2, ArrowRight } from "lucide-react";
 import { formatPrice } from "../lib/utils";
+import { apiFetch } from "../lib/api";
 import type { CartItem } from "../types";
 
 export default function Cart() {
   const navigate = useNavigate();
   const [cart, setCart] = useState<CartItem[]>([]);
+  const [freeShippingTier, setFreeShippingTier] = useState(false);
 
   useEffect(() => {
+    let saved: any[] = [];
     try {
-      const saved = JSON.parse(localStorage.getItem("benua_cart") || "[]");
-      setCart(Array.isArray(saved) ? saved : []);
+      const parsed = JSON.parse(localStorage.getItem("benua_cart") || "[]");
+      saved = Array.isArray(parsed) ? parsed : [];
     } catch {
-      setCart([]);
+      saved = [];
     }
+
+    const sync = async () => {
+      const next = [];
+      for (const item of saved) {
+        const res = await apiFetch(`/api/products/${item.id}`);
+        if (res.status === 404) continue;
+        if (!res.ok) {
+          next.push(item);
+          continue;
+        }
+        const product = await res.json();
+        const stock = Math.max(0, Number(product.stock) || 0);
+        if (stock < 1) continue;
+        const price =
+          product.discount_rate > 0
+            ? Math.round(product.price * (1 - product.discount_rate / 100))
+            : product.price;
+        next.push({
+          ...item,
+          name: product.name,
+          price,
+          stock,
+          quantity: Math.min(Math.max(1, Number(item.quantity) || 1), stock),
+          image: product.image_url || item.image,
+        });
+      }
+      setCart(next);
+      localStorage.setItem("benua_cart", JSON.stringify(next));
+      window.dispatchEvent(new Event("cart-updated"));
+    };
+    sync();
+
+    apiFetch("/api/auth/me")
+      .then((r) => r.json())
+      .then((d) => {
+        const tier = String(d.user?.tier || "").toUpperCase();
+        setFreeShippingTier(tier === "BLACK" || tier === "THE_BLACK");
+      })
+      .catch(() => {});
   }, []);
 
   const updateCart = (next: CartItem[]) => {
@@ -24,6 +66,7 @@ export default function Cart() {
   };
 
   const subtotal = cart.reduce((sum, i) => sum + i.price * i.quantity, 0);
+  const shipping = subtotal === 0 || subtotal >= 50000 || freeShippingTier ? 0 : 3000;
 
   return (
     <div className="pt-[110px] pb-24 px-6 md:px-[60px] max-w-5xl mx-auto">
@@ -59,6 +102,8 @@ export default function Cart() {
                 <div className="flex items-center gap-4">
                   <div className="flex items-center border rounded-lg">
                     <button
+                      type="button"
+                      aria-label="수량 줄이기"
                       onClick={() =>
                         updateCart(
                           cart.map((c) =>
@@ -72,19 +117,32 @@ export default function Cart() {
                     </button>
                     <span className="px-2.5 text-xs font-bold">{item.quantity}</span>
                     <button
+                      type="button"
+                      aria-label="수량 늘리기"
+                      disabled={item.quantity >= Number((item as any).stock || item.quantity)}
                       onClick={() =>
                         updateCart(
                           cart.map((c) =>
-                            c.id === item.id ? { ...c, quantity: c.quantity + 1 } : c
+                            c.id === item.id
+                              ? {
+                                  ...c,
+                                  quantity: Math.min(
+                                    Number((c as any).stock || c.quantity + 1),
+                                    c.quantity + 1
+                                  ),
+                                }
+                              : c
                           )
                         )
                       }
-                      className="px-2.5 py-1 text-xs font-bold"
+                      className="px-2.5 py-1 text-xs font-bold disabled:text-gray-300"
                     >
                       +
                     </button>
                   </div>
                   <button
+                    type="button"
+                    aria-label="쇼핑백에서 삭제"
                     onClick={() => updateCart(cart.filter((c) => c.id !== item.id))}
                     className="text-gray-400 hover:text-red-500"
                   >
@@ -100,9 +158,16 @@ export default function Cart() {
               <span className="text-gray-500">상품 금액</span>
               <span className="font-bold">{formatPrice(subtotal)}</span>
             </div>
+            <div className="flex justify-between text-sm">
+              <span className="text-gray-500">배송비</span>
+              <span className="font-bold">{shipping === 0 ? "무료" : formatPrice(shipping)}</span>
+            </div>
+            <p className="text-[11px] text-gray-400">
+              {freeShippingTier ? "등급 혜택으로 배송비가 무료입니다." : "5만 원 이상 구매 시 배송비 무료"}
+            </p>
             <div className="flex justify-between text-base font-bold pt-3 border-t">
               <span>예상 결제금액</span>
-              <span>{formatPrice(subtotal >= 50000 ? subtotal : subtotal + 3000)}</span>
+              <span>{formatPrice(subtotal + shipping)}</span>
             </div>
             <button
               onClick={() => navigate("/checkout")}

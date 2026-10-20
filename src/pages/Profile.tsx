@@ -38,7 +38,7 @@ const TIER_BANNERS: Record<
     muted: "text-[#8a7b68]",
     rate: "1%",
     shipping: false,
-    track: "bg-black/10",
+    track: "bg-black/20",
     style: { backgroundColor: "#faf2e7" },
     button: "border-black/15 hover:bg-black/5",
   },
@@ -246,8 +246,7 @@ export default function Profile() {
           <div className="flex items-center justify-between gap-3">
             <div className="flex items-center gap-1.5 text-venuea-gold text-[11px] md:text-xs font-bold uppercase tracking-[0.12em] md:tracking-widest whitespace-nowrap">
               <Award size={14} className="shrink-0" />
-              <span className="md:hidden">멤버십 {banner.label}</span>
-              <span className="hidden md:inline">Membership Tier: {banner.label}</span>
+              <span>멤버십 {banner.label}</span>
             </div>
             <button
               onClick={handleLogout}
@@ -266,9 +265,16 @@ export default function Profile() {
           <p className={cn("text-[11px] md:text-xs whitespace-nowrap", banner.muted)}>
             최근 6개월 구매실적 {formatPrice(spent)}
           </p>
-          <div className="pt-2 space-y-1.5">
+          <div className="pt-2 space-y-1.5 w-full min-w-[180px]">
             <p className={cn("text-[11px] whitespace-nowrap", banner.muted)}>{progressLabel}</p>
-            <div className={cn("h-1 rounded-full overflow-hidden", banner.track)}>
+            <div
+              className={cn("mt-1 h-2 w-full rounded-full overflow-hidden", banner.track)}
+              role="progressbar"
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuenow={Math.round(progress * 100)}
+              aria-label="다음 등급까지 진행"
+            >
               <div
                 className="h-full rounded-full bg-venuea-gold"
                 style={{ width: `${Math.round(progress * 100)}%` }}

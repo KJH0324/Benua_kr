@@ -19,10 +19,19 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const PORT = Number(process.env.PORT) || 3000;
+const isProduction = process.env.NODE_ENV === "production";
+if (
+  isProduction &&
+  (!process.env.JWT_SECRET || !process.env.ADMIN_PASSWORD || !process.env.TOSS_SECRET_KEY)
+) {
+  console.error(
+    "[BOOT] JWT_SECRET, ADMIN_PASSWORD, TOSS_SECRET_KEY 가 없으면 운영 서버를 시작하지 않습니다."
+  );
+  process.exit(1);
+}
 const JWT_SECRET = process.env.JWT_SECRET || "benua-secret-key-2024";
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "benua-admin-123";
 const TOSS_SECRET_KEY = process.env.TOSS_SECRET_KEY || "test_sk_zXLkKEypNArWmo50nX3lmeaxYG5R";
-const isProduction = process.env.NODE_ENV === "production";
 
 // ==========================================
 // 1. Email Transporter & Helper
@@ -424,6 +433,7 @@ const runMigrations = () => {
   ensureColumn("orders", "refund_reason", "TEXT");
   ensureColumn("orders", "status_updated_at", "DATETIME DEFAULT '2024-01-01 00:00:00'");
   ensureColumn("orders", "confirmed_at", "DATETIME");
+  ensureColumn("orders", "toss_secret", "TEXT");
 
   ensureColumn("reviews", "is_best", "INTEGER DEFAULT 0");
   ensureColumn("reviews", "is_hidden", "INTEGER DEFAULT 0");
@@ -442,6 +452,9 @@ const runMigrations = () => {
   ensureColumn("admin_logs", "timestamp_ms", "INTEGER");
 
   db.prepare("UPDATE users SET tier = UPPER(IFNULL(tier, 'BEIGE'))").run();
+  db.prepare(
+    "UPDATE products SET description = '' WHERE description LIKE '%난징%' OR description LIKE '%신청 가이드%'"
+  ).run();
 };
 
 runMigrations();
@@ -455,7 +468,59 @@ if (adminKeyCount.count === 0) {
 // 3. Security, Cookie, Token & Tier Helpers
 // ==========================================
 const hashPassword = (password: string): string => {
-  return crypto.createHash("sha512").update(password).digest("hex");
+  const salt = crypto.randomBytes(16).toString("hex");
+  const hash = crypto.scryptSync(password, salt, 64).toString("hex");
+  return `scrypt$${salt}$${hash}`;
+};
+
+const verifyPassword = (password: string, stored: string): boolean => {
+  if (!stored || !password) return false;
+  if (stored.startsWith("scrypt$")) {
+    const [, salt, hash] = stored.split("$");
+    if (!salt || !hash) return false;
+    const next = crypto.scryptSync(password, salt, 64).toString("hex");
+    if (next.length !== hash.length) return false;
+    return crypto.timingSafeEqual(Buffer.from(next), Buffer.from(hash));
+  }
+  const legacy = crypto.createHash("sha512").update(password).digest("hex");
+  if (legacy.length !== stored.length) return false;
+  return crypto.timingSafeEqual(Buffer.from(legacy), Buffer.from(stored));
+};
+
+const rateBuckets = new Map<string, number[]>();
+const allowRate = (key: string, limit: number, windowMs: number) => {
+  const now = Date.now();
+  const recent = (rateBuckets.get(key) || []).filter((at) => now - at < windowMs);
+  if (recent.length >= limit) return false;
+  recent.push(now);
+  rateBuckets.set(key, recent);
+  return true;
+};
+
+const clientIp = (req: express.Request) =>
+  String(req.headers["x-forwarded-for"] || req.socket.remoteAddress || "unknown")
+    .split(",")[0]
+    .trim();
+
+const OAUTH_ORIGINS = [
+  "https://benua.shop",
+  "https://www.benua.shop",
+  "https://dash.benua.shop",
+  "http://localhost:3000",
+  "http://localhost:5173",
+];
+
+const rememberOauthOrigin = (req: express.Request, res: express.Response) => {
+  const origin = String(req.headers.origin || "");
+  let next = isProduction ? "https://benua.shop" : "http://localhost:3000";
+  if (OAUTH_ORIGINS.includes(origin)) next = origin;
+  res.cookie("oauth_origin", next, { ...getCookieOptions(), maxAge: 10 * 60 * 1000, httpOnly: true });
+};
+
+const oauthMessageOrigin = (req: express.Request) => {
+  const cookie = req.cookies?.oauth_origin;
+  if (cookie && OAUTH_ORIGINS.includes(cookie)) return cookie;
+  return isProduction ? "https://benua.shop" : "http://localhost:3000";
 };
 
 const getCookieOptions = () => ({
@@ -824,6 +889,19 @@ const runAutoCompletion = () => {
     for (const order of deliveredOrders) {
       completeOrderTx(order.id);
     }
+
+    db.prepare(
+      `DELETE FROM order_items WHERE order_id IN (
+         SELECT id FROM orders
+         WHERE status = 'pending' AND payment_key IS NULL
+           AND created_at < datetime('now', '-2 hours')
+       )`
+    ).run();
+    db.prepare(
+      `DELETE FROM orders
+       WHERE status = 'pending' AND payment_key IS NULL
+         AND created_at < datetime('now', '-2 hours')`
+    ).run();
   } catch (err) {
     console.error("[AUTO] Error during auto-completion:", err);
   }
@@ -856,7 +934,7 @@ const isSupportInboxMail = (email: any) => {
 
 const verifyResendWebhook = (rawBody: string, headers: Record<string, unknown>) => {
   const secret = process.env.RESEND_WEBHOOK_SECRET;
-  if (!secret) return true;
+  if (!secret) return false;
   const id = String(headers["svix-id"] || "");
   const timestamp = String(headers["svix-timestamp"] || "");
   const signature = String(headers["svix-signature"] || "");
@@ -1104,13 +1182,15 @@ async function startServer() {
       return res.status(400).json({ error: "유효한 이메일 주소를 입력해주세요." });
     }
 
-    const cleanEmail = email.trim();
+    const cleanEmail = String(email || "").trim();
+    const ip = clientIp(req);
+    if (!allowRate(`code:${ip}:${cleanEmail.toLowerCase()}`, 3, 60 * 60 * 1000)) {
+      return res.status(429).json({ error: "인증 메일 요청이 너무 많습니다. 잠시 후 다시 시도해주세요." });
+    }
     try {
-      const existingUser = db
-        .prepare("SELECT id FROM users WHERE email = ?")
-        .get(cleanEmail);
+      const existingUser = db.prepare("SELECT id FROM users WHERE email = ?").get(cleanEmail);
       if (existingUser) {
-        return res.status(400).json({ error: "이미 가입된 이메일입니다." });
+        return res.json({ success: true, message: "인증 메일을 보낼 수 있으면 발송했습니다." });
       }
 
       const code = String(Math.floor(100000 + Math.random() * 900000));
@@ -1138,7 +1218,7 @@ async function startServer() {
         "SYSTEM"
       );
 
-      res.json({ success: true, message: "인증번호가 이메일로 발송되었습니다." });
+      res.json({ success: true, message: "인증 메일을 보낼 수 있으면 발송했습니다." });
     } catch (err) {
       console.error("Send verification code error:", err);
       res.status(500).json({ error: "인증번호 발송 중 오류가 발생했습니다." });
@@ -1247,7 +1327,7 @@ async function startServer() {
       res.json({ success: true, token, message: "회원가입이 완료되었습니다." });
     } catch (err: any) {
       if (err.code === "SQLITE_CONSTRAINT_UNIQUE") {
-        return res.status(400).json({ error: "이미 가입된 이메일입니다." });
+        return res.status(400).json({ error: "가입을 완료할 수 없습니다. 입력 정보를 확인해주세요." });
       }
       res.status(500).json({ error: "회원가입 처리 중 오류가 발생했습니다." });
     }
@@ -1255,10 +1335,17 @@ async function startServer() {
 
   app.post("/api/auth/login", (req, res) => {
     const { email, password } = req.body;
+    const cleanEmail = String(email || "").trim();
+    if (!allowRate(`login:${clientIp(req)}:${cleanEmail.toLowerCase()}`, 8, 15 * 60 * 1000)) {
+      return res.status(429).json({ error: "로그인 시도가 너무 많습니다. 잠시 후 다시 시도해주세요." });
+    }
     try {
-      const user = db.prepare("SELECT * FROM users WHERE email = ?").get(email?.trim()) as any;
-      if (!user || user.password !== hashPassword(password || "")) {
+      const user = db.prepare("SELECT * FROM users WHERE email = ?").get(cleanEmail) as any;
+      if (!user || !verifyPassword(password || "", user.password)) {
         return res.status(401).json({ error: "이메일 또는 비밀번호가 올바르지 않습니다." });
+      }
+      if (!String(user.password).startsWith("scrypt$")) {
+        db.prepare("UPDATE users SET password = ? WHERE id = ?").run(hashPassword(password), user.id);
       }
 
       const token = jwt.sign({ id: user.id, role: "user" }, JWT_SECRET, { expiresIn: "24h" });
@@ -1346,8 +1433,12 @@ async function startServer() {
 
   app.post("/api/auth/forgot-password", async (req, res) => {
     const { email } = req.body;
+    const cleanEmail = String(email || "").trim();
+    if (!allowRate(`reset:${clientIp(req)}:${cleanEmail.toLowerCase()}`, 3, 60 * 60 * 1000)) {
+      return res.status(429).json({ error: "재설정 요청이 너무 많습니다. 잠시 후 다시 시도해주세요." });
+    }
     try {
-      const user = db.prepare("SELECT * FROM users WHERE email = ?").get(email) as any;
+      const user = db.prepare("SELECT * FROM users WHERE email = ?").get(cleanEmail) as any;
       if (!user) return res.json({ success: true });
 
       const token = crypto.randomBytes(20).toString("hex");
@@ -1355,12 +1446,12 @@ async function startServer() {
       db.prepare("UPDATE users SET reset_token = ?, reset_expires = ? WHERE email = ?").run(
         token,
         expires,
-        email
+        cleanEmail
       );
 
       const resetLink = `https://${req.get("host")}/reset-password?token=${token}`;
       await sendMail(
-        email,
+        cleanEmail,
         "비밀번호 재설정 안내",
         `
         <h2 style="font-size: 18px; margin-bottom: 20px;">비밀번호 재설정</h2>
@@ -1448,6 +1539,7 @@ async function startServer() {
     `https://benua.shop/api/auth/${provider}/callback`;
 
   app.get("/api/auth/google/url", (req, res) => {
+    rememberOauthOrigin(req, res);
     const clientId = process.env.GOOGLE_CLIENT_ID;
     if (!clientId) return res.status(500).json({ error: "Google Client ID가 설정되지 않았습니다." });
 
@@ -1493,7 +1585,7 @@ async function startServer() {
           const decoded = jwt.verify(existingToken, JWT_SECRET) as any;
           db.prepare("UPDATE users SET google_id = ? WHERE id = ?").run(userData.id, decoded.id);
           return res.send(
-            `<html><body><script>if(window.opener){window.opener.postMessage({type:'OAUTH_LINK_SUCCESS',provider:'google'},'*');window.close();}</script></body></html>`
+            `<html><body><script>if(window.opener){window.opener.postMessage({type:'OAUTH_LINK_SUCCESS',provider:'google'}, '${oauthMessageOrigin(req)}');window.close();}</script></body></html>`
           );
         } catch {}
       }
@@ -1510,7 +1602,7 @@ async function startServer() {
         return res.send(`
           <html><body><script>
             if (window.opener) {
-              window.opener.postMessage({ type: 'OAUTH_ERROR', error: 'not_registered', email: '${userData.email}', socialId: '${userData.id}', provider: 'google' }, '*');
+              window.opener.postMessage({ type: 'OAUTH_ERROR', error: 'not_registered', email: '${userData.email}', socialId: '${userData.id}', provider: 'google' }, '${oauthMessageOrigin(req)}');
               window.close();
             } else {
               window.location.href = '/login?error=not_registered&email=${encodeURIComponent(userData.email)}&socialId=${encodeURIComponent(userData.id)}&provider=google';
@@ -1525,7 +1617,7 @@ async function startServer() {
       res.send(`
         <html><body><script>
           if (window.opener) {
-            window.opener.postMessage({ type: 'OAUTH_SUCCESS', token: '${jwtToken}' }, '*');
+            window.opener.postMessage({ type: 'OAUTH_SUCCESS', token: '${jwtToken}' }, '${oauthMessageOrigin(req)}');
             window.close();
           } else {
             localStorage.setItem('benua_user_token', '${jwtToken}');
@@ -1536,12 +1628,13 @@ async function startServer() {
     } catch (error) {
       console.error("Google OAuth Error:", error);
       res.send(
-        `<html><body><script>if(window.opener){window.opener.postMessage({type:'OAUTH_ERROR',error:'server_error'},'*');window.close();}else{window.location.href='/login?error=server_error';}</script></body></html>`
+        `<html><body><script>if(window.opener){window.opener.postMessage({type:'OAUTH_ERROR',error:'server_error'}, '${oauthMessageOrigin(req)}');window.close();}else{window.location.href='/login?error=server_error';}</script></body></html>`
       );
     }
   });
 
   app.get("/api/auth/naver/url", (req, res) => {
+    rememberOauthOrigin(req, res);
     const clientId = process.env.NAVER_CLIENT_ID;
     if (!clientId) return res.status(500).json({ error: "Naver Client ID가 설정되지 않았습니다." });
 
@@ -1581,7 +1674,7 @@ async function startServer() {
           const decoded = jwt.verify(existingToken, JWT_SECRET) as any;
           db.prepare("UPDATE users SET naver_id = ? WHERE id = ?").run(socialId, decoded.id);
           return res.send(
-            `<html><body><script>if(window.opener){window.opener.postMessage({type:'OAUTH_LINK_SUCCESS',provider:'naver'},'*');window.close();}</script></body></html>`
+            `<html><body><script>if(window.opener){window.opener.postMessage({type:'OAUTH_LINK_SUCCESS',provider:'naver'}, '${oauthMessageOrigin(req)}');window.close();}</script></body></html>`
           );
         } catch {}
       }
@@ -1598,7 +1691,7 @@ async function startServer() {
         return res.send(`
           <html><body><script>
             if (window.opener) {
-              window.opener.postMessage({ type: 'OAUTH_ERROR', error: 'not_registered', email: '${email}', socialId: '${socialId}', provider: 'naver' }, '*');
+              window.opener.postMessage({ type: 'OAUTH_ERROR', error: 'not_registered', email: '${email}', socialId: '${socialId}', provider: 'naver' }, '${oauthMessageOrigin(req)}');
               window.close();
             } else {
               window.location.href = '/login?error=not_registered&email=${encodeURIComponent(email)}&socialId=${encodeURIComponent(socialId)}&provider=naver';
@@ -1613,7 +1706,7 @@ async function startServer() {
       res.send(`
         <html><body><script>
           if (window.opener) {
-            window.opener.postMessage({ type: 'OAUTH_SUCCESS', token: '${jwtToken}' }, '*');
+            window.opener.postMessage({ type: 'OAUTH_SUCCESS', token: '${jwtToken}' }, '${oauthMessageOrigin(req)}');
             window.close();
           } else {
             localStorage.setItem('benua_user_token', '${jwtToken}');
@@ -1624,12 +1717,13 @@ async function startServer() {
     } catch (error) {
       console.error("Naver OAuth Error:", error);
       res.send(
-        `<html><body><script>if(window.opener){window.opener.postMessage({type:'OAUTH_ERROR',error:'server_error'},'*');window.close();}else{window.location.href='/login?error=server_error';}</script></body></html>`
+        `<html><body><script>if(window.opener){window.opener.postMessage({type:'OAUTH_ERROR',error:'server_error'}, '${oauthMessageOrigin(req)}');window.close();}else{window.location.href='/login?error=server_error';}</script></body></html>`
       );
     }
   });
 
   app.get("/api/auth/kakao/url", (req, res) => {
+    rememberOauthOrigin(req, res);
     const clientId = process.env.KAKAO_CLIENT_ID;
     if (!clientId) return res.status(500).json({ error: "Kakao Client ID가 설정되지 않았습니다." });
 
@@ -1679,7 +1773,7 @@ async function startServer() {
           const decoded = jwt.verify(existingToken, JWT_SECRET) as any;
           db.prepare("UPDATE users SET kakao_id = ? WHERE id = ?").run(socialId, decoded.id);
           return res.send(
-            `<html><body><script>if(window.opener){window.opener.postMessage({type:'OAUTH_LINK_SUCCESS',provider:'kakao'},'*');window.close();}</script></body></html>`
+            `<html><body><script>if(window.opener){window.opener.postMessage({type:'OAUTH_LINK_SUCCESS',provider:'kakao'}, '${oauthMessageOrigin(req)}');window.close();}</script></body></html>`
           );
         } catch {}
       }
@@ -1696,7 +1790,7 @@ async function startServer() {
         return res.send(`
           <html><body><script>
             if (window.opener) {
-              window.opener.postMessage({ type: 'OAUTH_ERROR', error: 'not_registered', email: '${email}', socialId: '${socialId}', provider: 'kakao' }, '*');
+              window.opener.postMessage({ type: 'OAUTH_ERROR', error: 'not_registered', email: '${email}', socialId: '${socialId}', provider: 'kakao' }, '${oauthMessageOrigin(req)}');
               window.close();
             } else {
               window.location.href = '/login?error=not_registered&email=${encodeURIComponent(email)}&socialId=${encodeURIComponent(socialId)}&provider=kakao';
@@ -1711,7 +1805,7 @@ async function startServer() {
       res.send(`
         <html><body><script>
           if (window.opener) {
-            window.opener.postMessage({ type: 'OAUTH_SUCCESS', token: '${jwtToken}' }, '*');
+            window.opener.postMessage({ type: 'OAUTH_SUCCESS', token: '${jwtToken}' }, '${oauthMessageOrigin(req)}');
             window.close();
           } else {
             localStorage.setItem('benua_user_token', '${jwtToken}');
@@ -1722,7 +1816,7 @@ async function startServer() {
     } catch (error) {
       console.error("Kakao OAuth Error:", error);
       res.send(
-        `<html><body><script>if(window.opener){window.opener.postMessage({type:'OAUTH_ERROR',error:'server_error'},'*');window.close();}else{window.location.href='/login?error=server_error';}</script></body></html>`
+        `<html><body><script>if(window.opener){window.opener.postMessage({type:'OAUTH_ERROR',error:'server_error'}, '${oauthMessageOrigin(req)}');window.close();}else{window.location.href='/login?error=server_error';}</script></body></html>`
       );
     }
   });
@@ -2156,7 +2250,9 @@ async function startServer() {
   app.get("/api/coupons/me", authenticateUser, getUserCouponsHandler);
   app.get("/api/user/coupons", authenticateUser, getUserCouponsHandler);
 
-  app.get("/api/coupons/notifications", authenticateUser, (req: any, res) => {
+  app.get("/api/coupons/notifications", (req, res) => {
+    const viewer = readOptionalUser(req);
+    if (!viewer?.id) return res.json([]);
     try {
       const newCoupons = db
         .prepare(
@@ -2165,7 +2261,7 @@ async function startServer() {
            JOIN coupons c ON uc.coupon_id = c.id
            WHERE uc.user_id = ? AND uc.notified = 0 AND uc.is_used = 0`
         )
-        .all(req.user.id);
+        .all(viewer.id);
       res.json(newCoupons);
     } catch {
       res.status(500).json({ error: "쿠폰 알림 조회 실패" });
@@ -2269,24 +2365,116 @@ async function startServer() {
   // 11. Orders & Toss Payments APIs
   // ==========================================
 
+  const unitPrice = (product: any) => {
+    const rate = Number(product.discount_rate) || 0;
+    const base = Number(product.price) || 0;
+    if (rate > 0 && rate < 100) return Math.round(base * (1 - rate / 100));
+    return base;
+  };
+
+  const quoteOrder = (
+    user: any | null,
+    rawItems: any[],
+    requestedPoints: number,
+    couponId: number | null
+  ) => {
+    if (!Array.isArray(rawItems) || rawItems.length === 0) {
+      throw new Error("주문할 상품이 없습니다.");
+    }
+    const priced: any[] = [];
+    let goods = 0;
+    for (const raw of rawItems) {
+      const productId = Number(raw.id || raw.product_id);
+      const qty = Math.floor(Number(raw.quantity));
+      if (!productId || qty < 1) throw new Error("주문 상품 정보가 올바르지 않습니다.");
+      const product = db.prepare("SELECT * FROM products WHERE id = ?").get(productId) as any;
+      if (!product) throw new Error("존재하지 않는 상품입니다.");
+      if (Number(product.stock) < qty) {
+        throw new Error(`'${product.name}' 상품의 재고가 부족합니다. (남은 재고: ${product.stock}개)`);
+      }
+      const price = unitPrice(product);
+      goods += price * qty;
+      priced.push({
+        product_id: product.id,
+        name: product.name,
+        price,
+        quantity: qty,
+        image_url: product.image_url,
+      });
+    }
+
+    let couponDiscount = 0;
+    let shippingCoupon = false;
+    let appliedCouponId: number | null = null;
+    if (couponId) {
+      if (!user) throw new Error("쿠폰은 로그인 후 사용할 수 있습니다.");
+      const coupon = db
+        .prepare(
+          `SELECT uc.id as user_coupon_id, c.type, c.value, c.min_order_amount, c.max_discount_amount, uc.expires_at
+           FROM user_coupons uc JOIN coupons c ON c.id = uc.coupon_id
+           WHERE uc.id = ? AND uc.user_id = ? AND uc.is_used = 0`
+        )
+        .get(couponId, user.id) as any;
+      if (!coupon) throw new Error("사용할 수 없는 쿠폰입니다.");
+      if (coupon.expires_at && new Date(coupon.expires_at).getTime() < Date.now()) {
+        throw new Error("만료된 쿠폰입니다.");
+      }
+      if (goods < (Number(coupon.min_order_amount) || 0)) {
+        throw new Error("쿠폰 최소 주문 금액을 충족하지 않습니다.");
+      }
+      if (coupon.type === "FIXED") couponDiscount = Number(coupon.value) || 0;
+      else if (coupon.type === "PERCENT") {
+        couponDiscount = Math.floor(goods * ((Number(coupon.value) || 0) / 100));
+        const cap = Number(coupon.max_discount_amount) || 0;
+        if (cap > 0 && couponDiscount > cap) couponDiscount = cap;
+      } else if (coupon.type === "SHIPPING") shippingCoupon = true;
+      couponDiscount = Math.min(goods, Math.max(0, couponDiscount));
+      appliedCouponId = coupon.user_coupon_id;
+    }
+
+    const tier = String(user?.tier || "").toUpperCase();
+    const freeTier = tier === "BLACK" || tier === "THE_BLACK";
+    const shippingFee = freeTier || shippingCoupon || goods >= 50000 || goods === 0 ? 0 : 3000;
+    const payable = Math.max(0, goods - couponDiscount + shippingFee);
+    let points = Math.floor(Number(requestedPoints) || 0);
+    if (points < 0) points = 0;
+    if (points > 0) {
+      if (!user) throw new Error("포인트는 로그인 후 사용할 수 있습니다.");
+      points = Math.min(points, Number(user.points) || 0, payable);
+      if (points > 0 && points < 1000 && payable >= 1000) {
+        throw new Error("포인트는 최소 1,000P 이상부터 사용 가능합니다.");
+      }
+    }
+    return {
+      items: priced,
+      shippingFee,
+      points,
+      total: Math.max(0, payable - points),
+      couponId: appliedCouponId,
+    };
+  };
+
   // Step 1: Prepare Order before launching Toss Payment Widget
   app.post("/api/orders/prepare", (req, res) => {
     const {
-      user_id,
       customer_name,
       customer_email,
       customer_phone,
       shipping_address,
-      total_amount,
-      shipping_fee,
       items,
       used_points,
       used_coupon_id,
       payment_method,
     } = req.body;
 
+    if (!allowRate(`prepare:${clientIp(req)}`, 30, 10 * 60 * 1000)) {
+      return res.status(429).json({ error: "주문 요청이 너무 많습니다. 잠시 후 다시 시도해주세요." });
+    }
     if (!Array.isArray(items) || items.length === 0) {
       return res.status(400).json({ error: "주문할 상품이 없습니다." });
+    }
+    if (!String(customer_name || "").trim() || !String(customer_phone || "").trim() || !String(shipping_address || "").trim()) {
+      return res.status(400).json({ error: "수령인, 연락처, 주소를 입력해주세요." });
     }
 
     const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
@@ -2295,39 +2483,18 @@ async function startServer() {
       order_number += chars.charAt(Math.floor(Math.random() * chars.length));
     }
 
-    const p_used_points = Number(used_points) || 0;
-    const p_used_coupon_id = used_coupon_id ? Number(used_coupon_id) : null;
-    const p_shipping_fee = Number(shipping_fee) || 0;
-    const p_total_amount = Math.max(0, Number(total_amount) || 0);
-
+    const viewer = readOptionalUser(req);
+    const account = viewer?.id
+      ? (db.prepare("SELECT * FROM users WHERE id = ?").get(viewer.id) as any)
+      : null;
     try {
+      const quote = quoteOrder(
+        account,
+        items,
+        Number(used_points) || 0,
+        used_coupon_id ? Number(used_coupon_id) : null
+      );
       const orderId = db.transaction(() => {
-        // Verify stock before creating pending order
-        for (const item of items) {
-          const prodId = item.id || item.product_id;
-          const prod = db.prepare("SELECT name, stock FROM products WHERE id = ?").get(prodId) as any;
-          if (!prod) throw new Error(`존재하지 않는 상품입니다: ${item.name}`);
-          if (prod.stock < item.quantity) {
-            throw new Error(`'${prod.name}' 상품의 재고가 부족합니다. (남은 재고: ${prod.stock}개)`);
-          }
-        }
-
-        // Verify points if used
-        if (user_id && p_used_points > 0) {
-          const userRow = db.prepare("SELECT points FROM users WHERE id = ?").get(user_id) as any;
-          if (!userRow) throw new Error("회원 정보를 찾을 수 없습니다.");
-          const goods = (items as any[]).reduce(
-            (sum, item) => sum + Number(item.price || 0) * Number(item.quantity || 0),
-            0
-          );
-          const payable = Math.max(0, goods + p_shipping_fee);
-          if (p_used_points > userRow.points) throw new Error("보유 포인트가 부족합니다.");
-          if (p_used_points > payable) throw new Error("주문 금액을 초과해 포인트를 사용할 수 없습니다.");
-          if (p_used_points < 1000 && payable >= 1000) {
-            throw new Error("포인트는 최소 1,000P 이상부터 사용 가능합니다.");
-          }
-        }
-
         const info = db
           .prepare(
             `INSERT INTO orders
@@ -2337,15 +2504,15 @@ async function startServer() {
           )
           .run(
             order_number,
-            user_id || null,
+            account?.id || null,
             customer_name,
             customer_email,
             customer_phone,
             shipping_address,
-            p_total_amount,
-            p_shipping_fee,
-            p_used_points,
-            p_used_coupon_id,
+            quote.total,
+            quote.shippingFee,
+            quote.points,
+            quote.couponId,
             payment_method || "card"
           );
 
@@ -2353,24 +2520,20 @@ async function startServer() {
         const insertItem = db.prepare(
           "INSERT INTO order_items (order_id, product_id, name, price, quantity, image_url) VALUES (?, ?, ?, ?, ?, ?)"
         );
-
-        for (const item of items) {
-          insertItem.run(
-            newOrderId,
-            item.id || item.product_id,
-            item.name,
-            item.price,
-            item.quantity,
-            item.image || item.image_url
-          );
+        for (const item of quote.items) {
+          insertItem.run(newOrderId, item.product_id, item.name, item.price, item.quantity, item.image_url);
         }
-
         return newOrderId;
       })();
 
-      // If total_amount is 0 won (fully paid by points/coupons), complete immediately without PG
-      if (p_total_amount === 0) {
-        finalizeOrderPaymentTx(orderId, `FREE_${order_number}`, payment_method || "card", "paid");
+      if (quote.total === 0) {
+        try {
+          finalizeOrderPaymentTx(orderId, `FREE_${order_number}`, payment_method || "card", "paid");
+        } catch (payErr) {
+          db.prepare("DELETE FROM order_items WHERE order_id = ?").run(orderId);
+          db.prepare("DELETE FROM orders WHERE id = ? AND status = 'pending'").run(orderId);
+          throw payErr;
+        }
         return res.json({
           success: true,
           zeroAmountPaid: true,
@@ -2384,9 +2547,11 @@ async function startServer() {
         zeroAmountPaid: false,
         order_id: orderId,
         order_number,
-        amount: p_total_amount,
+        amount: quote.total,
         order_name:
-          items.length > 1 ? `${items[0].name} 외 ${items.length - 1}건` : items[0].name,
+          quote.items.length > 1
+            ? `${quote.items[0].name} 외 ${quote.items.length - 1}건`
+            : quote.items[0].name,
       });
     } catch (err: any) {
       res.status(400).json({ error: err.message || "주문서 생성에 실패했습니다." });
@@ -2455,6 +2620,10 @@ async function startServer() {
           }
         : undefined;
 
+      if (tossData.secret) {
+        db.prepare("UPDATE orders SET toss_secret = ? WHERE id = ?").run(String(tossData.secret), order.id);
+      }
+
       const updatedOrder = finalizeOrderPaymentTx(
         order.id,
         paymentKey,
@@ -2517,19 +2686,44 @@ async function startServer() {
   });
 
   // Toss Webhook for Virtual Account Deposit / Cancellation
-  app.post("/api/payments/toss/webhook", (req, res) => {
-    const { orderId, status } = req.body?.data || req.body || {};
-    if (!orderId) return res.status(200).json({ ok: true });
+  app.post("/api/payments/toss/webhook", async (req, res) => {
+    const data = req.body?.data || {};
+    const orderId = data.orderId;
+    const secret = data.secret;
+    if (!orderId) return res.status(400).json({ error: "orderId가 없습니다." });
 
     try {
       const order = db.prepare("SELECT * FROM orders WHERE order_number = ?").get(orderId) as any;
       if (!order) return res.status(200).json({ ok: true });
+      if (!order.payment_key) {
+        return res.status(401).json({ error: "웹훅을 확인할 수 없습니다." });
+      }
+      if (order.toss_secret && (!secret || secret !== order.toss_secret)) {
+        return res.status(401).json({ error: "웹훅을 확인할 수 없습니다." });
+      }
 
-      if (status === "DONE" && order.status === "pending") {
+      const basicAuth = Buffer.from(`${TOSS_SECRET_KEY}:`).toString("base64");
+      const inquiry = await fetch(
+        `https://api.tosspayments.com/v1/payments/orders/${encodeURIComponent(order.order_number)}`,
+        { headers: { Authorization: `Basic ${basicAuth}` } }
+      );
+      const payment = await inquiry.json();
+      if (!inquiry.ok) return res.status(400).json({ error: "결제 조회에 실패했습니다." });
+      if (payment.paymentKey && payment.paymentKey !== order.payment_key) {
+        return res.status(400).json({ error: "결제 키가 일치하지 않습니다." });
+      }
+      if (Number(payment.totalAmount) !== Number(order.total_amount)) {
+        return res.status(400).json({ error: "결제 금액이 일치하지 않습니다." });
+      }
+
+      if (payment.status === "DONE" && order.status === "pending") {
         db.prepare(
-          "UPDATE orders SET status = 'paid', status_updated_at = CURRENT_TIMESTAMP WHERE id = ?"
+          "UPDATE orders SET status = 'paid', status_updated_at = CURRENT_TIMESTAMP WHERE id = ? AND status = 'pending'"
         ).run(order.id);
-      } else if (status === "CANCELED" && order.status !== "refunded") {
+      } else if (
+        (payment.status === "CANCELED" || payment.status === "ABORTED" || payment.status === "EXPIRED") &&
+        order.status !== "refunded"
+      ) {
         refundOrderTx(order.id, order.total_amount, "PG 웹훅 결제 취소");
       }
       res.status(200).json({ ok: true });
@@ -2539,79 +2733,25 @@ async function startServer() {
     }
   });
 
-  // Legacy Direct Order Fallback
-  app.post("/api/orders", (req, res) => {
-    const {
-      user_id,
-      customer_name,
-      customer_email,
-      customer_phone,
-      shipping_address,
-      total_amount,
-      shipping_fee,
-      items,
-      used_points,
-      used_coupon_id,
-      payment_method,
-    } = req.body;
+  app.post("/api/orders", (_req, res) => {
+    res.status(410).json({ error: "이 주문 경로는 닫혔습니다. 결제 화면에서 주문해주세요." });
+  });
 
-    const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
-    let order_number = "";
-    for (let i = 0; i < 15; i++) {
-      order_number += chars.charAt(Math.floor(Math.random() * chars.length));
-    }
-
-    const p_used_points = Number(used_points) || 0;
-    const p_used_coupon_id = used_coupon_id ? Number(used_coupon_id) : null;
-    const p_shipping_fee = Number(shipping_fee) || 0;
-    const p_total_amount = Number(total_amount) || 0;
-
+  app.post("/api/orders/abandon", (req, res) => {
+    const { order_number } = req.body || {};
+    if (!order_number) return res.status(400).json({ error: "주문번호가 필요합니다." });
     try {
-      const orderId = db.transaction(() => {
-        const info = db
-          .prepare(
-            `INSERT INTO orders
-            (order_number, user_id, customer_name, customer_email, customer_phone, shipping_address,
-             total_amount, shipping_fee, used_points, used_coupon_id, payment_method, status)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')`
-          )
-          .run(
-            order_number,
-            user_id || null,
-            customer_name,
-            customer_email,
-            customer_phone,
-            shipping_address,
-            p_total_amount,
-            p_shipping_fee,
-            p_used_points,
-            p_used_coupon_id,
-            payment_method || "card"
-          );
-
-        const newId = Number(info.lastInsertRowid);
-        if (Array.isArray(items)) {
-          const insertItem = db.prepare(
-            "INSERT INTO order_items (order_id, product_id, name, price, quantity, image_url) VALUES (?, ?, ?, ?, ?, ?)"
-          );
-          for (const item of items) {
-            insertItem.run(
-              newId,
-              item.id || item.product_id,
-              item.name,
-              item.price,
-              item.quantity,
-              item.image || item.image_url
-            );
-          }
-        }
-        return newId;
-      })();
-
-      finalizeOrderPaymentTx(orderId, null, payment_method || "card", "paid");
-      res.json({ success: true, order_number });
-    } catch (err: any) {
-      res.status(500).json({ error: err.message || "주문 처리 실패" });
+      const viewer = readOptionalUser(req);
+      const order = db.prepare("SELECT * FROM orders WHERE order_number = ?").get(order_number) as any;
+      if (!order || order.status !== "pending" || order.payment_key) return res.json({ success: true });
+      if (order.user_id && viewer?.id !== order.user_id) {
+        return res.status(403).json({ error: "주문을 취소할 수 없습니다." });
+      }
+      db.prepare("DELETE FROM order_items WHERE order_id = ?").run(order.id);
+      db.prepare("DELETE FROM orders WHERE id = ?").run(order.id);
+      res.json({ success: true });
+    } catch {
+      res.status(500).json({ error: "주문 정리에 실패했습니다." });
     }
   });
 
@@ -2639,13 +2779,41 @@ async function startServer() {
   });
 
   app.get("/api/orders/track/:orderNumber", (req, res) => {
+    if (!allowRate(`track:${clientIp(req)}`, 20, 10 * 60 * 1000)) {
+      return res.status(429).json({ error: "조회 요청이 너무 많습니다. 잠시 후 다시 시도해주세요." });
+    }
+    const normalizePhone = (value: unknown) => {
+      let digits = String(value || "").replace(/\D/g, "");
+      if (digits.startsWith("82")) digits = `0${digits.slice(2)}`;
+      return digits;
+    };
+    const phone = normalizePhone(req.query.phone);
+    if (phone.length < 8) {
+      return res.status(400).json({ error: "주문 시 입력한 연락처를 함께 입력해주세요." });
+    }
     try {
       const order = db
         .prepare("SELECT * FROM orders WHERE order_number = ?")
         .get(req.params.orderNumber) as any;
       if (!order) return res.status(404).json({ error: "주문을 찾을 수 없습니다." });
-      order.items = db.prepare("SELECT * FROM order_items WHERE order_id = ?").all(order.id);
-      res.json(order);
+      const stored = normalizePhone(order.customer_phone);
+      if (!stored || stored !== phone) {
+        return res.status(404).json({ error: "주문을 찾을 수 없습니다." });
+      }
+      const items = db
+        .prepare("SELECT name, quantity, price FROM order_items WHERE order_id = ?")
+        .all(order.id);
+      res.json({
+        order_number: order.order_number,
+        status: order.status,
+        created_at: order.created_at,
+        customer_name: order.customer_name,
+        shipping_address: order.shipping_address,
+        total_amount: order.total_amount,
+        tracking_number: order.tracking_number,
+        shipping_company: order.shipping_company,
+        items,
+      });
     } catch {
       res.status(500).json({ error: "주문 조회에 실패했습니다." });
     }
@@ -3583,8 +3751,27 @@ async function startServer() {
   } else {
     const distPath = path.join(process.cwd(), "dist");
     app.use(express.static(distPath));
-    app.get("*", (_req, res) => {
-      res.sendFile(path.join(distPath, "index.html"));
+    const spaExact = new Set([
+      "/",
+      "/shop",
+      "/about",
+      "/contact",
+      "/terms",
+      "/privacy",
+      "/cart",
+      "/checkout",
+      "/track",
+      "/profile",
+      "/login",
+      "/verify-email",
+      "/unsubscribe",
+    ]);
+    app.get("*", (req, res) => {
+      const known =
+        spaExact.has(req.path) ||
+        req.path.startsWith("/product/") ||
+        req.path.startsWith("/admin");
+      res.status(known ? 200 : 404).sendFile(path.join(distPath, "index.html"));
     });
   }
 
