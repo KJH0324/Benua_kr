@@ -137,8 +137,10 @@ export default function Checkout() {
     user?.tier === "BLACK" || user?.tier === "THE_BLACK";
   const baseShippingFee = subtotal >= 50000 || subtotal === 0 ? 0 : 3000;
   const shippingFee = isFreeShippingTier || isShippingCoupon ? 0 : baseShippingFee;
-
-  const totalAmount = Math.max(0, subtotal + shippingFee - couponDiscount - usePoints);
+  const payableBeforePoints = Math.max(0, subtotal + shippingFee - couponDiscount);
+  const pointBalance = Number(user?.points || 0);
+  const maxUsablePoints = Math.min(pointBalance, payableBeforePoints);
+  const totalAmount = Math.max(0, payableBeforePoints - usePoints);
 
   const handlePaymentSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -150,7 +152,11 @@ export default function Checkout() {
       toast.error("주문자 정보와 배송지를 모두 입력해주세요.");
       return;
     }
-    if (usePoints > 0 && usePoints < 1000) {
+    if (usePoints > maxUsablePoints) {
+      toast.error("보유 포인트와 결제 금액 안에서만 사용할 수 있습니다.");
+      return;
+    }
+    if (usePoints > 0 && usePoints < 1000 && payableBeforePoints >= 1000) {
       toast.error("포인트는 최소 1,000P 이상부터 사용 가능합니다.");
       return;
     }
@@ -374,20 +380,39 @@ export default function Checkout() {
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-gray-500 mb-1.5">
-                  포인트 사용 (보유: {Number(user.points || 0).toLocaleString()}P / 1,000P 이상 사용 가능)
-                </label>
+                <div className="flex items-center justify-between gap-3 mb-1.5">
+                  <label className="text-xs font-bold text-gray-500 whitespace-nowrap">
+                    포인트 사용 · 보유 {pointBalance.toLocaleString()}P
+                  </label>
+                  <button
+                    type="button"
+                    disabled={maxUsablePoints <= 0}
+                    onClick={() => setUsePoints(maxUsablePoints)}
+                    className="text-[11px] font-bold text-venuea-gold whitespace-nowrap disabled:text-gray-300"
+                  >
+                    전액 사용
+                  </button>
+                </div>
                 <input
                   type="number"
                   min={0}
-                  max={user.points || 0}
+                  max={maxUsablePoints}
                   value={usePoints || ""}
                   onChange={(e) =>
-                    setUsePoints(Math.min(user.points || 0, Math.max(0, Number(e.target.value))))
+                    setUsePoints(
+                      Math.min(maxUsablePoints, Math.max(0, Math.floor(Number(e.target.value) || 0)))
+                    )
                   }
                   placeholder="0"
                   className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm"
                 />
+                <p className="mt-1.5 text-[11px] text-gray-400">
+                  {pointBalance < 1000
+                    ? "1,000P부터 사용할 수 있습니다."
+                    : payableBeforePoints < 1000
+                    ? `이 주문은 ${maxUsablePoints.toLocaleString()}P까지 사용할 수 있습니다.`
+                    : `최대 ${maxUsablePoints.toLocaleString()}P, 1,000P 이상부터 사용`}
+                </p>
               </div>
             </section>
           )}

@@ -2316,8 +2316,16 @@ async function startServer() {
         if (user_id && p_used_points > 0) {
           const userRow = db.prepare("SELECT points FROM users WHERE id = ?").get(user_id) as any;
           if (!userRow) throw new Error("회원 정보를 찾을 수 없습니다.");
-          if (p_used_points < 1000) throw new Error("포인트는 최소 1,000P 이상부터 사용 가능합니다.");
-          if (userRow.points < p_used_points) throw new Error("보유 포인트가 부족합니다.");
+          const goods = (items as any[]).reduce(
+            (sum, item) => sum + Number(item.price || 0) * Number(item.quantity || 0),
+            0
+          );
+          const payable = Math.max(0, goods + p_shipping_fee);
+          if (p_used_points > userRow.points) throw new Error("보유 포인트가 부족합니다.");
+          if (p_used_points > payable) throw new Error("주문 금액을 초과해 포인트를 사용할 수 없습니다.");
+          if (p_used_points < 1000 && payable >= 1000) {
+            throw new Error("포인트는 최소 1,000P 이상부터 사용 가능합니다.");
+          }
         }
 
         const info = db

@@ -25,6 +25,9 @@ const TIER_BANNERS: Record<
     label: string;
     text: string;
     muted: string;
+    rate: string;
+    shipping: boolean;
+    track: string;
     style: { background?: string; backgroundColor?: string; border?: string; boxShadow?: string };
     button: string;
   }
@@ -33,6 +36,9 @@ const TIER_BANNERS: Record<
     label: "베이지",
     text: "text-[#1A1A1B]",
     muted: "text-[#8a7b68]",
+    rate: "1%",
+    shipping: false,
+    track: "bg-black/10",
     style: { backgroundColor: "#faf2e7" },
     button: "border-black/15 hover:bg-black/5",
   },
@@ -40,6 +46,9 @@ const TIER_BANNERS: Record<
     label: "그린",
     text: "text-[#f7f3ea]",
     muted: "text-white/70",
+    rate: "3%",
+    shipping: false,
+    track: "bg-white/20",
     style: { backgroundColor: "#385c37" },
     button: "border-white/25 hover:bg-white/10",
   },
@@ -47,6 +56,9 @@ const TIER_BANNERS: Record<
     label: "블랙",
     text: "text-white",
     muted: "text-white/55",
+    rate: "5%",
+    shipping: true,
+    track: "bg-white/15",
     style: {
       background: "linear-gradient(155deg, #2c2c2e 0%, #0c0c0d 48%, #1a1a1c 100%)",
     },
@@ -56,6 +68,9 @@ const TIER_BANNERS: Record<
     label: "더 블랙",
     text: "text-[#f6f1e6]",
     muted: "text-[#d9cbb4]/80",
+    rate: "7%",
+    shipping: true,
+    track: "bg-white/15",
     style: {
       background:
         "linear-gradient(118deg, #141416 0%, #3a3228 16%, #090909 48%, #241f19 74%, #050505 100%)",
@@ -199,6 +214,23 @@ export default function Profile() {
   if (!user) return null;
 
   const banner = TIER_BANNERS[(user.tier || "BEIGE").toUpperCase()] || TIER_BANNERS.BEIGE;
+  const spent = Number(user.spent || 0);
+  const nextStops = [
+    { label: "그린", min: 100000 },
+    { label: "블랙", min: 500000 },
+    { label: "더 블랙", min: 1000000 },
+  ];
+  const nextTier = nextStops.find((stop) => spent < stop.min);
+  const progressFloor = nextTier
+    ? [...nextStops].reverse().find((stop) => stop.min < nextTier.min)?.min || 0
+    : 1000000;
+  const progress = nextTier
+    ? Math.min(1, Math.max(0, (spent - progressFloor) / (nextTier.min - progressFloor)))
+    : 1;
+  const progressLabel = nextTier
+    ? `${nextTier.label}까지 ${formatPrice(nextTier.min - spent)}`
+    : "최고 등급";
+  const benefitLabel = banner.shipping ? `적립 ${banner.rate} · 무료배송` : `적립 ${banner.rate}`;
 
   return (
     <div className="pt-[110px] pb-24 px-6 md:px-[60px] max-w-6xl mx-auto space-y-12">
@@ -232,8 +264,18 @@ export default function Profile() {
             {user.name}님, 환영합니다
           </h1>
           <p className={cn("text-[11px] md:text-xs whitespace-nowrap", banner.muted)}>
-            최근 6개월 구매실적 {formatPrice(user.spent || 0)}
+            최근 6개월 구매실적 {formatPrice(spent)}
           </p>
+          <div className="pt-2 space-y-1.5">
+            <p className={cn("text-[11px] whitespace-nowrap", banner.muted)}>{progressLabel}</p>
+            <div className={cn("h-1 rounded-full overflow-hidden", banner.track)}>
+              <div
+                className="h-full rounded-full bg-venuea-gold"
+                style={{ width: `${Math.round(progress * 100)}%` }}
+              />
+            </div>
+            <p className="text-[11px] font-bold text-venuea-gold whitespace-nowrap">{benefitLabel}</p>
+          </div>
         </div>
 
         <div className="flex items-center gap-6 md:gap-8 shrink-0">
