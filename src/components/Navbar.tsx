@@ -126,7 +126,7 @@ export default function Navbar() {
             <div className="grid grid-cols-2 gap-3 pt-4">
               <Link
                 to={user ? "/profile" : "/login"}
-                className="h-12 rounded-xl border border-venuea-green text-venuea-green text-sm font-bold flex items-center justify-center"
+                className="h-12 rounded-xl border border-venuea-green bg-white text-venuea-green text-sm font-bold flex items-center justify-center"
               >
                 {user ? "마이페이지" : "로그인"}
               </Link>

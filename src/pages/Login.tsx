@@ -324,7 +324,7 @@ export default function Login() {
           <button
             type="button"
             onClick={() => handleOAuth("google")}
-            className="w-full py-3 border border-gray-200 rounded-xl text-xs font-bold hover:bg-gray-50 transition-colors"
+            className="w-full py-3 border border-gray-200 bg-white rounded-xl text-xs font-bold hover:bg-gray-50 transition-colors"
           >
             Google 계정으로 계속하기
           </button>

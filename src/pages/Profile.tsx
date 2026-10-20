@@ -417,7 +417,7 @@ export default function Profile() {
           <button
             onClick={handleLogout}
             className={cn(
-              "hidden md:flex px-4 py-2 border rounded-xl text-xs font-bold items-center gap-1.5 whitespace-nowrap",
+              "hidden md:flex px-4 py-2 border rounded-xl text-xs font-bold items-center gap-1.5 whitespace-nowrap bg-white text-venuea-dark",
               banner.button
             )}
           >
@@ -574,7 +574,7 @@ export default function Profile() {
                           setRefundDetailText("");
                           setRefundError("");
                         }}
-                        className="px-3 py-1 border border-gray-300 rounded-lg text-xs text-gray-600 hover:border-venuea-dark transition-colors"
+                        className="px-3 py-1 border border-gray-300 bg-white rounded-lg text-xs text-gray-600 hover:border-venuea-dark transition-colors"
                       >
                         환불/취소
                       </button>
@@ -709,7 +709,7 @@ export default function Profile() {
               <button
                 type="button"
                 onClick={() => setRefundModalOrder(null)}
-                className="flex-1 py-3 border border-gray-200 rounded-xl text-xs font-bold text-gray-600 hover:bg-gray-50"
+                className="flex-1 py-3 border border-gray-200 bg-white rounded-xl text-xs font-bold text-gray-600 hover:bg-gray-50"
               >
                 닫기
               </button>
@@ -768,7 +768,7 @@ export default function Profile() {
             <div className="flex gap-2">
               <button
                 onClick={() => setReviewModal(null)}
-                className="flex-1 py-2.5 border rounded-xl text-xs font-bold"
+                className="flex-1 py-2.5 border bg-white rounded-xl text-xs font-bold"
               >
                 취소
               </button>

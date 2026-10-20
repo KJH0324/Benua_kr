@@ -285,7 +285,7 @@ export default function ProductDetail() {
               type="button"
               onClick={() => handleAddToCart(false)}
               disabled={stock < 1}
-              className="hidden md:flex flex-1 h-12 border border-venuea-green text-venuea-green rounded-xl text-sm font-bold items-center justify-center gap-2 disabled:opacity-40"
+              className="hidden md:flex flex-1 h-12 border border-venuea-green bg-white text-venuea-green rounded-xl text-sm font-bold items-center justify-center gap-2 disabled:opacity-40"
             >
               <ShoppingBag size={16} />
               <span>쇼핑백 담기</span>
@@ -377,7 +377,7 @@ export default function ProductDetail() {
           type="button"
           onClick={() => handleAddToCart(false)}
           disabled={stock < 1}
-          className="h-12 px-4 rounded-xl border border-venuea-green text-venuea-green text-sm font-bold disabled:opacity-40"
+          className="h-12 px-4 rounded-xl border border-venuea-green bg-white text-venuea-green text-sm font-bold disabled:opacity-40"
         >
           쇼핑백
         </button>

@@ -183,7 +183,7 @@ export default function AdminLogin() {
                     setStep("KEY");
                     setTotpCode("");
                   }}
-                  className="w-1/3 py-3.5 rounded-xl border border-gray-200 text-xs font-bold uppercase tracking-widest text-gray-600 hover:bg-gray-50"
+                  className="w-1/3 py-3.5 rounded-xl border border-gray-200 bg-white text-xs font-bold uppercase tracking-widest text-gray-600 hover:bg-gray-50"
                 >
                   이전
                 </button>

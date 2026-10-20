@@ -327,7 +327,7 @@ export default function Checkout() {
               () => toast.error("복사하지 못했습니다. 번호를 직접 적어주세요.")
             );
           }}
-          className="px-5 py-3 rounded-full border border-venuea-green text-venuea-green text-sm font-bold"
+          className="px-5 py-3 rounded-full border border-venuea-green bg-white text-venuea-green text-sm font-bold"
         >
           주문번호 복사
         </button>
@@ -347,7 +347,7 @@ export default function Checkout() {
         <div className="flex gap-3 pt-4">
           <button
             onClick={() => navigate("/track")}
-            className="flex-1 py-3.5 border border-gray-200 rounded-xl text-xs font-bold uppercase tracking-widest"
+            className="flex-1 py-3.5 border border-gray-200 bg-white rounded-xl text-xs font-bold uppercase tracking-widest"
           >
             주문 조회
           </button>
@@ -511,7 +511,7 @@ export default function Checkout() {
                     "py-3.5 px-3 rounded-xl border text-xs font-bold transition-all",
                     paymentMethod === m.id
                       ? "border-venuea-dark bg-venuea-dark text-white"
-                      : "border-gray-200 text-gray-700 hover:bg-gray-50"
+                      : "border-gray-200 bg-white text-gray-700 hover:bg-gray-50"
                   )}
                 >
                   {m.label}
