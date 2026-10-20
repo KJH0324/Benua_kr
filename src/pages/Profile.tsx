@@ -19,6 +19,53 @@ const REFUND_REASONS = [
   "기타 사유",
 ];
 
+const TIER_BANNERS: Record<
+  string,
+  {
+    label: string;
+    text: string;
+    muted: string;
+    style: { background?: string; backgroundColor?: string; border?: string; boxShadow?: string };
+    button: string;
+  }
+> = {
+  BEIGE: {
+    label: "베이지",
+    text: "text-[#1A1A1B]",
+    muted: "text-[#8a7b68]",
+    style: { backgroundColor: "#faf2e7" },
+    button: "border-black/15 hover:bg-black/5",
+  },
+  GREEN: {
+    label: "그린",
+    text: "text-[#f7f3ea]",
+    muted: "text-white/70",
+    style: { backgroundColor: "#385c37" },
+    button: "border-white/25 hover:bg-white/10",
+  },
+  BLACK: {
+    label: "블랙",
+    text: "text-white",
+    muted: "text-white/55",
+    style: {
+      background: "linear-gradient(155deg, #2c2c2e 0%, #0c0c0d 48%, #1a1a1c 100%)",
+    },
+    button: "border-white/20 hover:bg-white/10",
+  },
+  THE_BLACK: {
+    label: "더 블랙",
+    text: "text-[#f6f1e6]",
+    muted: "text-[#d9cbb4]/80",
+    style: {
+      background:
+        "linear-gradient(118deg, #141416 0%, #3a3228 16%, #090909 48%, #241f19 74%, #050505 100%)",
+      border: "1px solid rgba(197, 160, 89, 0.55)",
+      boxShadow: "inset 0 1px 0 rgba(232, 210, 160, 0.45)",
+    },
+    button: "border-[#C5A059]/40 hover:bg-white/10",
+  },
+};
+
 export default function Profile() {
   const navigate = useNavigate();
   const [user, setUser] = useState<UserProfile | null>(null);
@@ -151,35 +198,46 @@ export default function Profile() {
 
   if (!user) return null;
 
+  const banner = TIER_BANNERS[(user.tier || "BEIGE").toUpperCase()] || TIER_BANNERS.BEIGE;
+
   return (
     <div className="pt-[110px] pb-24 px-6 md:px-[60px] max-w-6xl mx-auto space-y-12">
       {/* Tier & Points Banner */}
-      <div className="bg-[#1A1A1B] text-white p-8 rounded-2xl flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
+      <div
+        style={banner.style}
+        className={cn(
+          "p-8 rounded-2xl flex flex-col md:flex-row justify-between items-start md:items-center gap-6",
+          banner.text
+        )}
+      >
         <div className="space-y-1">
           <div className="flex items-center gap-2 text-venuea-gold text-xs font-bold uppercase tracking-widest">
             <Award size={16} />
-            <span>Membership Tier: {user.tier}</span>
+            <span>Membership Tier: {banner.label}</span>
           </div>
           <h1 className="text-2xl font-serif font-bold">{user.name}님, 환영합니다</h1>
-          <p className="text-xs text-gray-400">
+          <p className={cn("text-xs", banner.muted)}>
             최근 6개월 구매실적: {formatPrice(user.spent || 0)}
           </p>
         </div>
 
         <div className="flex items-center gap-8">
           <div>
-            <span className="text-[11px] text-gray-400 block">보유 포인트</span>
+            <span className={cn("text-[11px] block", banner.muted)}>보유 포인트</span>
             <span className="text-xl font-bold text-venuea-gold">
               {Number(user.points || 0).toLocaleString()} P
             </span>
           </div>
           <div>
-            <span className="text-[11px] text-gray-400 block">사용 가능 쿠폰</span>
+            <span className={cn("text-[11px] block", banner.muted)}>사용 가능 쿠폰</span>
             <span className="text-xl font-bold">{coupons.length}장</span>
           </div>
           <button
             onClick={handleLogout}
-            className="px-4 py-2 border border-white/20 rounded-xl text-xs font-bold flex items-center gap-1.5 hover:bg-white/10"
+            className={cn(
+              "px-4 py-2 border rounded-xl text-xs font-bold flex items-center gap-1.5",
+              banner.button
+            )}
           >
             <LogOut size={14} />
             <span>로그아웃</span>
