@@ -365,7 +365,7 @@ export default function Profile() {
           <div className="flex items-center justify-between gap-3">
             <div className={cn("flex items-center gap-1.5 text-[11px] md:text-xs font-bold whitespace-nowrap", banner.accent)}>
               <Award size={14} className="shrink-0" />
-              <span>멤버십 {banner.label}</span>
+              <span>MEMBERSHIP: {banner.label}</span>
             </div>
             <button
               onClick={handleLogout}
