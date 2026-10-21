@@ -3044,6 +3044,49 @@ async function startServer() {
     }
   });
 
+  app.post("/api/admin/orders/:id/delete", authenticateOperator, async (req: any, res) => {
+    if (String(req.body?.confirm || "") !== "삭제") {
+      return res.status(400).json({ error: "삭제하려면 삭제 라고 입력해주세요." });
+    }
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id)) return res.status(400).json({ error: "주문을 찾을 수 없습니다." });
+    try {
+      const order = db.prepare("SELECT * FROM orders WHERE id = ?").get(id) as any;
+      if (!order) return res.status(404).json({ error: "주문을 찾을 수 없습니다." });
+
+      if (order.status !== "pending" && order.status !== "refunded") {
+        await cancelTossPaymentIfNeeded(order, "관리자 주문 삭제");
+        refundOrderTx(id, order.total_amount, "관리자 주문 삭제");
+      }
+
+      db.transaction(() => {
+        const reviews = db
+          .prepare("SELECT user_id, points_earned FROM reviews WHERE order_id = ?")
+          .all(id) as any[];
+        for (const review of reviews) {
+          const points = Number(review.points_earned) || 0;
+          if (review.user_id && points > 0) {
+            db.prepare("UPDATE users SET points = MAX(0, points - ?) WHERE id = ?").run(
+              points,
+              review.user_id
+            );
+            db.prepare(
+              "INSERT INTO point_history (user_id, amount, reason, type) VALUES (?, ?, ?, 'USED')"
+            ).run(review.user_id, -points, `주문(${order.order_number}) 삭제로 리뷰 포인트 회수`);
+          }
+        }
+        db.prepare("DELETE FROM reviews WHERE order_id = ?").run(id);
+        db.prepare("DELETE FROM order_items WHERE order_id = ?").run(id);
+        db.prepare("DELETE FROM orders WHERE id = ?").run(id);
+      })();
+
+      logAdminAction(req, "DELETE_ORDER", "orders", id, `Deleted ${order.order_number}`);
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || "주문 삭제에 실패했습니다." });
+    }
+  });
+
   app.delete("/api/admin/orders/test", authenticateAdmin, (req: any, res) => {
     try {
       db.transaction(() => {

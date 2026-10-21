@@ -880,6 +880,10 @@ function AdminOrders() {
     company: "CJ대한통운",
     number: "",
   });
+  const [deleteTarget, setDeleteTarget] = useState<Order | null>(null);
+  const [deleteConfirm, setDeleteConfirm] = useState("");
+  const [deleteError, setDeleteError] = useState("");
+  const [isDeleting, setIsDeleting] = useState(false);
 
   const fetchOrders = async () => {
     setIsLoading(true);
@@ -970,6 +974,42 @@ function AdminOrders() {
       }
     } catch {
       toast.error("클레임 처리 중 오류가 발생했습니다.");
+    }
+  };
+
+  const openDelete = (order: Order) => {
+    setDeleteTarget(order);
+    setDeleteConfirm("");
+    setDeleteError("");
+  };
+
+  const handleDeleteOrder = async () => {
+    if (!deleteTarget) return;
+    if (deleteConfirm !== "삭제") {
+      setDeleteError("삭제하려면 삭제 라고 입력해주세요.");
+      return;
+    }
+    setIsDeleting(true);
+    setDeleteError("");
+    try {
+      const res = await apiFetch(`/api/admin/orders/${deleteTarget.id}/delete`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ confirm: deleteConfirm }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setDeleteError(data.error || "주문 삭제에 실패했습니다.");
+        return;
+      }
+      toast.success("주문을 삭제했습니다.");
+      if (selectedOrder?.id === deleteTarget.id) setSelectedOrder(null);
+      setDeleteTarget(null);
+      fetchOrders();
+    } catch {
+      setDeleteError("주문 삭제 중 오류가 발생했습니다.");
+    } finally {
+      setIsDeleting(false);
     }
   };
 
@@ -1109,6 +1149,12 @@ function AdminOrders() {
                       >
                         상세/운송장
                       </button>
+                      <button
+                        onClick={() => openDelete(order)}
+                        className="px-3 py-1.5 bg-white border border-red-200 text-red-600 rounded-lg text-xs font-bold hover:bg-red-50"
+                      >
+                        삭제
+                      </button>
                     </td>
                   </tr>
                 ))
@@ -1216,6 +1262,46 @@ function AdminOrders() {
           </div>
         )}
       </AnimatePresence>
+
+      {deleteTarget && (
+        <div className="fixed inset-0 bg-black/50 z-[110] flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl w-full max-w-md p-6 space-y-4 shadow-2xl">
+            <h3 className="text-lg font-bold">주문을 삭제할까요?</h3>
+            <p className="text-sm text-gray-600 leading-relaxed">
+              {deleteTarget.order_number} 주문은 복구할 수 없습니다. 결제된 주문이면 결제 취소와 재고·포인트
+              복구 후 지웁니다. 아래에 삭제 라고 입력해주세요.
+            </p>
+            {deleteError && (
+              <p className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-xs text-red-700">
+                {deleteError}
+              </p>
+            )}
+            <input
+              value={deleteConfirm}
+              onChange={(e) => setDeleteConfirm(e.target.value)}
+              placeholder="삭제"
+              className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm bg-white"
+            />
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => setDeleteTarget(null)}
+                className="flex-1 py-3 border border-gray-200 bg-white rounded-xl text-xs font-bold"
+              >
+                닫기
+              </button>
+              <button
+                type="button"
+                disabled={isDeleting || deleteConfirm !== "삭제"}
+                onClick={handleDeleteOrder}
+                className="flex-1 py-3 bg-red-600 text-white rounded-xl text-xs font-bold disabled:opacity-40"
+              >
+                {isDeleting ? "삭제 중" : "주문 삭제"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
