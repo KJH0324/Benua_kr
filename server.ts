@@ -1303,6 +1303,10 @@ const quoteCustomerRefund = (order: any, items: any[], selected: any[], waive = 
 const refundApprovedHtml = (order: any, names: string[], pickup: boolean) => {
   const list = names.map((name) => `<li style="margin:0 0 6px;">${escapeHtml(name)}</li>`).join("");
   const heading = pickup ? "반품 요청이 승인되었습니다" : "환불이 승인되었습니다";
+  const refundNote =
+    order.payment_method === "vbank"
+      ? `<p style="margin:0;">가상계좌 환불은 영업일 기준 2일 뒤 토스페이먼츠 이름으로 입금됩니다.</p>`
+      : `<p style="margin:0;">결제 당일 전체 취소는 바로 반영됩니다.</p><p style="margin:8px 0 0;">부분 취소, 결제일 이후 취소는 영업일 기준 3~4일 걸립니다.</p>`;
   return `<!DOCTYPE html>
 <html lang="ko"><body style="margin:0;padding:0;background:#faf2e7;">
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#faf2e7;padding:36px 12px;">
@@ -1318,9 +1322,7 @@ ${list ? `<tr><td style="padding:22px 36px 0;font-family:'Noto Sans KR',Arial,sa
 <tr><td style="padding:22px 36px 36px;font-family:'Noto Sans KR',Arial,sans-serif;">
 <div style="background:#faf2e7;border-radius:16px;padding:18px 20px;color:#463221;font-size:14px;line-height:1.7;">
 ${pickup ? `<p style="margin:0 0 12px;">계약된 택배사에서 회수합니다.</p>` : ""}
-<p style="margin:0;">환불은 결제하신 카드의 승인 취소로 처리됩니다.</p>
-<p style="margin:8px 0 0;">승인 취소가 카드사에 반영되기까지 영업일 기준 2–3일이 걸립니다.</p>
-<p style="margin:8px 0 0;">아직 청구되지 않은 결제는 카드 이용 내역에서 취소됩니다. 이미 청구된 금액은 카드사 일정에 따라 결제 계좌로 입금되거나, 다음 달 청구 금액에서 빠집니다.</p>
+${refundNote}
 <p style="margin:12px 0 0;">문의: support@benua.shop</p>
 </div>
 </td></tr>

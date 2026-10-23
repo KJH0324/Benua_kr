@@ -288,7 +288,9 @@ export default function Profile() {
         toast.success(
           data.status === "refund_requested"
             ? "환불 요청이 접수되었습니다."
-            : "환불되었습니다. 카드 승인 취소는 영업일 기준 2–3일 걸리고, 이미 청구된 금액은 계좌 입금이나 다음 달 청구에서 빠집니다."
+            : refundModalOrder.payment_method === "vbank"
+              ? "환불되었습니다. 영업일 기준 2일 뒤 토스페이먼츠 이름으로 입금됩니다."
+              : "환불되었습니다. 결제 당일 전체 취소는 바로 반영되고, 그 외에는 영업일 기준 3~4일 걸립니다."
         );
         setRefundModalOrder(null);
         setRefundDetailText("");
@@ -1226,9 +1228,14 @@ export default function Profile() {
               {(detailOrder.status === "refunded" ||
                 (detailOrder.items || []).some((item: any) => item.item_status === "refunded")) && (
                 <div className="pt-3 text-sm leading-relaxed text-venuea-brown space-y-1">
-                  <p>환불은 결제하신 카드의 승인 취소로 처리됩니다.</p>
-                  <p>승인 취소가 카드사에 반영되기까지 영업일 기준 2–3일이 걸립니다.</p>
-                  <p>아직 청구되지 않은 결제는 카드 이용 내역에서 취소됩니다. 이미 청구된 금액은 카드사 일정에 따라 결제 계좌로 입금되거나, 다음 달 청구 금액에서 빠집니다.</p>
+                  {detailOrder.payment_method === "vbank" ? (
+                    <p>가상계좌 환불은 영업일 기준 2일 뒤 토스페이먼츠 이름으로 입금됩니다.</p>
+                  ) : (
+                    <>
+                      <p>결제 당일 전체 취소는 바로 반영됩니다.</p>
+                      <p>부분 취소, 결제일 이후 취소는 영업일 기준 3~4일 걸립니다.</p>
+                    </>
+                  )}
                 </div>
               )}
               <div className="flex justify-between">
