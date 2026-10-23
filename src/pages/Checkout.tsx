@@ -47,6 +47,7 @@ export default function Checkout() {
   const [formError, setFormError] = useState("");
   const [completedOrderNumber, setCompletedOrderNumber] = useState<string | null>(null);
   const [vbankResult, setVbankResult] = useState<any>(null);
+  const [stockReady, setStockReady] = useState(false);
 
   // 1. Handle Toss Redirect Callback (?paymentKey=...&orderId=...&amount=...)
   useEffect(() => {
@@ -101,6 +102,52 @@ export default function Checkout() {
       confirmPayment();
     }
   }, [searchParams]);
+
+  useEffect(() => {
+    if (searchParams.get("paymentKey") || searchParams.get("message")) {
+      setStockReady(true);
+      return;
+    }
+    let cancelled = false;
+    const checkStock = async () => {
+      let saved: any[] = [];
+      try {
+        const parsed = JSON.parse(localStorage.getItem("benua_cart") || "[]");
+        saved = Array.isArray(parsed) ? parsed : [];
+      } catch {
+        saved = [];
+      }
+      for (const item of saved) {
+        const res = await apiFetch(`/api/products/${item.id}`);
+        const product = res.ok ? await res.json().catch(() => null) : null;
+        const stock = Math.max(0, Number(product?.stock) || 0);
+        const qty = Math.max(1, Number(item.quantity) || 1);
+        if (!product || product.sale_mode === "preorder" || stock < qty) {
+          if (!cancelled) {
+            toast.error("재고가 부족합니다.");
+            navigate("/cart", { replace: true });
+          }
+          return;
+        }
+        if (product.sale_mode === "reserved") {
+          const me = await apiFetch(`/api/products/${product.id}/preorder/me`);
+          const data = me.ok ? await me.json().catch(() => null) : null;
+          if (!data?.reserved) {
+            if (!cancelled) {
+              toast.error("사전 예약자만 구매할 수 있는 상품입니다");
+              navigate("/cart", { replace: true });
+            }
+            return;
+          }
+        }
+      }
+      if (!cancelled) setStockReady(true);
+    };
+    checkStock();
+    return () => {
+      cancelled = true;
+    };
+  }, [navigate, searchParams]);
 
   // 2. Load Cart, User Profile, and Coupons
   useEffect(() => {
@@ -358,6 +405,14 @@ export default function Checkout() {
             계속 쇼핑하기
           </button>
         </div>
+      </div>
+    );
+  }
+
+  if (!stockReady && !completedOrderNumber) {
+    return (
+      <div className="pt-40 flex justify-center">
+        <Loader2 className="animate-spin text-venuea-green" />
       </div>
     );
   }
