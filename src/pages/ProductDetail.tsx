@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, type FormEvent } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Link, useParams, useNavigate } from "react-router-dom";
 import { Heart, ShoppingBag, Star } from "lucide-react";
 import { toast } from "sonner";
@@ -16,7 +16,6 @@ export default function ProductDetail() {
   const [quantity, setQuantity] = useState(1);
   const [isWished, setIsWished] = useState(false);
   const [cartGoods, setCartGoods] = useState(0);
-  const [reserveEmail, setReserveEmail] = useState("");
   const [reserveDone, setReserveDone] = useState(false);
   const addingRef = useRef(false);
   useEffect(() => {
@@ -56,6 +55,16 @@ export default function ProductDetail() {
       .then((d) => setReviews(Array.isArray(d) ? d : []))
       .catch(() => {});
   }, [id]);
+
+  useEffect(() => {
+    if (!id || product?.sale_mode !== "preorder") return;
+    apiFetch(`/api/products/${id}/preorder/me`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (data?.reserved) setReserveDone(true);
+      })
+      .catch(() => {});
+  }, [id, product?.sale_mode]);
 
   useEffect(() => {
     if (product?.name) document.title = `${product.name} | 베뉴아`;
@@ -162,13 +171,12 @@ export default function ProductDetail() {
     }
   };
 
-  const handlePreorder = async (event: FormEvent) => {
-    event.preventDefault();
-    const res = await apiFetch(`/api/products/${product.id}/preorder`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email: reserveEmail.trim() }),
-    });
+  const handlePreorder = async () => {
+    const res = await apiFetch(`/api/products/${product.id}/preorder`, { method: "POST" });
+    if (res.status === 401) {
+      navigate(`/login?redirect=/product/${product.id}`);
+      return;
+    }
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
       toast.error(data.error || "사전예약에 실패했습니다.");
@@ -276,25 +284,17 @@ export default function ProductDetail() {
           </div>
 
           {isPreorder ? (
-            <form onSubmit={handlePreorder} className="space-y-3">
-              {reserveDone ? (
-                <p className="text-sm text-venuea-brown">예약되었습니다.</p>
-              ) : (
-                <>
-                  <input
-                    type="email"
-                    required
-                    value={reserveEmail}
-                    onChange={(e) => setReserveEmail(e.target.value)}
-                    placeholder="이메일"
-                    className="w-full border border-black/10 bg-white rounded-xl px-4 py-3 text-sm"
-                  />
-                  <button type="submit" className="w-full py-4 bg-venuea-green text-white rounded-xl text-sm font-bold">
-                    사전예약
-                  </button>
-                </>
-              )}
-            </form>
+            reserveDone ? (
+              <p className="text-sm text-venuea-brown">예약되었습니다.</p>
+            ) : (
+              <button
+                type="button"
+                onClick={handlePreorder}
+                className="w-full py-4 bg-venuea-green text-white rounded-xl text-sm font-bold"
+              >
+                사전예약
+              </button>
+            )
           ) : (
             <>
           {!isReservedSale && stock < 1 && <p className="text-sm text-venuea-muted">품절</p>}
@@ -410,19 +410,13 @@ export default function ProductDetail() {
           reserveDone ? (
             <p className="flex-1 text-sm text-venuea-brown">예약되었습니다.</p>
           ) : (
-            <form onSubmit={handlePreorder} className="flex flex-1 gap-2">
-              <input
-                type="email"
-                required
-                value={reserveEmail}
-                onChange={(e) => setReserveEmail(e.target.value)}
-                placeholder="이메일"
-                className="flex-1 h-12 border border-black/10 bg-white rounded-xl px-3 text-sm"
-              />
-              <button type="submit" className="h-12 px-4 rounded-xl bg-venuea-green text-white text-sm font-bold">
-                사전예약
-              </button>
-            </form>
+            <button
+              type="button"
+              onClick={handlePreorder}
+              className="flex-1 h-12 rounded-xl bg-venuea-green text-white text-sm font-bold"
+            >
+              사전예약
+            </button>
           )
         ) : (
           <>

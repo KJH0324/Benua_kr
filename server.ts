@@ -2330,15 +2330,14 @@ async function startServer() {
     }
   );
 
-  app.post("/api/products/:id/preorder", (req, res) => {
-    const email = String(req.body?.email || "").trim().toLowerCase();
-    if (!email.includes("@") || email.length > 200) {
-      return res.status(400).json({ error: "이메일을 입력해주세요." });
-    }
-    if (!allowRate(`preorder:${clientIp(req)}:${email}`, 5, 60 * 60 * 1000)) {
+  app.post("/api/products/:id/preorder", authenticateUser, (req: any, res) => {
+    if (!allowRate(`preorder:${req.user.id}:${req.params.id}`, 8, 60 * 60 * 1000)) {
       return res.status(429).json({ error: "요청이 너무 많습니다. 잠시 후 다시 시도해주세요." });
     }
     try {
+      const user = db.prepare("SELECT email FROM users WHERE id = ?").get(req.user.id) as any;
+      const email = String(user?.email || "").trim().toLowerCase();
+      if (!email.includes("@")) return res.status(400).json({ error: "계정 이메일이 없습니다." });
       const product = db.prepare("SELECT id, sale_mode FROM products WHERE id = ?").get(req.params.id) as any;
       if (!product) return res.status(404).json({ error: "상품을 찾을 수 없습니다." });
       if (normalizeSaleMode(product.sale_mode) !== "preorder") {
@@ -2349,6 +2348,15 @@ async function startServer() {
     } catch {
       res.status(500).json({ error: "사전예약에 실패했습니다." });
     }
+  });
+
+  app.get("/api/products/:id/preorder/me", authenticateUser, (req: any, res) => {
+    const user = db.prepare("SELECT email FROM users WHERE id = ?").get(req.user.id) as any;
+    const email = String(user?.email || "").trim().toLowerCase();
+    const row = email
+      ? db.prepare("SELECT id FROM product_preorders WHERE product_id = ? AND email = ?").get(req.params.id, email)
+      : null;
+    res.json({ reserved: Boolean(row) });
   });
 
   app.get("/api/admin/products/:id/preorders", authenticateAdmin, (req, res) => {
