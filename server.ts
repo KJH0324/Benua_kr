@@ -53,7 +53,8 @@ const sendMail = async (
   subject: string,
   html: string,
   fromType: MailFromType = "SYSTEM",
-  allowReply = false
+  allowReply = false,
+  layout: "wrap" | "raw" = "wrap"
 ) => {
   const fromMap: Record<MailFromType, string> = {
     ADMIN: process.env.SMTP_FROM_ADMIN || "admin@benua.shop",
@@ -67,7 +68,10 @@ const sendMail = async (
     to,
     replyTo: allowReply ? fromMap.SUPPORT : undefined,
     subject: `[Benua] ${subject}`,
-    html: `
+    html:
+      layout === "raw"
+        ? html
+        : `
       <div style="font-family: 'Inter', 'Noto Sans KR', sans-serif; max-width: 600px; margin: 0 auto; padding: 40px; color: #1a1a1a; background-color: #fdfdfd; border: 1px solid #f0f0f0; border-radius: 8px;">
         <div style="margin-bottom: 40px; text-align: center;">
           <h1 style="font-size: 24px; font-weight: bold; letter-spacing: 4px; text-transform: uppercase;">Benua</h1>
@@ -115,6 +119,62 @@ const ORDER_STATUS_KO: Record<string, string> = {
 
 const formatWon = (amount: number) =>
   `${Math.round(Number(amount) || 0).toLocaleString("ko-KR")}원`;
+
+const absoluteAsset = (value: string) => {
+  const url = String(value || "").trim();
+  if (!url) return "";
+  if (url.startsWith("http://") || url.startsWith("https://")) return url;
+  return `https://benua.shop${url.startsWith("/") ? "" : "/"}${url}`;
+};
+
+const preorderNoticeHtml = (product: any, note: string) => {
+  const name = escapeHtml(product.name || "");
+  const link = `https://benua.shop/product/${product.id}`;
+  const image = absoluteAsset(product.image_url);
+  const price = Math.round(Number(product.price) || 0);
+  const rate = Math.min(100, Math.max(0, Number(product.discount_rate) || 0));
+  const sale = rate > 0 ? Math.round(price * (1 - rate / 100)) : price;
+  const priceHtml =
+    price > 0
+      ? `<p style="margin:18px 0 0;font-size:20px;font-weight:700;letter-spacing:-0.3px;color:#463221;">${formatWon(sale)}</p>
+         ${
+           rate > 0
+             ? `<p style="margin:6px 0 0;font-size:13px;color:#b3a394;text-decoration:line-through;">${formatWon(price)}</p>`
+             : ""
+         }`
+      : "";
+  const imageHtml = image
+    ? `<tr><td style="padding:0 28px;">
+         <img src="${escapeHtml(image)}" alt="${name}" width="504" style="display:block;width:100%;max-width:504px;height:auto;border-radius:16px;border:0;" />
+       </td></tr>`
+    : "";
+
+  return `<!DOCTYPE html>
+<html lang="ko">
+<body style="margin:0;padding:0;background:#faf2e7;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#faf2e7;padding:36px 12px;">
+    <tr><td align="center">
+      <table role="presentation" width="560" cellpadding="0" cellspacing="0" style="width:100%;max-width:560px;background:#fffdf9;border-radius:24px;overflow:hidden;">
+        <tr><td style="padding:36px 28px 22px;text-align:center;">
+          <p style="margin:0;font-family:Georgia,'Times New Roman',serif;font-size:22px;letter-spacing:0.42em;color:#463221;">BENUA</p>
+        </td></tr>
+        ${imageHtml}
+        <tr><td style="padding:28px 36px 0;text-align:center;font-family:'Noto Sans KR',Arial,sans-serif;">
+          <p style="margin:0;font-size:11px;letter-spacing:0.22em;color:#385c37;">PREORDER</p>
+          <h1 style="margin:14px 0 0;font-size:26px;line-height:1.35;font-weight:700;color:#463221;">${name}</h1>
+          ${priceHtml}
+          <p style="margin:18px 0 0;font-size:15px;line-height:1.75;color:#5c4636;white-space:pre-line;">${note}</p>
+        </td></tr>
+        <tr><td align="center" style="padding:28px 36px 40px;">
+          <a href="${link}" style="display:inline-block;background:#385c37;color:#faf2e7;text-decoration:none;font-family:'Noto Sans KR',Arial,sans-serif;font-size:14px;font-weight:700;letter-spacing:0.04em;padding:14px 32px;border-radius:999px;">상품 보러가기</a>
+        </td></tr>
+      </table>
+      <p style="margin:18px 0 0;font-family:Arial,sans-serif;font-size:11px;line-height:1.6;color:#8d7766;">© ${new Date().getFullYear()} Benua. All rights reserved.</p>
+    </td></tr>
+  </table>
+</body>
+</html>`;
+};
 
 const notifyAdminNewOrder = (orderId: number) => {
   const order = db.prepare("SELECT * FROM orders WHERE id = ?").get(orderId) as any;
@@ -2486,17 +2546,22 @@ async function startServer() {
       .prepare("SELECT email FROM product_preorders WHERE product_id = ?")
       .all(product.id) as Array<{ email: string }>;
     if (rows.length === 0) return;
+    const full = db
+      .prepare("SELECT id, name, image_url, price, discount_rate FROM products WHERE id = ?")
+      .get(product.id) as any;
     const reserved = product.sale_mode === "reserved";
-    const link = `https://benua.shop/product/${product.id}`;
+    const note = reserved
+      ? "사전예약하신 계정으로 구매할 수 있습니다."
+      : "판매가 시작되었습니다.";
+    const html = preorderNoticeHtml(full || product, note);
     for (const row of rows) {
       await sendMail(
         row.email,
         reserved ? `${product.name} 구매가 열렸습니다` : `${product.name} 판매가 시작되었습니다`,
-        `
-        <p style="font-size: 16px; font-weight: bold; margin-bottom: 16px;">${escapeHtml(product.name)}</p>
-        <p style="margin-top: 24px;"><a href="${link}" style="color: #385c37;">상품 보기</a></p>
-        `,
-        "NEWS"
+        html,
+        "NEWS",
+        false,
+        "raw"
       );
     }
     db.prepare("UPDATE product_preorders SET notified_at = CURRENT_TIMESTAMP WHERE product_id = ?").run(product.id);
@@ -2517,25 +2582,25 @@ async function startServer() {
     const content = String(req.body?.content || "").trim();
     if (!subject) return res.status(400).json({ error: "제목을 입력해주세요." });
     try {
-      const product = db.prepare("SELECT id, name FROM products WHERE id = ?").get(req.params.id) as any;
+      const product = db
+        .prepare("SELECT id, name, image_url, price, discount_rate FROM products WHERE id = ?")
+        .get(req.params.id) as any;
       if (!product) return res.status(404).json({ error: "상품을 찾을 수 없습니다." });
       const rows = db
         .prepare("SELECT email FROM product_preorders WHERE product_id = ?")
         .all(product.id) as Array<{ email: string }>;
-      const link = `https://benua.shop/product/${product.id}`;
-      const body = content
-        ? `<p style="white-space: pre-line; line-height: 1.7;">${escapeHtml(content)}</p>`
-        : "";
+      const extra = content
+        ? escapeHtml(content)
+        : "사전예약하신 상품 안내입니다.";
+      const html = preorderNoticeHtml(product, extra);
       for (const row of rows) {
         await sendMail(
           row.email,
           subject,
-          `
-          <p style="font-size: 16px; font-weight: bold; margin-bottom: 16px;">${escapeHtml(product.name)}</p>
-          ${body}
-          <p style="margin-top: 24px;"><a href="${link}" style="color: #385c37;">상품 보기</a></p>
-          `,
-          "NEWS"
+          html,
+          "NEWS",
+          false,
+          "raw"
         );
       }
       if (rows.length > 0) {

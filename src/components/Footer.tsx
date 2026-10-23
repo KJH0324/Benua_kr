@@ -110,7 +110,7 @@ export default function Footer() {
           사업장 소재지 인천광역시 연수구 새말로 154, 307동 602호
         </p>
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
-          <p>© {new Date().getFullYear()} 베뉴아. 무단 전재와 복제를 금합니다.</p>
+          <p>© {new Date().getFullYear()} Benua. All rights reserved.</p>
           <p>
             고객센터{" "}
             <a href="tel:01092618016" className="hover:text-white">
