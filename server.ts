@@ -2419,12 +2419,35 @@ async function startServer() {
         );
 
         logAdminAction(req, "UPDATE_PRODUCT", "products", Number(id), `Updated product: ${name}`);
+        const previousMode = normalizeSaleMode(product.sale_mode);
+        const nextMode = normalizeSaleMode(sale_mode);
+        if (previousMode === "preorder" && nextMode !== "preorder") {
+          notifyPreorderOpened(req, { id: product.id, name: name.trim(), sale_mode: nextMode }).catch((err) =>
+            console.error("[PREORDER] notify failed:", err)
+          );
+        }
         res.json({ success: true });
       } catch (err: any) {
         res.status(500).json({ error: "상품 수정 실패: " + err.message });
       }
     }
   );
+
+  app.patch("/api/products/:id/quick", authenticateAdmin, (req: any, res) => {
+    const price = Math.max(0, Math.floor(Number(req.body?.price) || 0));
+    const discountRate = Math.min(100, Math.max(0, Math.floor(Number(req.body?.discount_rate) || 0)));
+    const stock = Math.max(0, Math.floor(Number(req.body?.stock) || 0));
+    const product = db.prepare("SELECT id, name FROM products WHERE id = ?").get(req.params.id) as any;
+    if (!product) return res.status(404).json({ error: "상품을 찾을 수 없습니다." });
+    db.prepare("UPDATE products SET price = ?, discount_rate = ?, stock = ? WHERE id = ?").run(
+      price,
+      discountRate,
+      stock,
+      product.id
+    );
+    logAdminAction(req, "UPDATE_PRODUCT", "products", product.id, `Quick update ${product.name}`);
+    res.json({ success: true, price, discount_rate: discountRate, stock });
+  });
 
   app.post("/api/products/:id/preorder", authenticateUser, (req: any, res) => {
     if (!allowRate(`preorder:${req.user.id}:${req.params.id}`, 8, 60 * 60 * 1000)) {
@@ -2454,6 +2477,31 @@ async function startServer() {
       : null;
     res.json({ reserved: Boolean(row) });
   });
+
+  const notifyPreorderOpened = async (
+    req: any,
+    product: { id: number; name: string; sale_mode: string }
+  ) => {
+    const rows = db
+      .prepare("SELECT email FROM product_preorders WHERE product_id = ?")
+      .all(product.id) as Array<{ email: string }>;
+    if (rows.length === 0) return;
+    const reserved = product.sale_mode === "reserved";
+    const link = `https://benua.shop/product/${product.id}`;
+    for (const row of rows) {
+      await sendMail(
+        row.email,
+        reserved ? `${product.name} 구매가 열렸습니다` : `${product.name} 판매가 시작되었습니다`,
+        `
+        <p style="font-size: 16px; font-weight: bold; margin-bottom: 16px;">${escapeHtml(product.name)}</p>
+        <p style="margin-top: 24px;"><a href="${link}" style="color: #385c37;">상품 보기</a></p>
+        `,
+        "NEWS"
+      );
+    }
+    db.prepare("UPDATE product_preorders SET notified_at = CURRENT_TIMESTAMP WHERE product_id = ?").run(product.id);
+    logAdminAction(req, "NOTIFY_PREORDER", "products", product.id, `Auto notified ${rows.length}`);
+  };
 
   app.get("/api/admin/products/:id/preorders", authenticateAdmin, (req, res) => {
     const rows = db

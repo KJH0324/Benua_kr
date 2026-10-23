@@ -499,6 +499,31 @@ function AdminProducts() {
     });
   };
 
+  const saveQuick = async (product: Product, form: HTMLFormElement) => {
+    const data = new FormData(form);
+    const price = Math.max(0, Math.floor(Number(data.get("price")) || 0));
+    const discount_rate = Math.min(100, Math.max(0, Math.floor(Number(data.get("discount_rate")) || 0)));
+    const stock = Math.max(0, Math.floor(Number(data.get("stock")) || 0));
+    if (
+      price === Number(product.price) &&
+      discount_rate === Number(product.discount_rate || 0) &&
+      stock === Number(product.stock || 0)
+    ) {
+      return;
+    }
+    const res = await apiFetch(`/api/products/${product.id}/quick`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ price, discount_rate, stock }),
+    });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      toast.error(body.error || "저장에 실패했습니다.");
+      return;
+    }
+    fetchProducts();
+  };
+
   const handleSaveProduct = async (e: React.FormEvent) => {
     e.preventDefault();
 
@@ -721,33 +746,51 @@ function AdminProducts() {
                     {product.category}
                   </td>
                   <td className="px-6 py-4">
-                    <div className="flex flex-col">
-                      <span
-                        className={cn(
-                          "inline-block px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider mb-1 w-fit",
-                          (product.stock || 0) < 5
-                            ? "bg-red-50 text-red-600"
-                            : "bg-gray-100 text-gray-600"
-                        )}
-                      >
-                        재고: {product.stock || 0}개
-                      </span>
-                      {product.discount_rate && product.discount_rate > 0 ? (
-                        <div>
-                          <span className="text-red-500 text-xs font-bold mr-1.5">
-                            {product.discount_rate}%
-                          </span>
-                          <span className="font-bold text-gray-900">
-                            {formatPrice(product.price * (1 - product.discount_rate / 100))}
-                          </span>
-                          <span className="text-gray-400 line-through text-xs ml-1.5">
-                            {formatPrice(product.price)}
-                          </span>
-                        </div>
-                      ) : (
-                        <span className="font-bold text-gray-900">{formatPrice(product.price)}</span>
-                      )}
-                    </div>
+                    <form
+                      key={`${product.id}-${product.price}-${product.discount_rate}-${product.stock}`}
+                      className="flex flex-col gap-1.5"
+                      onSubmit={(e) => {
+                        e.preventDefault();
+                        saveQuick(product, e.currentTarget);
+                      }}
+                      onBlur={(e) => {
+                        if (e.currentTarget.contains(e.relatedTarget as Node)) return;
+                        saveQuick(product, e.currentTarget);
+                      }}
+                    >
+                      <label className="flex items-center gap-2 text-[11px] text-gray-500">
+                        가격
+                        <input
+                          name="price"
+                          type="number"
+                          min={0}
+                          defaultValue={product.price}
+                          className="w-24 border border-gray-200 rounded-lg px-2 py-1 text-sm text-gray-900"
+                        />
+                      </label>
+                      <label className="flex items-center gap-2 text-[11px] text-gray-500">
+                        할인
+                        <input
+                          name="discount_rate"
+                          type="number"
+                          min={0}
+                          max={100}
+                          defaultValue={product.discount_rate || 0}
+                          className="w-16 border border-gray-200 rounded-lg px-2 py-1 text-sm text-gray-900"
+                        />
+                        %
+                      </label>
+                      <label className="flex items-center gap-2 text-[11px] text-gray-500">
+                        재고
+                        <input
+                          name="stock"
+                          type="number"
+                          min={0}
+                          defaultValue={product.stock || 0}
+                          className="w-16 border border-gray-200 rounded-lg px-2 py-1 text-sm text-gray-900"
+                        />
+                      </label>
+                    </form>
                   </td>
                   <td className="px-6 py-4 text-right">
                     <div className="flex justify-end space-x-2">
