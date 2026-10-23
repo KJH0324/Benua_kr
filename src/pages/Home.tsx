@@ -67,7 +67,7 @@ export default function Home() {
       </section>
 
       <section className="border-b border-black/5">
-        <div className="max-w-7xl mx-auto px-6 md:px-[60px] py-4 grid grid-cols-1 sm:grid-cols-3 gap-3 text-[13px] text-venuea-brown">
+        <div className="max-w-7xl mx-auto px-6 md:px-[60px] py-4 grid grid-cols-1 sm:grid-cols-3 gap-3 text-[13px] text-venuea-brown text-center">
           <p>{formatPrice(FREE_SHIPPING_MIN)} 이상 무료배송</p>
           <p>수령 후 7일 이내 교환·반품</p>
           <p>문의 support@benua.shop</p>
