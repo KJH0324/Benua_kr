@@ -1445,6 +1445,7 @@ function AdminOrders() {
                     <option value="우체국택배">우체국택배</option>
                     <option value="한진택배">한진택배</option>
                     <option value="로젠택배">로젠택배</option>
+                    <option value="롯데택배">롯데택배</option>
                   </select>
                   <input
                     type="text"
