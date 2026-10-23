@@ -2210,6 +2210,8 @@ function AdminInbox() {
   const [mails, setMails] = useState<any[]>([]);
   const [selected, setSelected] = useState<any | null>(null);
   const [syncing, setSyncing] = useState(false);
+  const [reply, setReply] = useState("");
+  const [sendingReply, setSendingReply] = useState(false);
 
   const fetchMails = async () => {
     const res = await apiFetch("/api/admin/inbox");
@@ -2239,7 +2241,27 @@ function AdminInbox() {
     const data = await res.json().catch(() => ({}));
     if (!res.ok) return toast.error(data.error || "메일을 열지 못했습니다.");
     setSelected(data);
+    setReply("");
     setMails((prev) => prev.map((mail) => (mail.id === id ? { ...mail, is_read: 1 } : mail)));
+  };
+
+  const sendReply = async () => {
+    if (!selected) return;
+    if (!reply.trim()) return toast.error("답장 내용을 입력해주세요.");
+    setSendingReply(true);
+    try {
+      const res = await apiFetch(`/api/admin/inbox/${selected.id}/reply`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message: reply.trim() }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) return toast.error(data.error || "답장을 보내지 못했습니다.");
+      toast.success("답장을 보냈습니다.");
+      setReply("");
+    } finally {
+      setSendingReply(false);
+    }
   };
 
   const attachmentNames = (raw: string) => {
@@ -2277,8 +2299,10 @@ function AdminInbox() {
                 key={mail.id}
                 onClick={() => openMail(mail.id)}
                 className={cn(
-                  "w-full text-left px-4 py-3 hover:bg-gray-50",
-                  selected?.id === mail.id && "bg-gray-50"
+                  "w-full text-left px-4 py-3 border-l-4",
+                  selected?.id === mail.id
+                    ? "bg-[#f3efe6] border-venuea-green"
+                    : "border-transparent hover:bg-gray-50"
                 )}
               >
                 <div className="flex items-center justify-between gap-2">
@@ -2316,6 +2340,23 @@ function AdminInbox() {
               <pre className="whitespace-pre-wrap text-sm leading-7 text-gray-800 font-sans">
                 {plainMailBody(selected) || "본문이 없습니다."}
               </pre>
+              <div className="border-t border-gray-100 pt-4 space-y-3">
+                <textarea
+                  rows={5}
+                  value={reply}
+                  onChange={(e) => setReply(e.target.value)}
+                  placeholder="답장"
+                  className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm"
+                />
+                <button
+                  type="button"
+                  onClick={sendReply}
+                  disabled={sendingReply}
+                  className="bg-venuea-dark text-white px-5 py-2.5 rounded-xl text-sm font-bold disabled:opacity-40"
+                >
+                  {sendingReply ? "보내는 중" : "답장 보내기"}
+                </button>
+              </div>
             </div>
           )}
         </div>

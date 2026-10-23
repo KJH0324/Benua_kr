@@ -52,7 +52,8 @@ const sendMail = async (
   to: string,
   subject: string,
   html: string,
-  fromType: MailFromType = "SYSTEM"
+  fromType: MailFromType = "SYSTEM",
+  allowReply = false
 ) => {
   const fromMap: Record<MailFromType, string> = {
     ADMIN: process.env.SMTP_FROM_ADMIN || "admin@benua.shop",
@@ -64,6 +65,7 @@ const sendMail = async (
   const mailOptions = {
     from: `"Benua" <${fromMap[fromType]}>`,
     to,
+    replyTo: allowReply ? fromMap.SUPPORT : undefined,
     subject: `[Benua] ${subject}`,
     html: `
       <div style="font-family: 'Inter', 'Noto Sans KR', sans-serif; max-width: 600px; margin: 0 auto; padding: 40px; color: #1a1a1a; background-color: #fdfdfd; border: 1px solid #f0f0f0; border-radius: 8px;">
@@ -73,7 +75,7 @@ const sendMail = async (
         ${html}
         <div style="margin-top: 60px; padding-top: 20px; border-top: 1px solid #f0f0f0; font-size: 11px; color: #999; text-align: center;">
           <p>© ${new Date().getFullYear()} Benua. All rights reserved.</p>
-          <p>본 메일은 발신 전용입니다.</p>
+          ${allowReply ? "" : "<p>본 메일은 발신 전용입니다.</p>"}
         </div>
       </div>
     `,
@@ -4093,6 +4095,32 @@ async function startServer() {
       res.json({ ...row, is_read: 1 });
     } catch {
       res.status(500).json({ error: "메일 조회에 실패했습니다." });
+    }
+  });
+
+  app.post("/api/admin/inbox/:id/reply", authenticateCS, async (req: any, res) => {
+    const message = String(req.body?.message || "").trim();
+    if (!message) return res.status(400).json({ error: "답장 내용을 입력해주세요." });
+    try {
+      const row = db.prepare("SELECT * FROM inbound_emails WHERE id = ?").get(req.params.id) as any;
+      if (!row) return res.status(404).json({ error: "메일을 찾을 수 없습니다." });
+      const match = String(row.from_address || "").match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i);
+      const to = match?.[0] || "";
+      if (!to) return res.status(400).json({ error: "답장할 이메일 주소가 없습니다." });
+      const originalSubject = String(row.subject || "문의").trim();
+      const subject = /^re:/i.test(originalSubject) ? originalSubject : `Re: ${originalSubject}`;
+      const sent = await sendMail(
+        to,
+        subject,
+        `<p style="white-space: pre-line; line-height: 1.7;">${escapeHtml(message)}</p>`,
+        "SUPPORT",
+        true
+      );
+      if (!sent) return res.status(500).json({ error: "답장을 보내지 못했습니다." });
+      logAdminAction(req, "REPLY_INBOX", "inbound_emails", Number(row.id), `Replied to ${to}`);
+      res.json({ success: true });
+    } catch {
+      res.status(500).json({ error: "답장을 보내지 못했습니다." });
     }
   });
 
