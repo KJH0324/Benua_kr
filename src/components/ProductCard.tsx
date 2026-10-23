@@ -9,6 +9,7 @@ export type CardProduct = {
   category?: string;
   discount_rate?: number;
   stock?: number;
+  sale_mode?: string;
 };
 
 export function salePrice(product: { price: number; discount_rate?: number }) {
@@ -34,11 +35,15 @@ export default function ProductCard({ product }: { product: CardProduct }) {
         ) : (
           <div className="w-full h-full bg-white" />
         )}
-        {Number(product.stock) === 0 && (
+        {product.sale_mode === "preorder" ? (
+          <div className="absolute inset-0 bg-[#faf2e7]/80 flex items-end p-3">
+            <p className="text-xs font-bold text-venuea-dark">사전예약</p>
+          </div>
+        ) : Number(product.stock) === 0 ? (
           <div className="absolute inset-0 bg-[#faf2e7]/80 flex items-end p-3">
             <p className="text-xs font-bold text-venuea-dark">품절</p>
           </div>
-        )}
+        ) : null}
         {rate > 0 && (
           <span className="absolute top-3 left-3 bg-[#C0392B] text-white text-[11px] font-bold px-2.5 py-1 rounded-full">
             {rate}%

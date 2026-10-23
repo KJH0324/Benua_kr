@@ -399,11 +399,17 @@ function AdminProducts() {
     dimensions: "",
     origin: "",
     manufacturer: "",
+    sale_mode: "open",
   };
 
   const [newProduct, setNewProduct] = useState(initialProductState);
   const [mainImage, setMainImage] = useState<File | null>(null);
   const [descImage, setDescImage] = useState<File | null>(null);
+  const [reserveProduct, setReserveProduct] = useState<any>(null);
+  const [reserves, setReserves] = useState<Array<{ id: number; email: string; notified_at?: string }>>([]);
+  const [mailSubject, setMailSubject] = useState("");
+  const [mailBody, setMailBody] = useState("");
+  const [sendingMail, setSendingMail] = useState(false);
 
   const fetchProducts = async () => {
     setIsLoading(true);
@@ -464,6 +470,7 @@ function AdminProducts() {
     formData.append("dimensions", newProduct.dimensions);
     formData.append("origin", newProduct.origin);
     formData.append("manufacturer", newProduct.manufacturer);
+    formData.append("sale_mode", newProduct.sale_mode);
 
     if (mainImage) formData.append("image", mainImage);
     if (descImage) formData.append("description_image", descImage);
@@ -504,6 +511,7 @@ function AdminProducts() {
       dimensions: product.dimensions || "",
       origin: product.origin || "",
       manufacturer: product.manufacturer || "",
+      sale_mode: (product as any).sale_mode || "open",
     });
     setMainImage(null);
     setDescImage(null);
@@ -520,6 +528,47 @@ function AdminProducts() {
       }
     } catch {
       toast.error("삭제에 실패했습니다.");
+    }
+  };
+
+  const openReserves = async (product: any) => {
+    setReserveProduct(product);
+    setMailSubject(product.name);
+    setMailBody("");
+    try {
+      const res = await apiFetch(`/api/admin/products/${product.id}/preorders`);
+      const data = await res.json();
+      setReserves(Array.isArray(data) ? data : []);
+    } catch {
+      setReserves([]);
+      toast.error("예약 명단을 불러오지 못했습니다.");
+    }
+  };
+
+  const sendReserveMail = async () => {
+    if (!reserveProduct) return;
+    if (!mailSubject.trim()) {
+      toast.error("제목을 입력해주세요.");
+      return;
+    }
+    setSendingMail(true);
+    try {
+      const res = await apiFetch(`/api/admin/products/${reserveProduct.id}/preorders/notify`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ subject: mailSubject.trim(), content: mailBody.trim() }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        toast.error(data.error || "메일을 보내지 못했습니다.");
+        return;
+      }
+      toast.success(`${data.count}명에게 보냈습니다.`);
+      openReserves(reserveProduct);
+    } catch {
+      toast.error("메일을 보내지 못했습니다.");
+    } finally {
+      setSendingMail(false);
     }
   };
 
@@ -592,6 +641,16 @@ function AdminProducts() {
                               Main
                             </span>
                           )}
+                          {(product as any).sale_mode === "preorder" && (
+                            <span className="text-[9px] bg-green-50 text-green-700 px-1.5 py-0.5 rounded font-bold border border-green-200">
+                              사전예약
+                            </span>
+                          )}
+                          {(product as any).sale_mode === "reserved" && (
+                            <span className="text-[9px] bg-green-50 text-green-700 px-1.5 py-0.5 rounded font-bold border border-green-200">
+                              예약자 구매
+                            </span>
+                          )}
                         </div>
                         {product.dimensions && (
                           <p className="text-[11px] text-gray-400">규격: {product.dimensions}</p>
@@ -633,6 +692,12 @@ function AdminProducts() {
                   </td>
                   <td className="px-6 py-4 text-right">
                     <div className="flex justify-end space-x-2">
+                      <button
+                        onClick={() => openReserves(product)}
+                        className="text-xs font-bold text-venuea-green px-2"
+                      >
+                        예약
+                      </button>
                       <button
                         onClick={() => handleEditClick(product)}
                         className="text-venuea-dark hover:text-venuea-gold p-1.5"
@@ -815,6 +880,19 @@ function AdminProducts() {
                 </div>
 
                 <div className="space-y-1">
+                  <label className="text-xs font-bold text-gray-500 uppercase">판매 방식</label>
+                  <select
+                    value={newProduct.sale_mode}
+                    onChange={(e) => setNewProduct({ ...newProduct, sale_mode: e.target.value })}
+                    className="w-full border border-gray-200 rounded-lg px-4 py-2 text-sm bg-white"
+                  >
+                    <option value="open">일반 판매</option>
+                    <option value="preorder">사전예약</option>
+                    <option value="reserved">예약자만 구매</option>
+                  </select>
+                </div>
+
+                <div className="space-y-1">
                   <label className="text-xs font-bold text-gray-500 uppercase">대표 이미지</label>
                   <input
                     type="file"
@@ -858,6 +936,52 @@ function AdminProducts() {
           </div>
         )}
       </AnimatePresence>
+
+      {reserveProduct && (
+        <div className="fixed inset-0 bg-black/50 z-[110] flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl w-full max-w-lg p-6 space-y-4 shadow-2xl max-h-[85vh] overflow-y-auto">
+            <div className="flex justify-between items-center">
+              <h3 className="text-lg font-bold">{reserveProduct.name} 예약</h3>
+              <button type="button" onClick={() => setReserveProduct(null)}>
+                <X size={22} className="text-gray-400" />
+              </button>
+            </div>
+            <p className="text-sm text-gray-500">{reserves.length}명</p>
+            <div className="max-h-40 overflow-y-auto border border-gray-100 rounded-xl divide-y">
+              {reserves.length === 0 ? (
+                <p className="p-4 text-sm text-gray-400">예약이 없습니다.</p>
+              ) : (
+                reserves.map((row) => (
+                  <p key={row.id} className="px-4 py-2 text-sm">
+                    {row.email}
+                  </p>
+                ))
+              )}
+            </div>
+            <input
+              value={mailSubject}
+              onChange={(e) => setMailSubject(e.target.value)}
+              placeholder="제목"
+              className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm"
+            />
+            <textarea
+              value={mailBody}
+              onChange={(e) => setMailBody(e.target.value)}
+              rows={4}
+              placeholder="내용"
+              className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm"
+            />
+            <button
+              type="button"
+              disabled={sendingMail}
+              onClick={sendReserveMail}
+              className="w-full py-3 bg-venuea-dark text-white rounded-xl text-sm font-bold disabled:opacity-40"
+            >
+              {sendingMail ? "보내는 중" : "예약자에게 메일 보내기"}
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

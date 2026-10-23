@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, type FormEvent } from "react";
 import { Link, useParams, useNavigate } from "react-router-dom";
 import { Heart, ShoppingBag, Star } from "lucide-react";
 import { toast } from "sonner";
@@ -16,6 +16,8 @@ export default function ProductDetail() {
   const [quantity, setQuantity] = useState(1);
   const [isWished, setIsWished] = useState(false);
   const [cartGoods, setCartGoods] = useState(0);
+  const [reserveEmail, setReserveEmail] = useState("");
+  const [reserveDone, setReserveDone] = useState(false);
   const addingRef = useRef(false);
   useEffect(() => {
     const readCart = () => {
@@ -38,6 +40,7 @@ export default function ProductDetail() {
     if (!id) return;
     setProduct(null);
     setMissing(false);
+    setReserveDone(false);
     apiFetch(`/api/products/${id}`)
       .then(async (r) => {
         if (!r.ok) {
@@ -108,6 +111,8 @@ export default function ProductDetail() {
   }
 
   const stock = Math.max(0, Number(product.stock) || 0);
+  const isPreorder = product.sale_mode === "preorder";
+  const isReservedSale = product.sale_mode === "reserved";
   const finalPrice =
     product.discount_rate && product.discount_rate > 0
       ? Math.round(product.price * (1 - product.discount_rate / 100))
@@ -155,6 +160,21 @@ export default function ProductDetail() {
     } else {
       toast.success("쇼핑백에 담았습니다.");
     }
+  };
+
+  const handlePreorder = async (event: FormEvent) => {
+    event.preventDefault();
+    const res = await apiFetch(`/api/products/${product.id}/preorder`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: reserveEmail.trim() }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      toast.error(data.error || "사전예약에 실패했습니다.");
+      return;
+    }
+    setReserveDone(true);
   };
 
   const handleToggleWishlist = async () => {
@@ -255,7 +275,32 @@ export default function ProductDetail() {
             )}
           </div>
 
-          {stock < 1 && <p className="text-sm text-venuea-muted">품절</p>}
+          {isPreorder ? (
+            <form onSubmit={handlePreorder} className="space-y-3">
+              {reserveDone ? (
+                <p className="text-sm text-venuea-brown">예약되었습니다.</p>
+              ) : (
+                <>
+                  <input
+                    type="email"
+                    required
+                    value={reserveEmail}
+                    onChange={(e) => setReserveEmail(e.target.value)}
+                    placeholder="이메일"
+                    className="w-full border border-black/10 bg-white rounded-xl px-4 py-3 text-sm"
+                  />
+                  <button type="submit" className="w-full py-4 bg-venuea-green text-white rounded-xl text-sm font-bold">
+                    사전예약
+                  </button>
+                </>
+              )}
+            </form>
+          ) : (
+            <>
+          {!isReservedSale && stock < 1 && <p className="text-sm text-venuea-muted">품절</p>}
+          {isReservedSale && (
+            <p className="text-sm text-venuea-brown">사전예약하신 이메일로만 주문할 수 있습니다.</p>
+          )}
           <div className="flex items-center gap-4">
             <div className="flex items-center border border-black/10 rounded-xl bg-white">
               <button
@@ -307,6 +352,8 @@ export default function ProductDetail() {
           >
             바로 구매하기
           </button>
+            </>
+          )}
 
           <details className="border-t border-black/10 pt-4">
             <summary className="cursor-pointer text-sm font-bold text-venuea-dark">배송·교환·반품</summary>
@@ -359,6 +406,26 @@ export default function ProductDetail() {
       </section>
 
       <div className="md:hidden fixed inset-x-0 bottom-0 z-40 bg-venuea-beige border-t border-black/10 px-4 pt-3 pb-[max(12px,env(safe-area-inset-bottom))] flex items-center gap-2">
+        {isPreorder ? (
+          reserveDone ? (
+            <p className="flex-1 text-sm text-venuea-brown">예약되었습니다.</p>
+          ) : (
+            <form onSubmit={handlePreorder} className="flex flex-1 gap-2">
+              <input
+                type="email"
+                required
+                value={reserveEmail}
+                onChange={(e) => setReserveEmail(e.target.value)}
+                placeholder="이메일"
+                className="flex-1 h-12 border border-black/10 bg-white rounded-xl px-3 text-sm"
+              />
+              <button type="submit" className="h-12 px-4 rounded-xl bg-venuea-green text-white text-sm font-bold">
+                사전예약
+              </button>
+            </form>
+          )
+        ) : (
+          <>
         <button
           type="button"
           aria-label={isWished ? "위시리스트에서 빼기" : "위시리스트에 담기"}
@@ -383,6 +450,8 @@ export default function ProductDetail() {
         >
           바로 구매 {formatPrice(finalPrice)}
         </button>
+          </>
+        )}
       </div>
     </div>
   );

@@ -289,6 +289,10 @@ export default function Profile() {
   };
 
   const addWishToCart = (product: any) => {
+    if (product.sale_mode === "preorder") {
+      toast.error("사전예약 상품입니다.");
+      return;
+    }
     const stock = Math.max(0, Number(product.stock) || 0);
     if (stock < 1) {
       toast.error("품절입니다.");

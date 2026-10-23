@@ -29,6 +29,7 @@ export default function Cart() {
           continue;
         }
         const product = await res.json();
+        if (product.sale_mode === "preorder") continue;
         const stock = Math.max(0, Number(product.stock) || 0);
         if (stock < 1) continue;
         const price =

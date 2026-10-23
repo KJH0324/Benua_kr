@@ -277,6 +277,7 @@ db.exec(`
     manufacturer TEXT,
     discount_rate INTEGER DEFAULT 0,
     show_on_main INTEGER DEFAULT 0,
+    sale_mode TEXT DEFAULT 'open',
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
 
@@ -336,6 +337,16 @@ db.exec(`
     FOREIGN KEY(product_id) REFERENCES products(id) ON DELETE CASCADE,
     FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE SET NULL,
     FOREIGN KEY(order_id) REFERENCES orders(id) ON DELETE CASCADE
+  );
+
+  CREATE TABLE IF NOT EXISTS product_preorders (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    product_id INTEGER NOT NULL,
+    email TEXT NOT NULL,
+    notified_at DATETIME,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(product_id, email),
+    FOREIGN KEY(product_id) REFERENCES products(id) ON DELETE CASCADE
   );
 
   CREATE TABLE IF NOT EXISTS wishlists (
@@ -429,6 +440,7 @@ const runMigrations = () => {
   ensureColumn("products", "manufacturer", "TEXT");
   ensureColumn("products", "discount_rate", "INTEGER DEFAULT 0");
   ensureColumn("products", "show_on_main", "INTEGER DEFAULT 0");
+  ensureColumn("products", "sale_mode", "TEXT DEFAULT 'open'");
 
   ensureColumn("orders", "payment_method", "TEXT DEFAULT 'card'");
   ensureColumn("orders", "payment_key", "TEXT");
@@ -2205,6 +2217,7 @@ async function startServer() {
         manufacturer,
         discount_rate,
         show_on_main,
+        sale_mode,
       } = req.body;
       const files = req.files as { [fieldname: string]: Express.Multer.File[] };
 
@@ -2221,8 +2234,8 @@ async function startServer() {
         const info = db
           .prepare(
             `INSERT INTO products
-            (name, price, description, image_url, description_image_url, category, stock, material, dimensions, origin, manufacturer, discount_rate, show_on_main)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+            (name, price, description, image_url, description_image_url, category, stock, material, dimensions, origin, manufacturer, discount_rate, show_on_main, sale_mode)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
           )
           .run(
             name.trim(),
@@ -2237,7 +2250,8 @@ async function startServer() {
             origin || "",
             manufacturer || "",
             parseInt(discount_rate, 10) || 0,
-            show_on_main === "true" || show_on_main === "1" || show_on_main === 1 ? 1 : 0
+            show_on_main === "true" || show_on_main === "1" || show_on_main === 1 ? 1 : 0,
+            normalizeSaleMode(sale_mode)
           );
 
         logAdminAction(req, "CREATE_PRODUCT", "products", Number(info.lastInsertRowid), `Created product: ${name}`);
@@ -2269,6 +2283,7 @@ async function startServer() {
         manufacturer,
         discount_rate,
         show_on_main,
+        sale_mode,
       } = req.body;
       const files = req.files as { [fieldname: string]: Express.Multer.File[] };
 
@@ -2287,7 +2302,7 @@ async function startServer() {
           `UPDATE products
            SET name = ?, price = ?, description = ?, image_url = ?, description_image_url = ?,
                category = ?, stock = ?, material = ?, dimensions = ?, origin = ?,
-               manufacturer = ?, discount_rate = ?, show_on_main = ?
+               manufacturer = ?, discount_rate = ?, show_on_main = ?, sale_mode = ?
            WHERE id = ?`
         ).run(
           name.trim(),
@@ -2303,6 +2318,7 @@ async function startServer() {
           manufacturer || "",
           parseInt(discount_rate, 10) || 0,
           show_on_main === "true" || show_on_main === "1" || show_on_main === 1 ? 1 : 0,
+          normalizeSaleMode(sale_mode),
           id
         );
 
@@ -2313,6 +2329,74 @@ async function startServer() {
       }
     }
   );
+
+  app.post("/api/products/:id/preorder", (req, res) => {
+    const email = String(req.body?.email || "").trim().toLowerCase();
+    if (!email.includes("@") || email.length > 200) {
+      return res.status(400).json({ error: "이메일을 입력해주세요." });
+    }
+    if (!allowRate(`preorder:${clientIp(req)}:${email}`, 5, 60 * 60 * 1000)) {
+      return res.status(429).json({ error: "요청이 너무 많습니다. 잠시 후 다시 시도해주세요." });
+    }
+    try {
+      const product = db.prepare("SELECT id, sale_mode FROM products WHERE id = ?").get(req.params.id) as any;
+      if (!product) return res.status(404).json({ error: "상품을 찾을 수 없습니다." });
+      if (normalizeSaleMode(product.sale_mode) !== "preorder") {
+        return res.status(400).json({ error: "지금은 사전예약을 받지 않습니다." });
+      }
+      db.prepare("INSERT OR IGNORE INTO product_preorders (product_id, email) VALUES (?, ?)").run(product.id, email);
+      res.json({ success: true });
+    } catch {
+      res.status(500).json({ error: "사전예약에 실패했습니다." });
+    }
+  });
+
+  app.get("/api/admin/products/:id/preorders", authenticateAdmin, (req, res) => {
+    const rows = db
+      .prepare(
+        "SELECT id, email, notified_at, created_at FROM product_preorders WHERE product_id = ? ORDER BY created_at DESC"
+      )
+      .all(req.params.id);
+    res.json(rows);
+  });
+
+  app.post("/api/admin/products/:id/preorders/notify", authenticateAdmin, async (req: any, res) => {
+    const subject = String(req.body?.subject || "").trim();
+    const content = String(req.body?.content || "").trim();
+    if (!subject) return res.status(400).json({ error: "제목을 입력해주세요." });
+    try {
+      const product = db.prepare("SELECT id, name FROM products WHERE id = ?").get(req.params.id) as any;
+      if (!product) return res.status(404).json({ error: "상품을 찾을 수 없습니다." });
+      const rows = db
+        .prepare("SELECT email FROM product_preorders WHERE product_id = ?")
+        .all(product.id) as Array<{ email: string }>;
+      const link = `https://benua.shop/product/${product.id}`;
+      const body = content
+        ? `<p style="white-space: pre-line; line-height: 1.7;">${escapeHtml(content)}</p>`
+        : "";
+      for (const row of rows) {
+        await sendMail(
+          row.email,
+          subject,
+          `
+          <p style="font-size: 16px; font-weight: bold; margin-bottom: 16px;">${escapeHtml(product.name)}</p>
+          ${body}
+          <p style="margin-top: 24px;"><a href="${link}" style="color: #385c37;">상품 보기</a></p>
+          `,
+          "NEWS"
+        );
+      }
+      if (rows.length > 0) {
+        db.prepare(
+          "UPDATE product_preorders SET notified_at = CURRENT_TIMESTAMP WHERE product_id = ?"
+        ).run(product.id);
+      }
+      logAdminAction(req, "NOTIFY_PREORDER", "products", product.id, `Notified ${rows.length}`);
+      res.json({ success: true, count: rows.length });
+    } catch {
+      res.status(500).json({ error: "메일을 보내지 못했습니다." });
+    }
+  });
 
   app.delete("/api/products/:id", authenticateAdmin, (req: any, res) => {
     try {
@@ -2566,6 +2650,20 @@ async function startServer() {
   // 11. Orders & Toss Payments APIs
   // ==========================================
 
+  const normalizeSaleMode = (value: unknown) => {
+    const mode = String(value || "open");
+    return mode === "preorder" || mode === "reserved" ? mode : "open";
+  };
+
+  const canBuyReserved = (productId: number, emails: string[]) => {
+    const unique = [
+      ...new Set(emails.map((email) => email.trim().toLowerCase()).filter((email) => email.includes("@"))),
+    ];
+    if (unique.length === 0) return false;
+    const found = db.prepare("SELECT id FROM product_preorders WHERE product_id = ? AND email = ?");
+    return unique.some((email) => found.get(productId, email));
+  };
+
   const unitPrice = (product: any) => {
     const rate = Number(product.discount_rate) || 0;
     const base = Number(product.price) || 0;
@@ -2577,7 +2675,8 @@ async function startServer() {
     user: any | null,
     rawItems: any[],
     requestedPoints: number,
-    couponId: number | null
+    couponId: number | null,
+    buyerEmail = ""
   ) => {
     if (!Array.isArray(rawItems) || rawItems.length === 0) {
       throw new Error("주문할 상품이 없습니다.");
@@ -2590,8 +2689,15 @@ async function startServer() {
       if (!productId || qty < 1) throw new Error("주문 상품 정보가 올바르지 않습니다.");
       const product = db.prepare("SELECT * FROM products WHERE id = ?").get(productId) as any;
       if (!product) throw new Error("존재하지 않는 상품입니다.");
+      const saleMode = normalizeSaleMode(product.sale_mode);
+      if (saleMode === "preorder") {
+        throw new Error(`'${product.name}'은 사전예약 중입니다.`);
+      }
+      if (saleMode === "reserved" && !canBuyReserved(product.id, [buyerEmail, user?.email || ""])) {
+        throw new Error(`'${product.name}'은 사전예약하신 이메일로만 구매할 수 있습니다.`);
+      }
       if (Number(product.stock) < qty) {
-        throw new Error(`'${product.name}' 상품의 재고가 부족합니다. (남은 재고: ${product.stock}개)`);
+        throw new Error(`'${product.name}' 재고가 부족합니다.`);
       }
       const price = unitPrice(product);
       goods += price * qty;
@@ -2693,7 +2799,8 @@ async function startServer() {
         account,
         items,
         Number(used_points) || 0,
-        used_coupon_id ? Number(used_coupon_id) : null
+        used_coupon_id ? Number(used_coupon_id) : null,
+        String(customer_email || "")
       );
       const orderId = db.transaction(() => {
         const info = db
