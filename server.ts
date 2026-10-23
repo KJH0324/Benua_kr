@@ -126,8 +126,19 @@ const notifyAdminNewOrder = (orderId: number) => {
     .map((item) => `${escapeHtml(item.name)} × ${Number(item.quantity) || 0} · ${formatWon((item.price || 0) * (item.quantity || 0))}`)
     .join("<br/>");
   const status = order.status === "paid" ? "결제완료" : "입금대기";
-  const to = process.env.ADMIN_NOTIFY_EMAIL || process.env.SMTP_FROM_SUPPORT || "support@benua.shop";
-  sendMail(
+  const recipients = [
+    ...new Set(
+      (
+        db.prepare(
+          "SELECT notify_email FROM admin_keys WHERE notify_email IS NOT NULL AND TRIM(notify_email) != ''"
+        ).all() as Array<{ notify_email: string }>
+      )
+        .map((row) => String(row.notify_email || "").trim().toLowerCase())
+        .filter((email) => email.includes("@"))
+    ),
+  ];
+  for (const to of recipients) {
+    sendMail(
     to,
     `새 주문 ${order.order_number}`,
     `
@@ -140,6 +151,7 @@ const notifyAdminNewOrder = (orderId: number) => {
     `,
     "ADMIN"
   );
+  }
 };
 
 const buildOrderEmailHtml = (order: any, items: any[]) => {
@@ -498,6 +510,7 @@ const runMigrations = () => {
   ensureColumn("inquiries", "user_id", "INTEGER");
   ensureColumn("user_coupons", "notified", "INTEGER DEFAULT 0");
   ensureColumn("admin_keys", "role", "TEXT DEFAULT 'MASTER'");
+  ensureColumn("admin_keys", "notify_email", "TEXT");
   ensureColumn("admin_logs", "admin_identifier", "TEXT");
   ensureColumn("admin_logs", "ip_address", "TEXT");
   ensureColumn("admin_logs", "user_agent", "TEXT");
@@ -2132,7 +2145,7 @@ async function startServer() {
   app.get("/api/admin/keys", authenticateAdmin, (_req, res) => {
     const keys = db
       .prepare(
-        "SELECT id, role, CASE WHEN totp_secret IS NULL THEN 0 ELSE 1 END as has_2fa, created_at FROM admin_keys ORDER BY created_at DESC"
+        "SELECT id, role, notify_email, CASE WHEN totp_secret IS NULL THEN 0 ELSE 1 END as has_2fa, created_at FROM admin_keys ORDER BY created_at DESC"
       )
       .all() as any[];
     res.json(keys);
@@ -2182,6 +2195,24 @@ async function startServer() {
     } catch {
       res.status(500).json({ error: "권한 변경에 실패했습니다." });
     }
+  });
+
+  app.put("/api/admin/keys/:id/email", authenticateAdmin, (req: any, res) => {
+    const email = String(req.body?.email || "").trim().toLowerCase();
+    if (email && (!email.includes("@") || email.length > 200)) {
+      return res.status(400).json({ error: "이메일을 확인해주세요." });
+    }
+    const existing = db.prepare("SELECT id FROM admin_keys WHERE id = ?").get(req.params.id);
+    if (!existing) return res.status(404).json({ error: "보안 키를 찾을 수 없습니다." });
+    db.prepare("UPDATE admin_keys SET notify_email = ? WHERE id = ?").run(email || null, req.params.id);
+    logAdminAction(
+      req,
+      "UPDATE_KEY_EMAIL",
+      "admin_keys",
+      Number(req.params.id),
+      email ? "Set notify email" : "Cleared notify email"
+    );
+    res.json({ success: true });
   });
 
   app.delete("/api/admin/keys/:id", authenticateAdmin, (req: any, res) => {

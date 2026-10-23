@@ -2572,6 +2572,7 @@ function AdminKeys({ adminRole }: { adminRole: string }) {
             <tr>
               <th className="p-4">보안 키</th>
               <th className="p-4">권한</th>
+              <th className="p-4">알림 이메일</th>
               <th className="p-4">2FA(OTP) 연동</th>
               <th className="p-4 text-right">관리</th>
             </tr>
@@ -2581,6 +2582,35 @@ function AdminKeys({ adminRole }: { adminRole: string }) {
               <tr key={k.id}>
                 <td className="p-4 font-mono text-gray-400">해시로 저장됨</td>
                 <td className="p-4 font-bold">{k.role}</td>
+                <td className="p-4">
+                  <form
+                    className="flex gap-2"
+                    onSubmit={async (e) => {
+                      e.preventDefault();
+                      const input = e.currentTarget.elements.namedItem("email") as HTMLInputElement;
+                      const res = await apiFetch(`/api/admin/keys/${k.id}/email`, {
+                        method: "PUT",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ email: input.value.trim() }),
+                      });
+                      const data = await res.json().catch(() => ({}));
+                      if (!res.ok) return toast.error(data.error || "저장에 실패했습니다.");
+                      toast.success("저장했습니다.");
+                      fetchKeys();
+                    }}
+                  >
+                    <input
+                      name="email"
+                      type="email"
+                      defaultValue={k.notify_email || ""}
+                      placeholder="이메일"
+                      className="w-52 border border-gray-200 rounded-lg px-3 py-2 text-sm"
+                    />
+                    <button type="submit" className="text-xs font-bold text-venuea-green">
+                      저장
+                    </button>
+                  </form>
+                </td>
                 <td className="p-4">{k.has_2fa ? "연동됨" : "미설정 (최초 로그인 시 QR 생성)"}</td>
                 <td className="p-4 text-right">
                   <button
