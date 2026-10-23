@@ -248,7 +248,7 @@ export default function ProductDetail() {
             )}
           </div>
           <p className="text-sm text-venuea-brown">
-            배송비 {formatPrice(SHIPPING_FEE)} · {formatPrice(FREE_SHIPPING_MIN)} 이상, 블랙·더 블랙 등급은 무료
+            배송비 {formatPrice(SHIPPING_FEE)} · {formatPrice(FREE_SHIPPING_MIN)} 이상 무료
           </p>
           {stock > 0 && (
             <div className="space-y-2">
