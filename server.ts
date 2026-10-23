@@ -182,10 +182,51 @@ const notifyAdminNewOrder = (orderId: number) => {
   const items = db
     .prepare("SELECT name, quantity, price FROM order_items WHERE order_id = ?")
     .all(orderId) as Array<{ name: string; quantity: number; price: number }>;
-  const lines = items
-    .map((item) => `${escapeHtml(item.name)} × ${Number(item.quantity) || 0} · ${formatWon((item.price || 0) * (item.quantity || 0))}`)
-    .join("<br/>");
+  const lines =
+    items.length > 0
+      ? items
+          .map(
+            (item) =>
+              `<tr>
+                <td style="padding:10px 0;border-bottom:1px solid #f3ece4;font-family:'Noto Sans KR',Arial,sans-serif;font-size:14px;color:#463221;">${escapeHtml(item.name)}</td>
+                <td style="padding:10px 0;border-bottom:1px solid #f3ece4;font-family:'Noto Sans KR',Arial,sans-serif;font-size:14px;color:#463221;text-align:right;white-space:nowrap;">${Number(item.quantity) || 0}개 · ${formatWon((item.price || 0) * (item.quantity || 0))}</td>
+              </tr>`
+          )
+          .join("")
+      : "";
   const status = order.status === "paid" ? "결제완료" : "입금대기";
+  const html = `<!DOCTYPE html>
+<html lang="ko">
+<body style="margin:0;padding:0;background:#faf2e7;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#faf2e7;padding:36px 12px;">
+    <tr><td align="center">
+      <table role="presentation" width="560" cellpadding="0" cellspacing="0" style="width:100%;max-width:560px;background:#fffdf9;border-radius:24px;">
+        <tr><td style="padding:36px 32px 8px;text-align:center;font-family:Georgia,'Times New Roman',serif;">
+          <p style="margin:0;font-size:22px;letter-spacing:0.42em;color:#463221;">BENUA</p>
+        </td></tr>
+        <tr><td style="padding:18px 32px 0;text-align:center;font-family:'Noto Sans KR',Arial,sans-serif;">
+          <h1 style="margin:0;font-size:24px;line-height:1.4;color:#463221;">새 주문이 등록되었습니다</h1>
+          <p style="margin:12px 0 0;font-size:14px;color:#5c4636;">${escapeHtml(order.order_number)} · ${status}</p>
+        </td></tr>
+        <tr><td style="padding:24px 32px 0;">
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0">${lines}</table>
+        </td></tr>
+        <tr><td style="padding:18px 32px 0;font-family:'Noto Sans KR',Arial,sans-serif;font-size:14px;line-height:1.7;color:#463221;">
+          <p style="margin:0;">${escapeHtml(order.customer_name || "")}</p>
+          <p style="margin:0;color:#5c4636;">${escapeHtml(order.customer_phone || "")}</p>
+          <p style="margin:0;color:#5c4636;">${escapeHtml(order.customer_email || "")}</p>
+          <p style="margin:8px 0 0;color:#5c4636;">${escapeHtml(order.shipping_address || "")}</p>
+          <p style="margin:16px 0 0;font-size:18px;font-weight:700;">${formatWon(order.total_amount)}</p>
+        </td></tr>
+        <tr><td align="center" style="padding:28px 32px 40px;">
+          <a href="https://dash.benua.shop/orders" style="display:inline-block;background:#385c37;color:#faf2e7;text-decoration:none;font-family:'Noto Sans KR',Arial,sans-serif;font-size:14px;font-weight:700;padding:14px 32px;border-radius:999px;">주문 확인하기</a>
+        </td></tr>
+      </table>
+      <p style="margin:18px 0 0;font-family:Arial,sans-serif;font-size:11px;line-height:1.6;color:#8d7766;">© ${new Date().getFullYear()} Benua. All rights reserved.</p>
+    </td></tr>
+  </table>
+</body>
+</html>`;
   const recipients = [
     ...new Set(
       (
@@ -198,19 +239,7 @@ const notifyAdminNewOrder = (orderId: number) => {
     ),
   ];
   for (const to of recipients) {
-    sendMail(
-    to,
-    `새 주문 ${order.order_number}`,
-    `
-    <p style="margin: 0 0 8px;">${escapeHtml(order.order_number)} · ${status}</p>
-    <p style="margin: 0 0 8px;">${escapeHtml(order.customer_name || "")} ${escapeHtml(order.customer_phone || "")}</p>
-    <p style="margin: 0 0 8px;">${escapeHtml(order.customer_email || "")}</p>
-    <p style="margin: 0 0 16px;">${escapeHtml(order.shipping_address || "")}</p>
-    <p style="margin: 0 0 16px; line-height: 1.7;">${lines}</p>
-    <p style="margin: 0; font-weight: bold;">${formatWon(order.total_amount)}</p>
-    `,
-    "ADMIN"
-  );
+    sendMail(to, "새 주문이 등록되었습니다", html, "ADMIN", false, "raw");
   }
 };
 
