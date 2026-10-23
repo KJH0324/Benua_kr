@@ -2278,7 +2278,7 @@ function AdminInbox() {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h2 className="text-xl font-bold font-serif">받은 메일</h2>
-          <p className="text-xs text-gray-400 mt-1">support@benua.shop 으로 온 메일만 표시됩니다.</p>
+          <p className="text-xs text-gray-400 mt-1">support@benua.shop, admin@benua.shop 으로 온 메일만 표시됩니다.</p>
         </div>
         <button
           onClick={syncMails}

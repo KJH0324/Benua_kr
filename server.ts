@@ -116,6 +116,32 @@ const ORDER_STATUS_KO: Record<string, string> = {
 const formatWon = (amount: number) =>
   `${Math.round(Number(amount) || 0).toLocaleString("ko-KR")}원`;
 
+const notifyAdminNewOrder = (orderId: number) => {
+  const order = db.prepare("SELECT * FROM orders WHERE id = ?").get(orderId) as any;
+  if (!order) return;
+  const items = db
+    .prepare("SELECT name, quantity, price FROM order_items WHERE order_id = ?")
+    .all(orderId) as Array<{ name: string; quantity: number; price: number }>;
+  const lines = items
+    .map((item) => `${escapeHtml(item.name)} × ${Number(item.quantity) || 0} · ${formatWon((item.price || 0) * (item.quantity || 0))}`)
+    .join("<br/>");
+  const status = order.status === "paid" ? "결제완료" : "입금대기";
+  const to = process.env.ADMIN_NOTIFY_EMAIL || process.env.SMTP_FROM_ADMIN || "admin@benua.shop";
+  sendMail(
+    to,
+    `새 주문 ${order.order_number}`,
+    `
+    <p style="margin: 0 0 8px;">${escapeHtml(order.order_number)} · ${status}</p>
+    <p style="margin: 0 0 8px;">${escapeHtml(order.customer_name || "")} ${escapeHtml(order.customer_phone || "")}</p>
+    <p style="margin: 0 0 8px;">${escapeHtml(order.customer_email || "")}</p>
+    <p style="margin: 0 0 16px;">${escapeHtml(order.shipping_address || "")}</p>
+    <p style="margin: 0 0 16px; line-height: 1.7;">${lines}</p>
+    <p style="margin: 0; font-weight: bold;">${formatWon(order.total_amount)}</p>
+    `,
+    "ADMIN"
+  );
+};
+
 const buildOrderEmailHtml = (order: any, items: any[]) => {
   const itemRows =
     items.length > 0
@@ -1104,6 +1130,7 @@ const runAutoCompletion = () => {
 // 5. Express Server Setup
 // ==========================================
 const SUPPORT_INBOX = (process.env.INBOUND_ADDRESS || "support@benua.shop").toLowerCase();
+const ADMIN_INBOX = (process.env.SMTP_FROM_ADMIN || "admin@benua.shop").toLowerCase();
 
 const resendApiKey = () => process.env.RESEND_API_KEY || process.env.SMTP_PASS || "";
 
@@ -1122,7 +1149,7 @@ const isSupportInboxMail = (email: any) => {
   ]
     .join(" ")
     .toLowerCase();
-  return blob.includes(SUPPORT_INBOX);
+  return blob.includes(SUPPORT_INBOX) || blob.includes(ADMIN_INBOX);
 };
 
 const verifyResendWebhook = (rawBody: string, headers: Record<string, unknown>) => {
@@ -2847,6 +2874,7 @@ async function startServer() {
       if (quote.total === 0) {
         try {
           finalizeOrderPaymentTx(orderId, `FREE_${order_number}`, payment_method || "card", "paid");
+          notifyAdminNewOrder(orderId);
         } catch (payErr) {
           db.prepare("DELETE FROM order_items WHERE order_id = ?").run(orderId);
           db.prepare("DELETE FROM orders WHERE id = ? AND status = 'pending'").run(orderId);
@@ -2990,6 +3018,8 @@ async function startServer() {
           "SYSTEM"
         );
       }
+
+      notifyAdminNewOrder(order.id);
 
       res.json({
         success: true,
