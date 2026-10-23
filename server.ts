@@ -1300,8 +1300,9 @@ const quoteCustomerRefund = (order: any, items: any[], selected: any[], waive = 
   };
 };
 
-const returnApprovedHtml = (order: any, names: string[]) => {
+const refundApprovedHtml = (order: any, names: string[], pickup: boolean) => {
   const list = names.map((name) => `<li style="margin:0 0 6px;">${escapeHtml(name)}</li>`).join("");
+  const heading = pickup ? "반품 요청이 승인되었습니다" : "환불이 승인되었습니다";
   return `<!DOCTYPE html>
 <html lang="ko"><body style="margin:0;padding:0;background:#faf2e7;">
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#faf2e7;padding:36px 12px;">
@@ -1309,20 +1310,16 @@ const returnApprovedHtml = (order: any, names: string[]) => {
 <table role="presentation" width="560" cellpadding="0" cellspacing="0" style="width:100%;max-width:560px;background:#fffdf9;border-radius:24px;">
 <tr><td style="padding:36px 28px 8px;text-align:center;font-family:Georgia,serif;font-size:22px;letter-spacing:0.42em;color:#463221;">BENUA</td></tr>
 <tr><td style="padding:12px 36px 0;text-align:center;font-family:'Noto Sans KR',Arial,sans-serif;">
-<p style="margin:0;font-size:12px;letter-spacing:0.18em;color:#385c37;">RETURN</p>
-<h1 style="margin:14px 0 0;font-size:24px;line-height:1.4;color:#463221;">반품 요청이 승인되었습니다</h1>
-<p style="margin:16px 0 0;font-size:14px;line-height:1.7;color:#5c4636;">${escapeHtml(order.customer_name || "")}님, 주문 ${escapeHtml(order.order_number)}의 반품을 확인했습니다. 아래 상품을 보내 주세요.</p>
+<p style="margin:0;font-size:12px;letter-spacing:0.18em;color:#385c37;">REFUND</p>
+<h1 style="margin:14px 0 0;font-size:24px;line-height:1.4;color:#463221;">${heading}</h1>
+<p style="margin:16px 0 0;font-size:14px;line-height:1.7;color:#5c4636;">${escapeHtml(order.customer_name || "")}님, 주문 ${escapeHtml(order.order_number)}의 환불을 승인했습니다.</p>
 </td></tr>
-<tr><td style="padding:22px 36px 0;font-family:'Noto Sans KR',Arial,sans-serif;font-size:14px;color:#463221;">
-<ul style="margin:0;padding-left:18px;">${list}</ul>
-</td></tr>
+${list ? `<tr><td style="padding:22px 36px 0;font-family:'Noto Sans KR',Arial,sans-serif;font-size:14px;color:#463221;"><ul style="margin:0;padding-left:18px;">${list}</ul></td></tr>` : ""}
 <tr><td style="padding:22px 36px 36px;font-family:'Noto Sans KR',Arial,sans-serif;">
 <div style="background:#faf2e7;border-radius:16px;padding:18px 20px;color:#463221;font-size:14px;line-height:1.7;">
-<p style="margin:0 0 8px;font-weight:700;">반품 보내실 곳</p>
-<p style="margin:0;">인천광역시 연수구 새말로 154, 307동 602호 (베뉴아)</p>
-<p style="margin:8px 0 0;">받는 사람: 베뉴아</p>
-<p style="margin:8px 0 0;">문의: support@benua.shop</p>
-<p style="margin:12px 0 0;font-size:13px;color:#5c4636;">택배는 착불이 아닙니다. 선불로 보내 주세요. 상품이 도착하면 환불 금액을 결제수단으로 돌려드립니다.</p>
+${pickup ? `<p style="margin:0 0 12px;">계약된 택배사에서 회수합니다.</p>` : ""}
+<p style="margin:0;">카드사 승인 취소까지 2–3영업일이 걸릴 수 있습니다.</p>
+<p style="margin:12px 0 0;">문의: support@benua.shop</p>
 </div>
 </td></tr>
 </table>
@@ -1330,12 +1327,12 @@ const returnApprovedHtml = (order: any, names: string[]) => {
 </body></html>`;
 };
 
-const sendReturnGuide = (order: any, names: string[]) => {
-  if (!order?.customer_email || names.length === 0) return;
+const sendRefundApproved = (order: any, names: string[], pickup = false) => {
+  if (!order?.customer_email) return;
   sendMail(
     order.customer_email,
-    "반품 요청이 승인되었습니다",
-    returnApprovedHtml(order, names),
+    pickup ? "반품 요청이 승인되었습니다" : "환불이 승인되었습니다",
+    refundApprovedHtml(order, names, pickup),
     "SUPPORT",
     true,
     "raw"
@@ -4167,6 +4164,11 @@ async function startServer() {
       if (quote.phase === "before") {
         await cancelTossPaymentIfNeeded(fresh, reason, quote.amount);
         const done = refundOrderTx(order.id, quote.amount, reason);
+        sendRefundApproved(
+          fresh,
+          selected.map((item) => `${item.name} × ${item.refund_quantity || item.quantity}`),
+          false
+        );
         return res.json({ success: true, status: done.status, refund_amount: quote.amount });
       }
       db.prepare(
@@ -4269,6 +4271,14 @@ async function startServer() {
       } else if (status === "refunded") {
         await cancelTossPaymentIfNeeded(order, order.refund_reason || "관리자 환불 승인", order.refund_amount || undefined);
         refundOrderTx(id);
+        const left = db
+          .prepare("SELECT name, quantity FROM order_items WHERE order_id = ? AND item_status = 'refunded'")
+          .all(id) as any[];
+        sendRefundApproved(
+          order,
+          left.map((item) => `${item.name} × ${item.quantity}`),
+          false
+        );
       } else {
         db.prepare(
           "UPDATE orders SET status = ?, vbank_account = CASE WHEN ? = 'pending' THEN vbank_account ELSE NULL END, status_updated_at = CURRENT_TIMESTAMP WHERE id = ?"
@@ -4303,12 +4313,11 @@ async function startServer() {
         const amount = selected.length ? quote.amount : Number(order.refund_amount) || Number(order.total_amount);
         await cancelTossPaymentIfNeeded(order, order.refund_reason || "클레임 환불 승인", amount);
         refundOrderTx(id, amount, order.refund_reason || "클레임 환불 승인");
-        if (pickup && orderPhase(order) === "after") {
-          sendReturnGuide(
-            order,
-            selected.map((item) => `${item.name} × ${item.refund_quantity || item.quantity}`)
-          );
-        }
+        sendRefundApproved(
+          order,
+          selected.map((item) => `${item.name} × ${item.refund_quantity || item.quantity}`),
+          Boolean(pickup) && orderPhase(order) === "after"
+        );
       } else {
         db.prepare(
           "UPDATE order_items SET item_status = 'normal', refund_quantity = 0 WHERE order_id = ? AND item_status = 'refund_requested'"
@@ -4363,12 +4372,11 @@ async function startServer() {
         reason,
         selected.map((item) => Number(item.id))
       );
-      if (req.body?.pickup && orderPhase(order) === "after") {
-        sendReturnGuide(
-          order,
-          selected.map((item) => `${item.name} × ${item.refund_quantity || item.quantity}`)
-        );
-      }
+      sendRefundApproved(
+        order,
+        selected.map((item) => `${item.name} × ${item.refund_quantity || item.quantity}`),
+        Boolean(req.body?.pickup) && orderPhase(order) === "after"
+      );
       logAdminAction(req, "ADMIN_PARTIAL_REFUND", "orders", Number(order.id), reason);
       res.json({ success: true, refund_amount: quote.amount });
     } catch (err: any) {

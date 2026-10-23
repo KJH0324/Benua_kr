@@ -286,9 +286,9 @@ export default function Profile() {
       const data = await res.json();
       if (res.ok) {
         toast.success(
-          data.status === "refunded"
-            ? "주문이 즉시 취소 및 환불되었습니다."
-            : "환불 요청이 정상적으로 접수되었습니다."
+          data.status === "refund_requested"
+            ? "환불 요청이 접수되었습니다."
+            : "환불되었습니다. 카드사 승인 취소까지 2–3영업일이 걸릴 수 있습니다."
         );
         setRefundModalOrder(null);
         setRefundDetailText("");
@@ -1223,6 +1223,10 @@ export default function Profile() {
                 <span>결제금액</span>
                 <span>{formatPrice(detailOrder.total_amount)}</span>
               </div>
+              {(detailOrder.status === "refunded" ||
+                (detailOrder.items || []).some((item: any) => item.item_status === "refunded")) && (
+                <p className="pt-2 text-sm text-venuea-brown">카드사 승인 취소까지 2–3영업일이 걸릴 수 있습니다.</p>
+              )}
               <div className="flex justify-between">
                 <span className="text-gray-500">상태</span>
                 <span>{formatOrderStatus(detailOrder.status)}</span>
