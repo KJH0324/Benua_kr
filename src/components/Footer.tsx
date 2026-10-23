@@ -116,7 +116,10 @@ export default function Footer() {
             <a href="tel:01092618016" className="hover:text-white">
               010-9261-8016
             </a>{" "}
-            · support@benua.shop
+            ·{" "}
+            <a href="mailto:support@benua.shop" className="hover:text-white">
+              support@benua.shop
+            </a>
           </p>
         </div>
       </div>
