@@ -126,6 +126,7 @@ export default function Profile() {
   const [reviewPreview, setReviewPreview] = useState("");
   const [wishes, setWishes] = useState<any[]>([]);
   const [pointHistory, setPointHistory] = useState<any[]>([]);
+  const [pointHistoryOpen, setPointHistoryOpen] = useState(false);
   const [addressOpen, setAddressOpen] = useState(false);
   const [postcodeOpen, setPostcodeOpen] = useState(false);
   const [addressError, setAddressError] = useState("");
@@ -590,19 +591,30 @@ export default function Profile() {
         {pointHistory.length === 0 ? (
           <p className="text-sm text-gray-400">포인트 내역이 없습니다.</p>
         ) : (
-          <div className="divide-y divide-black/5 rounded-xl border border-gray-200 bg-white">
-            {pointHistory.map((row) => (
-              <div key={row.id} className="px-4 py-3 flex items-center justify-between gap-3 text-sm">
-                <div>
-                  <p className="font-bold text-venuea-dark">{row.reason || (row.type === "USED" ? "사용" : "적립")}</p>
-                  <p className="text-[11px] text-gray-400">{String(row.created_at || "").slice(0, 16)}</p>
+          <div className="space-y-3">
+            <div className="divide-y divide-black/5 rounded-xl border border-gray-200 bg-white">
+              {pointHistory.slice(0, 3).map((row) => (
+                <div key={row.id} className="px-4 py-3 flex items-center justify-between gap-3 text-sm">
+                  <div>
+                    <p className="font-bold text-venuea-dark">{row.reason || (row.type === "USED" ? "사용" : "적립")}</p>
+                    <p className="text-[11px] text-gray-400">{String(row.created_at || "").slice(0, 16)}</p>
+                  </div>
+                  <span className={row.type === "USED" ? "text-red-600 font-bold" : "text-venuea-green font-bold"}>
+                    {row.type === "USED" ? "-" : "+"}
+                    {Number(row.amount || 0).toLocaleString()}P
+                  </span>
                 </div>
-                <span className={row.type === "USED" ? "text-red-600 font-bold" : "text-venuea-green font-bold"}>
-                  {row.type === "USED" ? "-" : "+"}
-                  {Number(row.amount || 0).toLocaleString()}P
-                </span>
-              </div>
-            ))}
+              ))}
+            </div>
+            {pointHistory.length > 3 && (
+              <button
+                type="button"
+                onClick={() => setPointHistoryOpen(true)}
+                className="text-sm font-bold text-venuea-green"
+              >
+                포인트 내역 조회
+              </button>
+            )}
           </div>
         )}
       </section>
@@ -862,6 +874,33 @@ export default function Profile() {
               >
                 등록하기
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {pointHistoryOpen && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-lg w-full max-h-[85vh] overflow-y-auto p-6 space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="font-bold text-lg">포인트 내역</h3>
+              <button type="button" aria-label="포인트 내역 닫기" onClick={() => setPointHistoryOpen(false)}>
+                <X size={18} />
+              </button>
+            </div>
+            <div className="divide-y divide-black/5">
+              {pointHistory.map((row) => (
+                <div key={row.id} className="py-3 flex items-center justify-between gap-3 text-sm">
+                  <div>
+                    <p className="font-bold text-venuea-dark">{row.reason || (row.type === "USED" ? "사용" : "적립")}</p>
+                    <p className="text-[11px] text-gray-400">{String(row.created_at || "").slice(0, 16)}</p>
+                  </div>
+                  <span className={row.type === "USED" ? "text-red-600 font-bold" : "text-venuea-green font-bold"}>
+                    {row.type === "USED" ? "-" : "+"}
+                    {Number(row.amount || 0).toLocaleString()}P
+                  </span>
+                </div>
+              ))}
             </div>
           </div>
         </div>

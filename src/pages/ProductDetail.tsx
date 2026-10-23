@@ -371,8 +371,51 @@ export default function ProductDetail() {
 
           <details className="border-t border-black/10 pt-4">
             <summary className="cursor-pointer text-sm font-bold text-venuea-dark">배송·교환·반품</summary>
-            <div className="pt-3 text-sm text-venuea-muted leading-relaxed">
-              <p>수령일로부터 7일 이내 교환·반품을 요청할 수 있습니다.</p>
+            <div className="pt-4 space-y-5 text-sm text-venuea-dark leading-relaxed">
+              <div>
+                <p className="font-bold">배송 안내</p>
+                <ul className="mt-2 space-y-1 text-venuea-muted">
+                  <li>택배사: CJ대한통운</li>
+                  <li>배송비: 기본 3,000원 (실결제 금액 50,000원 이상 무료배송 / BLACK·THE BLACK 등급 상시 무료배송)</li>
+                  <li>출고 기간: 결제 완료 후 영업일 기준 1~3일 이내 출고되며, 택배사 사정에 따라 수령까지 2~5일 정도 소요됩니다.</li>
+                </ul>
+              </div>
+              <div>
+                <p className="font-bold">교환·반품 신청 기간 및 방법</p>
+                <ul className="mt-2 space-y-1 text-venuea-muted">
+                  <li>단순 변심 및 옵션 오선택: 상품 수령일로부터 7일 이내에 신청할 수 있습니다.</li>
+                  <li>상품 불량 및 오배송: 수령일로부터 3개월 이내, 또는 그 사실을 안 날로부터 30일 이내에 신청할 수 있습니다.</li>
+                  <li>신청 방법: 마이페이지 주문 내역에서 환불/취소를 요청하시거나, 문의하기에서 주문번호를 선택해 접수해 주세요. 사전 접수 없이 임의로 발송하신 경우 처리가 지연될 수 있습니다.</li>
+                </ul>
+              </div>
+              <div>
+                <p className="font-bold">교환·반품 배송비 안내</p>
+                <ul className="mt-2 space-y-1 text-venuea-muted">
+                  <li>출고 전 취소: 결제대기·결제완료 단계에서 취소 시 전액 환불됩니다.</li>
+                  <li>단순 변심 및 옵션 오선택: 상품 출고 이후 반품 시 왕복 배송비 5,000원이 환불 금액에서 차감됩니다.</li>
+                  <li>상품 파손·불량 및 오배송: 배송비 전액을 베뉴아가 부담합니다. 수령 후 파손이나 불량을 발견하신 경우 사진을 함께 남겨주시면 더 빠르게 확인해 드립니다.</li>
+                </ul>
+              </div>
+              <div>
+                <p className="font-bold">교환·반품이 어려운 경우</p>
+                <ul className="mt-2 space-y-1 text-venuea-muted">
+                  <li>상품 수령일로부터 7일이 지난 경우</li>
+                  <li>고객님의 사용, 세탁 또는 부주의로 인해 상품이 훼손되거나 가치가 감소한 경우 (패브릭 및 소품류는 사용 흔적이 있을 경우 반품이 어렵습니다.)</li>
+                  <li>상품의 고유 패키지나 택(Tag)이 훼손·분실된 경우 (단, 상품 확인을 위한 단순 택배 박스 개봉은 제외됩니다.)</li>
+                </ul>
+              </div>
+              <div>
+                <p className="font-bold">반품 보내실 곳</p>
+                <ul className="mt-2 space-y-1 text-venuea-muted">
+                  <li>주소: 인천광역시 연수구 새말로 154, 307동 602호 (베뉴아)</li>
+                  <li>
+                    고객센터:{" "}
+                    <a href="mailto:support@benua.shop" className="underline">
+                      support@benua.shop
+                    </a>
+                  </li>
+                </ul>
+              </div>
             </div>
           </details>
         </div>

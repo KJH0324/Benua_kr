@@ -1749,8 +1749,7 @@ async function startServer() {
           `SELECT id, amount, reason, type, created_at
            FROM point_history
            WHERE user_id = ?
-           ORDER BY id DESC
-           LIMIT 50`
+           ORDER BY id DESC`
         )
         .all(req.user.id);
       res.json(rows);
