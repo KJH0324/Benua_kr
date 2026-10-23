@@ -44,7 +44,11 @@ const TIER_BANNERS: Record<
     track: "bg-black/20",
     accent: "text-[#385c37]",
     fill: "bg-[#385c37]",
-    style: { backgroundColor: "#faf2e7" },
+    style: {
+      backgroundColor: "#fffaf3",
+      border: "1px solid rgba(70, 50, 33, 0.22)",
+      boxShadow: "0 8px 24px rgba(70, 50, 33, 0.06)",
+    },
     button: "border-black/15 hover:bg-black/5",
   },
   GREEN: {
