@@ -2557,7 +2557,7 @@ async function startServer() {
     for (const row of rows) {
       await sendMail(
         row.email,
-        reserved ? `${product.name} 구매가 열렸습니다` : `${product.name} 판매가 시작되었습니다`,
+        `${product.name}의 판매가 시작되었습니다`,
         html,
         "NEWS",
         false,
