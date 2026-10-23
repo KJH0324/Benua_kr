@@ -21,14 +21,18 @@ export default function AdminLogs() {
   const [logs, setLogs] = useState<AdminLogItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
+  const [capped, setCapped] = useState(false);
 
-  const fetchLogs = async () => {
+  const fetchLogs = async (query: string) => {
     setIsLoading(true);
     try {
-      const res = await apiFetch("/api/admin/logs");
+      const q = query.trim();
+      const res = await apiFetch(q ? `/api/admin/logs?q=${encodeURIComponent(q)}` : "/api/admin/logs");
       if (!res.ok) throw new Error("Failed");
       const data = await res.json();
-      setLogs(Array.isArray(data) ? data : []);
+      const rows = Array.isArray(data) ? data : data.logs;
+      setLogs(Array.isArray(rows) ? rows : []);
+      setCapped(Boolean(data?.capped));
     } catch {
       toast.error("감사 로그를 불러오지 못했습니다.");
     } finally {
@@ -37,18 +41,9 @@ export default function AdminLogs() {
   };
 
   useEffect(() => {
-    fetchLogs();
-  }, []);
-
-  const filteredLogs = logs.filter((log) => {
-    const q = searchTerm.toLowerCase();
-    return (
-      (log.action || "").toLowerCase().includes(q) ||
-      (log.admin_identifier || "").toLowerCase().includes(q) ||
-      (log.details || "").toLowerCase().includes(q) ||
-      (log.target_type || "").toLowerCase().includes(q)
-    );
-  });
+    const timer = setTimeout(() => fetchLogs(searchTerm), 300);
+    return () => clearTimeout(timer);
+  }, [searchTerm]);
 
   return (
     <div className="space-y-6 animate-in fade-in">
@@ -60,7 +55,11 @@ export default function AdminLogs() {
           <div>
             <h1 className="text-2xl font-serif font-bold text-gray-900">보안 감사 로그</h1>
             <p className="text-xs text-gray-500 mt-0.5">
-              관리자 계정 및 보안 키로 수행된 최근 500건의 작업 기록입니다.
+              {searchTerm.trim()
+                ? capped
+                  ? "전체 기록 중 일치하는 최근 500건"
+                  : "전체 기록"
+                : "최근 500건"}
             </p>
           </div>
         </div>
@@ -77,7 +76,7 @@ export default function AdminLogs() {
             />
           </div>
           <button
-            onClick={fetchLogs}
+            onClick={() => fetchLogs(searchTerm)}
             className="p-2.5 bg-white border border-gray-200 rounded-xl text-gray-600 hover:text-venuea-dark hover:bg-gray-50 transition-colors"
             title="새로고침"
           >
@@ -118,14 +117,14 @@ export default function AdminLogs() {
                     <Loader2 className="animate-spin mx-auto text-venuea-gold" size={28} />
                   </td>
                 </tr>
-              ) : filteredLogs.length === 0 ? (
+              ) : logs.length === 0 ? (
                 <tr>
                   <td colSpan={6} className="px-6 py-12 text-center text-gray-400">
-                    기록된 감사 로그가 없습니다.
+                    {searchTerm.trim() ? "일치하는 기록이 없습니다." : "기록된 감사 로그가 없습니다."}
                   </td>
                 </tr>
               ) : (
-                filteredLogs.map((log) => (
+                logs.map((log) => (
                   <tr key={log.id} className="hover:bg-gray-50/70 transition-colors">
                     <td className="px-6 py-4 text-xs text-gray-500 whitespace-nowrap">
                       {new Date(log.created_at).toLocaleString("ko-KR")}

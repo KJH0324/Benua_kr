@@ -2061,10 +2061,29 @@ async function startServer() {
     res.json({ authenticated: true, role: req.admin.role });
   });
 
-  app.get("/api/admin/logs", authenticateAdmin, (_req, res) => {
+  app.get("/api/admin/logs", authenticateAdmin, (req, res) => {
     try {
-      const logs = db.prepare("SELECT * FROM admin_logs ORDER BY created_at DESC LIMIT 500").all();
-      res.json(logs);
+      const q = String(req.query.q || "").trim();
+      if (!q) {
+        const logs = db.prepare("SELECT * FROM admin_logs ORDER BY created_at DESC LIMIT 500").all();
+        return res.json({ logs, capped: false });
+      }
+      const like = `%${q.replace(/[\\%_]/g, (ch) => `\\${ch}`)}%`;
+      const rows = db
+        .prepare(
+          `SELECT * FROM admin_logs
+           WHERE action LIKE ? ESCAPE '\\'
+              OR IFNULL(admin_identifier, '') LIKE ? ESCAPE '\\'
+              OR IFNULL(details, '') LIKE ? ESCAPE '\\'
+              OR IFNULL(target_type, '') LIKE ? ESCAPE '\\'
+              OR IFNULL(changes, '') LIKE ? ESCAPE '\\'
+              OR IFNULL(ip_address, '') LIKE ? ESCAPE '\\'
+              OR CAST(IFNULL(target_id, '') AS TEXT) LIKE ? ESCAPE '\\'
+           ORDER BY created_at DESC
+           LIMIT 501`
+        )
+        .all(like, like, like, like, like, like, like) as any[];
+      res.json({ logs: rows.slice(0, 500), capped: rows.length > 500 });
     } catch {
       res.status(500).json({ error: "로그를 불러오지 못했습니다." });
     }
