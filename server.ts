@@ -3391,6 +3391,38 @@ async function startServer() {
     }
   });
 
+  app.put("/api/orders/:id/address", authenticateUser, (req: any, res) => {
+    const name = String(req.body?.customer_name || "").trim();
+    const phone = String(req.body?.customer_phone || "").trim();
+    const zipcode = String(req.body?.zipcode || "").replace(/\D/g, "");
+    const address = String(req.body?.address || "").trim();
+    const detail = String(req.body?.detail_address || "").trim();
+    if (!name || !phone || zipcode.length < 5 || !address) {
+      return res.status(400).json({ error: "수령인, 연락처, 주소를 입력해주세요." });
+    }
+    try {
+      const order = db
+        .prepare("SELECT id, status FROM orders WHERE id = ? AND user_id = ?")
+        .get(req.params.id, req.user.id) as any;
+      if (!order) return res.status(404).json({ error: "주문을 찾을 수 없습니다." });
+      if (!["pending", "paid"].includes(order.status)) {
+        return res.status(400).json({ error: "발송된 주문은 배송지를 바꿀 수 없습니다." });
+      }
+      const shippingAddress = `[${zipcode}] ${address}${detail ? ` ${detail}` : ""}`;
+      db.prepare(
+        "UPDATE orders SET customer_name = ?, customer_phone = ?, shipping_address = ? WHERE id = ?"
+      ).run(name, phone, shippingAddress, order.id);
+      res.json({
+        success: true,
+        customer_name: name,
+        customer_phone: phone,
+        shipping_address: shippingAddress,
+      });
+    } catch {
+      res.status(500).json({ error: "배송지를 바꾸지 못했습니다." });
+    }
+  });
+
   app.post("/api/orders/:id/confirm", authenticateUser, (req: any, res) => {
     try {
       const order = db

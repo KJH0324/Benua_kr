@@ -12,6 +12,19 @@ import {
 } from "../lib/utils";
 import type { UserProfile, Order } from "../types";
 
+const PAYMENT_LABELS: Record<string, string> = {
+  card: "신용/체크카드",
+  kakao_pay: "카카오페이",
+  naver_pay: "네이버페이",
+  vbank: "가상계좌",
+};
+
+const splitShippingAddress = (value: string) => {
+  const match = String(value || "").match(/^\[(\d+)\]\s*(.*)$/);
+  if (!match) return { zipcode: "", address: String(value || ""), detail_address: "" };
+  return { zipcode: match[1], address: match[2], detail_address: "" };
+};
+
 const REFUND_REASONS = [
   "단순 변심",
   "옵션 오선택",
@@ -129,6 +142,16 @@ export default function Profile() {
   const [refundDetailText, setRefundDetailText] = useState("");
   const [refundError, setRefundError] = useState("");
   const [isSubmittingRefund, setIsSubmittingRefund] = useState(false);
+  const [detailOrder, setDetailOrder] = useState<any | null>(null);
+  const [editingAddress, setEditingAddress] = useState(false);
+  const [orderAddressForm, setOrderAddressForm] = useState({
+    customer_name: "",
+    customer_phone: "",
+    zipcode: "",
+    address: "",
+    detail_address: "",
+  });
+  const [orderAddressError, setOrderAddressError] = useState("");
 
   const loadProfileData = async () => {
     const meRes = await apiFetch("/api/auth/me");
@@ -160,6 +183,39 @@ export default function Profile() {
   useEffect(() => {
     loadProfileData();
   }, []);
+
+  const openOrderDetail = (order: any) => {
+    const parsed = splitShippingAddress(order.shipping_address || "");
+    setDetailOrder(order);
+    setEditingAddress(false);
+    setOrderAddressError("");
+    setOrderAddressForm({
+      customer_name: order.customer_name || "",
+      customer_phone: order.customer_phone || "",
+      zipcode: parsed.zipcode,
+      address: parsed.address,
+      detail_address: parsed.detail_address,
+    });
+  };
+
+  const saveOrderAddress = async () => {
+    if (!detailOrder) return;
+    setOrderAddressError("");
+    const res = await apiFetch(`/api/orders/${detailOrder.id}/address`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(orderAddressForm),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      setOrderAddressError(data.error || "배송지를 바꾸지 못했습니다.");
+      return;
+    }
+    setDetailOrder({ ...detailOrder, ...data });
+    setEditingAddress(false);
+    toast.success("배송지를 변경했습니다.");
+    loadProfileData();
+  };
 
   const handleConfirmOrder = async (orderId: number) => {
     const res = await apiFetch(`/api/orders/${orderId}/confirm`, { method: "POST" });
@@ -579,6 +635,13 @@ export default function Profile() {
                     >
                       {formatOrderStatus(order.status)}
                     </span>
+                    <button
+                      type="button"
+                      onClick={() => openOrderDetail(order)}
+                      className="px-3 py-1 border border-gray-300 bg-white rounded-lg text-xs font-bold text-gray-700"
+                    >
+                      주문 상세
+                    </button>
                     {["paid", "shipping", "delivered"].includes(order.status) && (
                       <button
                         onClick={() => handleConfirmOrder(order.id)}
@@ -804,6 +867,180 @@ export default function Profile() {
         </div>
       )}
 
+      {detailOrder && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-lg w-full max-h-[85vh] overflow-y-auto p-6 space-y-5">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h3 className="font-bold text-lg">주문 상세</h3>
+                <p className="text-xs text-gray-400 font-mono mt-1">{detailOrder.order_number}</p>
+              </div>
+              <button type="button" aria-label="주문 상세 닫기" onClick={() => setDetailOrder(null)}>
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="space-y-2 text-sm">
+              {(detailOrder.items || []).map((item: any, idx: number) => (
+                <div key={idx} className="flex justify-between gap-3">
+                  <span>
+                    {item.name} × {item.quantity}
+                  </span>
+                  <span className="font-bold">{formatPrice(item.price * item.quantity)}</span>
+                </div>
+              ))}
+            </div>
+
+            <div className="border-t border-black/10 pt-4 space-y-1.5 text-sm">
+              <div className="flex justify-between">
+                <span className="text-gray-500">결제수단</span>
+                <span>{PAYMENT_LABELS[detailOrder.payment_method] || detailOrder.payment_method || "-"}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-gray-500">상품 금액</span>
+                <span>
+                  {formatPrice(
+                    (detailOrder.items || []).reduce(
+                      (sum: number, item: any) => sum + Number(item.price || 0) * Number(item.quantity || 0),
+                      0
+                    )
+                  )}
+                </span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-gray-500">배송비</span>
+                <span>{Number(detailOrder.shipping_fee || 0) === 0 ? "무료" : formatPrice(detailOrder.shipping_fee)}</span>
+              </div>
+              {Number(detailOrder.used_points || 0) > 0 && (
+                <div className="flex justify-between">
+                  <span className="text-gray-500">포인트</span>
+                  <span>-{Number(detailOrder.used_points).toLocaleString()}P</span>
+                </div>
+              )}
+              {(() => {
+                const goods = (detailOrder.items || []).reduce(
+                  (sum: number, item: any) => sum + Number(item.price || 0) * Number(item.quantity || 0),
+                  0
+                );
+                const discount = Math.max(
+                  0,
+                  goods + Number(detailOrder.shipping_fee || 0) - Number(detailOrder.used_points || 0) - Number(detailOrder.total_amount || 0)
+                );
+                return discount > 0 ? (
+                  <div className="flex justify-between">
+                    <span className="text-gray-500">할인</span>
+                    <span>-{formatPrice(discount)}</span>
+                  </div>
+                ) : null;
+              })()}
+              <div className="flex justify-between font-bold pt-2">
+                <span>결제금액</span>
+                <span>{formatPrice(detailOrder.total_amount)}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-gray-500">상태</span>
+                <span>{formatOrderStatus(detailOrder.status)}</span>
+              </div>
+            </div>
+
+            {detailOrder.status === "pending" && detailOrder.vbank_account && (
+              <div className="rounded-xl bg-amber-50 border border-amber-200 p-4 text-sm space-y-1">
+                <p className="font-bold">입금 계좌</p>
+                <p>{detailOrder.vbank_bank} {detailOrder.vbank_account}</p>
+                {detailOrder.vbank_holder && <p>예금주 {detailOrder.vbank_holder}</p>}
+                {detailOrder.vbank_due_date && (
+                  <p>기한 {new Date(detailOrder.vbank_due_date).toLocaleString("ko-KR")}</p>
+                )}
+              </div>
+            )}
+
+            {(detailOrder.tracking_number || detailOrder.shipping_company) && (
+              <p className="text-sm">
+                {detailOrder.shipping_company || "택배"} {detailOrder.tracking_number || ""}
+              </p>
+            )}
+
+            <div className="border-t border-black/10 pt-4 space-y-3 text-sm">
+              <div className="flex items-center justify-between">
+                <p className="font-bold">배송지</p>
+                {["pending", "paid"].includes(detailOrder.status) && !editingAddress && (
+                  <button
+                    type="button"
+                    onClick={() => setEditingAddress(true)}
+                    className="text-xs font-bold text-venuea-green"
+                  >
+                    배송지 변경
+                  </button>
+                )}
+              </div>
+              {editingAddress ? (
+                <div className="space-y-2">
+                  {orderAddressError && (
+                    <p className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+                      {orderAddressError}
+                    </p>
+                  )}
+                  <input
+                    value={orderAddressForm.customer_name}
+                    onChange={(e) => setOrderAddressForm({ ...orderAddressForm, customer_name: e.target.value })}
+                    placeholder="수령인"
+                    className="w-full border rounded-xl px-3 py-2 text-sm"
+                  />
+                  <input
+                    value={orderAddressForm.customer_phone}
+                    onChange={(e) => setOrderAddressForm({ ...orderAddressForm, customer_phone: e.target.value })}
+                    placeholder="연락처"
+                    className="w-full border rounded-xl px-3 py-2 text-sm"
+                  />
+                  <div className="flex gap-2">
+                    <input
+                      value={orderAddressForm.zipcode}
+                      onChange={(e) =>
+                        setOrderAddressForm({ ...orderAddressForm, zipcode: e.target.value.replace(/\D/g, "") })
+                      }
+                      placeholder="우편번호"
+                      className="flex-1 border rounded-xl px-3 py-2 text-sm"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setPostcodeOpen(true)}
+                      className="px-4 rounded-xl bg-venuea-dark text-white text-xs font-bold"
+                    >
+                      주소 검색
+                    </button>
+                  </div>
+                  <input
+                    value={orderAddressForm.address}
+                    onChange={(e) => setOrderAddressForm({ ...orderAddressForm, address: e.target.value })}
+                    placeholder="주소"
+                    className="w-full border rounded-xl px-3 py-2 text-sm"
+                  />
+                  <input
+                    value={orderAddressForm.detail_address}
+                    onChange={(e) => setOrderAddressForm({ ...orderAddressForm, detail_address: e.target.value })}
+                    placeholder="상세주소"
+                    className="w-full border rounded-xl px-3 py-2 text-sm"
+                  />
+                  <button
+                    type="button"
+                    onClick={saveOrderAddress}
+                    className="w-full py-3 bg-venuea-green text-white rounded-xl text-sm font-bold"
+                  >
+                    저장
+                  </button>
+                </div>
+              ) : (
+                <div className="text-gray-700 leading-6">
+                  <p>{detailOrder.customer_name}</p>
+                  <p>{detailOrder.customer_phone}</p>
+                  <p>{detailOrder.shipping_address}</p>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       {addressOpen && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl max-w-md w-full p-6 space-y-4">
@@ -871,11 +1108,19 @@ export default function Profile() {
             </div>
             <DaumPostcodeEmbed
               onComplete={(data) => {
-                setAddressForm((prev) => ({
-                  ...prev,
-                  zipcode: data.zonecode,
-                  address: data.address,
-                }));
+                if (editingAddress) {
+                  setOrderAddressForm((prev) => ({
+                    ...prev,
+                    zipcode: data.zonecode,
+                    address: data.address,
+                  }));
+                } else {
+                  setAddressForm((prev) => ({
+                    ...prev,
+                    zipcode: data.zonecode,
+                    address: data.address,
+                  }));
+                }
                 setPostcodeOpen(false);
               }}
             />
