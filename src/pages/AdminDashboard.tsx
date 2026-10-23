@@ -748,7 +748,7 @@ function AdminProducts() {
                   <td className="px-6 py-4">
                     <form
                       key={`${product.id}-${product.price}-${product.discount_rate}-${product.stock}`}
-                      className="flex flex-col gap-1.5"
+                      className="flex flex-row flex-wrap items-center gap-3"
                       onSubmit={(e) => {
                         e.preventDefault();
                         saveQuick(product, e.currentTarget);
