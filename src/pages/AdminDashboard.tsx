@@ -459,7 +459,11 @@ function AdminProducts() {
               origin: String(row.origin || row.원산지 || "").trim(),
               manufacturer: String(row.manufacturer || row.제조사 || "").trim(),
               discount_rate: row.discount_rate ?? row.할인율 ?? 0,
-              show_on_main: row.show_on_main ?? row.메인노출 ?? 0,
+              show_on_main: ["1", "예", "y", "yes", "true", "노출"].includes(
+                String(row.show_on_main ?? row.메인노출 ?? "").trim().toLowerCase()
+              )
+                ? 1
+                : 0,
             }))
             .filter(
               (item) =>
@@ -624,7 +628,7 @@ function AdminProducts() {
                 "benua_products_example.csv",
                 [
                   "상품명,가격,설명,카테고리,재고,소재,규격,원산지,제조사,할인율,메인노출",
-                  "예시 상품,28000,상품 설명,오브제,10,도자기,지름 10cm,대한민국,베뉴아,0,0",
+                  "예시 상품,28000,상품 설명,오브제,10,도자기,지름 10cm,대한민국,베뉴아,0,아니오",
                 ].join("\n")
               )
             }
