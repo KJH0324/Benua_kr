@@ -381,6 +381,16 @@ function AdminOverview() {
 /* =========================================================
    2. Products Management (Fixed duplicate stock & added dimensions)
 ========================================================= */
+function downloadCsv(filename: string, csv: string) {
+  const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 function AdminProducts() {
   const [products, setProducts] = useState<Product[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -437,13 +447,26 @@ function AdminProducts() {
       skipEmptyLines: true,
       complete: async (results) => {
         try {
+          const products = (results.data as any[]).map((row) => ({
+            name: row.name || row.상품명 || "",
+            price: row.price ?? row.가격 ?? 0,
+            description: row.description || row.설명 || "",
+            category: row.category || row.카테고리 || "오브제",
+            stock: row.stock ?? row.재고 ?? 0,
+            material: row.material || row.소재 || "",
+            dimensions: row.dimensions || row.규격 || "",
+            origin: row.origin || row.원산지 || "",
+            manufacturer: row.manufacturer || row.제조사 || "",
+            discount_rate: row.discount_rate ?? row.할인율 ?? 0,
+            show_on_main: row.show_on_main ?? row.메인노출 ?? 0,
+          }));
           const response = await apiFetch("/api/admin/products/bulk", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ products: results.data }),
+            body: JSON.stringify({ products }),
           });
           if (response.ok) {
-            toast.success(`${results.data.length}건의 오브제가 등록되었습니다.`);
+            toast.success(`${products.filter((item) => item.name).length}건의 오브제가 등록되었습니다.`);
             fetchProducts();
           } else {
             toast.error("CSV 대량 등록에 실패했습니다.");
@@ -577,6 +600,21 @@ function AdminProducts() {
       <header className="flex flex-wrap justify-between items-center gap-4">
         <h1 className="text-2xl font-serif font-bold text-gray-900">오브제 관리</h1>
         <div className="flex space-x-3">
+          <button
+            type="button"
+            onClick={() =>
+              downloadCsv(
+                "benua_products_example.csv",
+                [
+                  "상품명,가격,설명,카테고리,재고,소재,규격,원산지,제조사,할인율,메인노출",
+                  "예시 상품,28000,상품 설명,오브제,10,도자기,지름 10cm,대한민국,베뉴아,0,0",
+                ].join("\n")
+              )
+            }
+            className="bg-white border border-gray-200 text-gray-600 px-4 py-2 rounded-lg text-sm font-medium hover:bg-gray-50"
+          >
+            CSV 예시
+          </button>
           <label className="bg-white border border-gray-200 text-gray-600 px-4 py-2 rounded-lg text-sm font-medium flex items-center space-x-2 cursor-pointer hover:bg-gray-50 transition-colors">
             <Upload size={18} />
             <span>CSV 일괄 등록</span>
@@ -1606,8 +1644,9 @@ function AdminFulfillment() {
       method: "POST",
       body: formData,
     });
-    if (res.ok) toast.success("운송장 일괄 등록이 완료되었습니다.");
-    else toast.error("일괄 등록에 실패했습니다.");
+    const data = await res.json().catch(() => ({}));
+    if (res.ok) toast.success(`${data.updatedCount || 0}건 등록했습니다.`);
+    else toast.error(data.error || "일괄 등록에 실패했습니다.");
   };
 
   return (
@@ -1617,6 +1656,18 @@ function AdminFulfillment() {
         첫 줄 헤더 이후 <code>주문번호,운송장번호,택배사</code> 형식의 CSV 파일을 업로드하면 자동으로 배송중 처리됩니다.
       </p>
       <div className="flex items-center gap-4">
+        <button
+          type="button"
+          onClick={() =>
+            downloadCsv(
+              "benua_tracking_example.csv",
+              ["주문번호,운송장번호,택배사", "예시주문번호,123456789012,CJ대한통운"].join("\n")
+            )
+          }
+          className="bg-white border border-gray-200 text-gray-700 px-4 py-2.5 rounded-lg text-sm font-bold"
+        >
+          CSV 예시
+        </button>
         <input
           type="file"
           accept=".csv"

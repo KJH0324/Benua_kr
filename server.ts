@@ -3783,15 +3783,16 @@ async function startServer() {
           for (const row of rows) {
             const [order_number, tracking_number, shipping_company] = row
               .split(",")
-              .map((s) => s.trim());
-            if (order_number && tracking_number) {
-              const r = db
-                .prepare(
-                  "UPDATE orders SET tracking_number = ?, shipping_company = ?, status = 'shipping', vbank_account = NULL, status_updated_at = CURRENT_TIMESTAMP WHERE order_number = ?"
-                )
-                .run(tracking_number, shipping_company || "CJ대한통운", order_number);
-              updatedCount += r.changes;
+              .map((s) => s.trim().replace(/^\uFEFF/, "").replace(/^"|"$/g, ""));
+            if (!order_number || order_number === "주문번호" || !tracking_number || tracking_number === "운송장번호") {
+              continue;
             }
+            const r = db
+              .prepare(
+                "UPDATE orders SET tracking_number = ?, shipping_company = ?, status = 'shipping', vbank_account = NULL, status_updated_at = CURRENT_TIMESTAMP WHERE order_number = ?"
+              )
+              .run(tracking_number, shipping_company || "CJ대한통운", order_number);
+            updatedCount += r.changes;
           }
         })(lines.slice(1));
 
