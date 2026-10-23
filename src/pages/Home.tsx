@@ -54,7 +54,7 @@ export default function Home() {
             나만의 쉼이 시작됩니다
           </h1>
           <p className="text-sm md:text-base text-white/90 leading-relaxed">
-            작은 공간을 위한 감성 소품·수납용품 · {formatPrice(FREE_SHIPPING_MIN)} 이상 무료배송
+            {formatPrice(FREE_SHIPPING_MIN)} 이상 무료배송
           </p>
           <Link
             to={banner.link_url || "/shop"}

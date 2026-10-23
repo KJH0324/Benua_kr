@@ -63,12 +63,9 @@ export default function CouponPopup() {
               <Ticket size={24} />
             </div>
 
-            <h3 className="text-lg font-serif font-bold text-venuea-dark mb-1">
-              새로운 혜택이 도착했습니다
+            <h3 className="text-lg font-serif font-bold text-venuea-dark mb-4">
+              쿠폰이 발급되었습니다
             </h3>
-            <p className="text-xs text-venuea-muted mb-4">
-              회원님께 발급된 전용 쿠폰을 확인해보세요.
-            </p>
 
             <div className="space-y-2.5 max-h-48 overflow-y-auto mb-6">
               {newCoupons.map((c) => (

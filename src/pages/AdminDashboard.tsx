@@ -666,7 +666,7 @@ function AdminProducts() {
             >
               <div className="p-6 border-b border-gray-100 flex justify-between items-center">
                 <h2 className="text-xl font-bold">
-                  {editingId ? "오브제 정보 수정" : "새 오브제 등록"}
+                  {editingId ? "상품 수정" : "상품 등록"}
                 </h2>
                 <button
                   onClick={() => setIsModalOpen(false)}
@@ -680,13 +680,12 @@ function AdminProducts() {
                 className="p-6 space-y-4 max-h-[75vh] overflow-y-auto"
               >
                 <div className="space-y-1">
-                  <label className="text-xs font-bold text-gray-500 uppercase">오브제명</label>
+                  <label className="text-xs font-bold text-gray-500 uppercase">상품명</label>
                   <input
                     type="text"
                     required
                     value={newProduct.name}
                     onChange={(e) => setNewProduct({ ...newProduct, name: e.target.value })}
-                    placeholder="예: 아르떼 세라믹 화병 오브제"
                     className="w-full border border-gray-200 rounded-lg px-4 py-2 text-sm"
                   />
                 </div>
@@ -754,24 +753,20 @@ function AdminProducts() {
 
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-1">
-                    <label className="text-xs font-bold text-gray-500 uppercase">소재 (Material)</label>
+                    <label className="text-xs font-bold text-gray-500 uppercase">소재</label>
                     <input
                       type="text"
                       value={newProduct.material}
                       onChange={(e) => setNewProduct({ ...newProduct, material: e.target.value })}
-                      placeholder="예: 포슬린 세라믹, 황동"
                       className="w-full border border-gray-200 rounded-lg px-4 py-2 text-sm"
                     />
                   </div>
                   <div className="space-y-1">
-                    <label className="text-xs font-bold text-gray-500 uppercase">
-                      규격/사이즈 (Dimensions)
-                    </label>
+                    <label className="text-xs font-bold text-gray-500 uppercase">규격</label>
                     <input
                       type="text"
                       value={newProduct.dimensions}
                       onChange={(e) => setNewProduct({ ...newProduct, dimensions: e.target.value })}
-                      placeholder="예: W 140 × D 140 × H 220 mm"
                       className="w-full border border-gray-200 rounded-lg px-4 py-2 text-sm"
                     />
                   </div>
@@ -784,19 +779,18 @@ function AdminProducts() {
                       type="text"
                       value={newProduct.origin}
                       onChange={(e) => setNewProduct({ ...newProduct, origin: e.target.value })}
-                      placeholder="예: 대한민국"
+                      placeholder="대한민국"
                       className="w-full border border-gray-200 rounded-lg px-4 py-2 text-sm"
                     />
                   </div>
                   <div className="space-y-1">
-                    <label className="text-xs font-bold text-gray-500 uppercase">제조사/아틀리에</label>
+                    <label className="text-xs font-bold text-gray-500 uppercase">제조사</label>
                     <input
                       type="text"
                       value={newProduct.manufacturer}
                       onChange={(e) =>
                         setNewProduct({ ...newProduct, manufacturer: e.target.value })
                       }
-                      placeholder="예: Benua Studio"
                       className="w-full border border-gray-200 rounded-lg px-4 py-2 text-sm"
                     />
                   </div>
@@ -816,7 +810,7 @@ function AdminProducts() {
                     htmlFor="show_on_main"
                     className="text-sm font-bold text-venuea-dark cursor-pointer"
                   >
-                    메인 페이지 큐레이션 노출
+                    메인 노출
                   </label>
                 </div>
 
@@ -844,7 +838,7 @@ function AdminProducts() {
                 </div>
 
                 <div className="space-y-1">
-                  <label className="text-xs font-bold text-gray-500 uppercase">오브제 스토리 설명</label>
+                  <label className="text-xs font-bold text-gray-500 uppercase">설명</label>
                   <textarea
                     rows={3}
                     value={newProduct.description}
@@ -857,7 +851,7 @@ function AdminProducts() {
                   type="submit"
                   className="w-full bg-venuea-dark text-white py-3 rounded-lg font-bold hover:bg-venuea-gold transition-colors"
                 >
-                  {editingId ? "수정 내용 저장" : "오브제 등록하기"}
+                  {editingId ? "저장" : "등록"}
                 </button>
               </form>
             </motion.div>

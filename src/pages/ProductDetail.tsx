@@ -153,7 +153,7 @@ export default function ProductDetail() {
     if (buyNow) {
       navigate("/checkout");
     } else {
-      toast.success("쇼핑백에 오브제가 담겼습니다.");
+      toast.success("쇼핑백에 담았습니다.");
     }
   };
 
@@ -256,7 +256,7 @@ export default function ProductDetail() {
           </div>
 
           <p className="text-sm text-venuea-muted">
-            {stock > 0 ? `남은 재고 ${stock}개` : "지금은 품절이에요. 입고되면 알려드릴게요."}
+            {stock > 0 ? `남은 재고 ${stock}개` : "품절"}
           </p>
           <div className="flex items-center gap-4">
             <div className="flex items-center border border-black/10 rounded-xl bg-white">
@@ -312,12 +312,8 @@ export default function ProductDetail() {
 
           <details className="border-t border-black/10 pt-4">
             <summary className="cursor-pointer text-sm font-bold text-venuea-dark">배송·교환·반품</summary>
-            <div className="pt-3 space-y-2 text-sm text-venuea-muted leading-relaxed">
-              <p>
-                배송비는 {formatPrice(SHIPPING_FEE)}입니다. 상품 금액이 {formatPrice(FREE_SHIPPING_MIN)} 이상이거나
-                블랙·더 블랙 등급이면 무료입니다.
-              </p>
-              <p>수령일로부터 7일 이내 교환·반품을 요청할 수 있습니다. 단순 변심은 반품 배송비가 들 수 있습니다.</p>
+            <div className="pt-3 text-sm text-venuea-muted leading-relaxed">
+              <p>수령일로부터 7일 이내 교환·반품을 요청할 수 있습니다.</p>
             </div>
           </details>
         </div>

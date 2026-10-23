@@ -36,7 +36,7 @@ export default function ProductCard({ product }: { product: CardProduct }) {
         )}
         {Number(product.stock) === 0 && (
           <div className="absolute inset-0 bg-[#faf2e7]/80 flex items-end p-3">
-            <p className="text-xs font-bold text-venuea-dark">지금은 품절이에요. 입고되면 알려드릴게요.</p>
+            <p className="text-xs font-bold text-venuea-dark">품절</p>
           </div>
         )}
         {rate > 0 && (

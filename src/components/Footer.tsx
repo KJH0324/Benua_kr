@@ -34,9 +34,6 @@ export default function Footer() {
           <Link to="/" className="inline-flex">
             <img src="/logo-beige.png" alt="Benua" className="h-12 w-auto" />
           </Link>
-          <p className="text-sm text-[#faf2e7]/85 leading-relaxed">
-            작은 공간을 위한 감성 소품과 수납용품.
-          </p>
         </div>
 
         <div className="space-y-3">

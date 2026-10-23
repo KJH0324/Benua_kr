@@ -291,7 +291,7 @@ export default function Profile() {
   const addWishToCart = (product: any) => {
     const stock = Math.max(0, Number(product.stock) || 0);
     if (stock < 1) {
-      toast.error("지금은 품절이에요. 입고되면 알려드릴게요.");
+      toast.error("품절입니다.");
       return;
     }
     const price =
@@ -474,7 +474,7 @@ export default function Profile() {
               {(user as any).phone}
             </p>
           ) : (
-            <p>저장된 배송지가 없습니다. 다음에 결제할 때 다시 쓰지 않도록 저장해두세요.</p>
+            <p>저장된 배송지가 없습니다.</p>
           )}
         </div>
       </section>
@@ -750,11 +750,11 @@ export default function Profile() {
               rows={4}
               value={reviewForm.content}
               onChange={(e) => setReviewForm({ ...reviewForm, content: e.target.value })}
-              placeholder="상품에 대한 감상을 남겨주세요."
+              placeholder="리뷰 내용"
               className="w-full border rounded-xl p-3 text-sm"
             />
             <label className="block text-xs font-bold text-gray-500">
-              사진 첨부하면 포토 리뷰 포인트가 적립됩니다
+              사진 (선택)
               <input
                 type="file"
                 accept="image/*"

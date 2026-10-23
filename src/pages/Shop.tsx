@@ -41,9 +41,6 @@ export default function Shop() {
         <h1 className="text-3xl md:text-4xl font-serif font-bold text-venuea-dark">
           오브제 컬렉션
         </h1>
-        <p className="text-sm text-venuea-muted mt-2">
-          작은 공간을 위한 감성 소품과 수납용품.
-        </p>
       </div>
 
       {categories.length > 1 && (
