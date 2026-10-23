@@ -301,7 +301,12 @@ export default function Profile() {
     const saved = JSON.parse(localStorage.getItem("benua_cart") || "[]");
     const list = Array.isArray(saved) ? saved : [];
     const idx = list.findIndex((item: any) => String(item.id) === String(product.id));
-    if (idx >= 0) list[idx].quantity = Math.min(stock, Number(list[idx].quantity || 1) + 1);
+    const already = idx >= 0 ? Number(list[idx].quantity) || 0 : 0;
+    if (already + 1 > stock) {
+      toast.error("재고가 부족합니다.");
+      return;
+    }
+    if (idx >= 0) list[idx].quantity = already + 1;
     else {
       list.push({
         id: product.id,

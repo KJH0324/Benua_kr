@@ -115,7 +115,11 @@ export default function ProductDetail() {
 
   const handleAddToCart = (buyNow = false) => {
     if (addingRef.current) return;
-    if (stock < 1 || quantity > stock) {
+    const saved = JSON.parse(localStorage.getItem("benua_cart") || "[]");
+    const list = Array.isArray(saved) ? saved : [];
+    const existingIdx = list.findIndex((i: any) => String(i.id) === String(product.id));
+    const already = existingIdx >= 0 ? Number(list[existingIdx].quantity) || 0 : 0;
+    if (stock < 1 || already + quantity > stock) {
       toast.error("재고가 부족합니다.");
       return;
     }
@@ -124,11 +128,7 @@ export default function ProductDetail() {
       addingRef.current = false;
     }, 500);
 
-    const saved = JSON.parse(localStorage.getItem("benua_cart") || "[]");
-    const list = Array.isArray(saved) ? saved : [];
-    const existingIdx = list.findIndex((i: any) => String(i.id) === String(product.id));
-    const nextQty =
-      existingIdx >= 0 ? Math.min(stock, list[existingIdx].quantity + quantity) : quantity;
+    const nextQty = already + quantity;
 
     if (existingIdx >= 0) {
       list[existingIdx].quantity = nextQty;
@@ -255,9 +255,7 @@ export default function ProductDetail() {
             )}
           </div>
 
-          <p className="text-sm text-venuea-muted">
-            {stock > 0 ? `남은 재고 ${stock}개` : "품절"}
-          </p>
+          {stock < 1 && <p className="text-sm text-venuea-muted">품절</p>}
           <div className="flex items-center gap-4">
             <div className="flex items-center border border-black/10 rounded-xl bg-white">
               <button
