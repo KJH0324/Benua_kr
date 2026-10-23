@@ -2580,7 +2580,38 @@ function AdminKeys({ adminRole }: { adminRole: string }) {
           <tbody className="divide-y">
             {keys.map((k) => (
               <tr key={k.id}>
-                <td className="p-4 font-mono text-sm text-gray-900">{k.key_label || "원문 없음"}</td>
+                <td className="p-4 font-mono text-sm text-gray-900">
+                  {k.key_label ? (
+                    k.key_label
+                  ) : (
+                    <form
+                      className="flex gap-2"
+                      onSubmit={async (e) => {
+                        e.preventDefault();
+                        const input = e.currentTarget.elements.namedItem("key") as HTMLInputElement;
+                        const res = await apiFetch(`/api/admin/keys/${k.id}/label`, {
+                          method: "PUT",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({ key: input.value.trim() }),
+                        });
+                        const data = await res.json().catch(() => ({}));
+                        if (!res.ok) return toast.error(data.error || "저장에 실패했습니다.");
+                        toast.success("저장했습니다.");
+                        fetchKeys();
+                      }}
+                    >
+                      <input
+                        name="key"
+                        required
+                        placeholder="원문"
+                        className="w-40 border border-gray-200 rounded-lg px-3 py-2 text-sm"
+                      />
+                      <button type="submit" className="text-xs font-bold text-venuea-green">
+                        넣기
+                      </button>
+                    </form>
+                  )}
+                </td>
                 <td className="p-4 font-bold">{k.role}</td>
                 <td className="p-4">
                   <form

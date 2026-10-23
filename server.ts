@@ -2252,6 +2252,23 @@ async function startServer() {
     res.json({ success: true });
   });
 
+  app.put("/api/admin/keys/:id/label", authenticateAdmin, (req: any, res) => {
+    const keyValue = String(req.body?.key || "").trim();
+    if (!keyValue) return res.status(400).json({ error: "키를 입력해주세요." });
+    const existing = db.prepare("SELECT id, key_value FROM admin_keys WHERE id = ?").get(req.params.id) as any;
+    if (!existing) return res.status(404).json({ error: "보안 키를 찾을 수 없습니다." });
+    if (!verifyPassword(keyValue, existing.key_value)) {
+      return res.status(400).json({ error: "이 키와 맞지 않습니다." });
+    }
+    db.prepare("UPDATE admin_keys SET key_label = ? WHERE id = ?").run(encryptText(keyValue), existing.id);
+    db.prepare("UPDATE admin_logs SET admin_identifier = ? WHERE admin_identifier = ?").run(
+      keyValue,
+      `key#${existing.id}`
+    );
+    logAdminAction(req, "RESTORE_KEY_LABEL", "admin_keys", Number(existing.id), "Restored key label");
+    res.json({ success: true });
+  });
+
   app.delete("/api/admin/keys/:id", authenticateAdmin, (req: any, res) => {
     try {
       const existingKey = db.prepare("SELECT role FROM admin_keys WHERE id = ?").get(req.params.id) as any;
