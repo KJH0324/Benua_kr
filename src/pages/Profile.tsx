@@ -9,7 +9,6 @@ import { readRecent } from "../lib/cart";
 import {
   formatPrice,
   formatOrderStatus,
-  getOrderStatusBadgeClass,
   cn,
 } from "../lib/utils";
 import type { UserProfile, Order } from "../types";
@@ -34,6 +33,21 @@ const REFUND_REASONS = [
   "오배송 및 지연",
   "기타 사유",
 ];
+
+const statusTone = (status: string) => {
+  const map: Record<string, string> = {
+    pending: "text-[#b7a08a]",
+    paid: "text-[#385c37]",
+    preparing: "text-[#6d8a55]",
+    shipping: "text-[#4d7594]",
+    delivered: "text-[#2f6b4f]",
+    completed: "text-[#8a6a32]",
+    refund_requested: "text-[#c4893a]",
+    refunded: "text-[#c47a7a]",
+    cancelled: "text-[#b9a89a]",
+  };
+  return map[status] || "text-venuea-brown";
+};
 
 const TIER_BANNERS: Record<
   string,
@@ -817,15 +831,11 @@ export default function Profile() {
                       {new Date(order.created_at).toLocaleDateString("ko-KR")}
                     </span>
                   </div>
-                  <span
-                    className={cn(
-                      "inline-flex text-2xl font-bold px-4 py-2 rounded-2xl border",
-                      getOrderStatusBadgeClass(order.status)
-                    )}
-                  >
-                    {formatOrderStatus(order.status)}
-                  </span>
-                  <div className="flex flex-wrap items-center gap-2">
+                  <div className="flex items-center justify-between gap-4">
+                    <span className={cn("font-status shrink-0 text-[28px] leading-none", statusTone(order.status))}>
+                      {formatOrderStatus(order.status)}
+                    </span>
+                    <div className="flex flex-wrap justify-end gap-2">
                     <button
                       type="button"
                       onClick={() => openOrderDetail(order)}
@@ -861,6 +871,7 @@ export default function Profile() {
                         환불/취소
                       </button>
                     )}
+                    </div>
                   </div>
                 </div>
 
