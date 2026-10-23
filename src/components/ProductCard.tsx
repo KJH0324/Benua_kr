@@ -10,6 +10,8 @@ export type CardProduct = {
   discount_rate?: number;
   stock?: number;
   sale_mode?: string;
+  rating_avg?: number;
+  review_count?: number;
 };
 
 export function salePrice(product: { price: number; discount_rate?: number }) {
@@ -55,6 +57,11 @@ export default function ProductCard({ product }: { product: CardProduct }) {
           <p className="text-[13px] text-venuea-muted">{product.category}</p>
         ) : null}
         <h3 className="text-sm font-bold text-venuea-dark mt-0.5">{product.name}</h3>
+        {Number(product.review_count) > 0 && (
+          <p className="text-[12px] text-venuea-brown mt-0.5">
+            ★ {Number(product.rating_avg || 0).toFixed(1)} ({product.review_count})
+          </p>
+        )}
         <div className="flex flex-wrap items-center gap-2 mt-1 text-sm">
           {rate > 0 ? <span className="font-bold text-[#C0392B]">{rate}%</span> : null}
           <span className="font-bold text-venuea-dark">{formatPrice(finalPrice)}</span>

@@ -4,6 +4,8 @@ import { LogOut, Award, Ticket, Package, Star, RotateCcw, X, Heart, MapPin } fro
 import DaumPostcodeEmbed from "react-daum-postcode";
 import { toast } from "sonner";
 import { apiFetch, authStorage } from "../lib/api";
+import TrackingTimeline from "../components/TrackingTimeline";
+import { readRecent } from "../lib/cart";
 import {
   formatPrice,
   formatOrderStatus,
@@ -144,6 +146,11 @@ export default function Profile() {
   const [refundError, setRefundError] = useState("");
   const [isSubmittingRefund, setIsSubmittingRefund] = useState(false);
   const [detailOrder, setDetailOrder] = useState<any | null>(null);
+  const [partialIds, setPartialIds] = useState<number[]>([]);
+  const [inquiries, setInquiries] = useState<any[]>([]);
+  const [couponCode, setCouponCode] = useState("");
+  const [passwordForm, setPasswordForm] = useState({ current: "", next: "" });
+  const [recent, setRecent] = useState<any[]>([]);
   const [editingAddress, setEditingAddress] = useState(false);
   const [orderAddressForm, setOrderAddressForm] = useState({
     customer_name: "",
@@ -163,11 +170,12 @@ export default function Profile() {
     }
     setUser(meData.user);
 
-    const [ordRes, coupRes, wishRes, pointRes] = await Promise.all([
+    const [ordRes, coupRes, wishRes, pointRes, inquiryRes] = await Promise.all([
       apiFetch("/api/orders/me"),
       apiFetch("/api/coupons/me"),
       apiFetch("/api/wishlists"),
       apiFetch("/api/points/history"),
+      apiFetch("/api/inquiries/me"),
     ]);
     if (ordRes.ok) setOrders(await ordRes.json());
     if (coupRes.ok) setCoupons(await coupRes.json());
@@ -179,6 +187,11 @@ export default function Profile() {
       const pointData = await pointRes.json();
       setPointHistory(Array.isArray(pointData) ? pointData : []);
     }
+    if (inquiryRes.ok) {
+      const inquiryData = await inquiryRes.json();
+      setInquiries(Array.isArray(inquiryData) ? inquiryData : []);
+    }
+    setRecent(readRecent());
   };
 
   useEffect(() => {
@@ -528,6 +541,32 @@ export default function Profile() {
             </div>
           ))}
         </div>
+        <form
+          className="flex gap-2"
+          onSubmit={async (e) => {
+            e.preventDefault();
+            const res = await apiFetch("/api/coupons/claim", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ code: couponCode.trim() }),
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) return toast.error(data.error || "쿠폰을 받지 못했습니다.");
+            setCouponCode("");
+            toast.success("쿠폰을 받았습니다.");
+            loadProfileData();
+          }}
+        >
+          <input
+            value={couponCode}
+            onChange={(e) => setCouponCode(e.target.value.toUpperCase())}
+            placeholder="쿠폰 코드"
+            className="flex-1 border rounded-xl px-4 py-3 text-sm"
+          />
+          <button type="submit" className="px-4 rounded-xl bg-venuea-green text-white text-sm font-bold">
+            등록
+          </button>
+        </form>
       </section>
 
       <section className="space-y-4">
@@ -552,6 +591,100 @@ export default function Profile() {
           )}
         </div>
       </section>
+
+      <section className="space-y-3">
+        <h2 className="text-lg font-bold">계정</h2>
+        <div className="flex flex-wrap gap-2 text-sm">
+          {[
+            ["google", "구글", (user as any).google_id],
+            ["naver", "네이버", (user as any).naver_id],
+            ["kakao", "카카오", (user as any).kakao_id],
+          ].map(([provider, label, linked]) => (
+            <button
+              key={String(provider)}
+              type="button"
+              disabled={!linked}
+              onClick={async () => {
+                const res = await apiFetch("/api/auth/unlink", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ provider }),
+                });
+                if (!res.ok) return toast.error("연결을 해제하지 못했습니다.");
+                toast.success(`${label} 연결을 해제했습니다.`);
+                loadProfileData();
+              }}
+              className="px-3 py-2 rounded-full border text-xs font-bold disabled:opacity-40"
+            >
+              {label} {linked ? "연결됨 · 해제" : "미연결"}
+            </button>
+          ))}
+        </div>
+        <form
+          className="grid sm:grid-cols-3 gap-2"
+          onSubmit={async (e) => {
+            e.preventDefault();
+            const res = await apiFetch("/api/auth/password", {
+              method: "PUT",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(passwordForm),
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) return toast.error(data.error || "비밀번호를 바꾸지 못했습니다.");
+            setPasswordForm({ current: "", next: "" });
+            toast.success("비밀번호를 변경했습니다.");
+          }}
+        >
+          <input
+            type="password"
+            value={passwordForm.current}
+            onChange={(e) => setPasswordForm({ ...passwordForm, current: e.target.value })}
+            placeholder="현재 비밀번호"
+            className="border rounded-xl px-3 py-2 text-sm"
+          />
+          <input
+            type="password"
+            value={passwordForm.next}
+            onChange={(e) => setPasswordForm({ ...passwordForm, next: e.target.value })}
+            placeholder="새 비밀번호"
+            className="border rounded-xl px-3 py-2 text-sm"
+          />
+          <button type="submit" className="rounded-xl bg-venuea-dark text-white text-sm font-bold">
+            비밀번호 변경
+          </button>
+        </form>
+      </section>
+
+      <section className="space-y-3">
+        <h2 className="text-lg font-bold">내 문의</h2>
+        {inquiries.length === 0 ? (
+          <p className="text-sm text-gray-400">문의 내역이 없습니다.</p>
+        ) : (
+          inquiries.map((row) => (
+            <div key={row.id} className="rounded-xl border border-gray-200 bg-white p-4 text-sm space-y-1">
+              <p className="font-bold">
+                {row.subject} · {row.status === "replied" ? "답변완료" : "답변대기"}
+              </p>
+              <p className="text-gray-600">{row.message}</p>
+              {row.reply_message && <p className="text-venuea-brown">답변 {row.reply_message}</p>}
+            </div>
+          ))
+        )}
+      </section>
+
+      {recent.length > 0 && (
+        <section className="space-y-3">
+          <h2 className="text-lg font-bold">최근 본 상품</h2>
+          <div className="flex gap-3 overflow-x-auto">
+            {recent.map((item) => (
+              <a key={item.id} href={`/product/${item.id}`} className="w-28 shrink-0">
+                {item.image_url ? <img src={item.image_url} alt="" className="w-28 h-32 object-cover rounded-xl" /> : null}
+                <p className="text-xs font-bold mt-1 line-clamp-2">{item.name}</p>
+              </a>
+            ))}
+          </div>
+        </section>
+      )}
 
       <section className="space-y-4">
         <h2 className="text-lg font-bold flex items-center gap-2">
@@ -921,14 +1054,55 @@ export default function Profile() {
 
             <div className="space-y-2 text-sm">
               {(detailOrder.items || []).map((item: any, idx: number) => (
-                <div key={idx} className="flex justify-between gap-3">
-                  <span>
+                <label key={item.id || idx} className="flex justify-between gap-3 items-center">
+                  <span className="flex items-center gap-2">
+                    {["paid", "preparing", "shipping", "delivered", "completed"].includes(detailOrder.status) &&
+                      item.item_status !== "refunded" &&
+                      item.item_status !== "refund_requested" && (
+                        <input
+                          type="checkbox"
+                          checked={partialIds.includes(item.id)}
+                          onChange={(e) =>
+                            setPartialIds((prev) =>
+                              e.target.checked ? [...prev, item.id] : prev.filter((id) => id !== item.id)
+                            )
+                          }
+                        />
+                      )}
                     {item.name} × {item.quantity}
+                    {item.item_status === "refund_requested" ? " · 반품요청" : ""}
+                    {item.item_status === "refunded" ? " · 환불됨" : ""}
                   </span>
                   <span className="font-bold">{formatPrice(item.price * item.quantity)}</span>
-                </div>
+                </label>
               ))}
             </div>
+            {partialIds.length > 0 && (
+              <button
+                type="button"
+                onClick={async () => {
+                  const res = await apiFetch(`/api/orders/${detailOrder.id}/partial-refund`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                      reason: "부분 반품",
+                      items: (detailOrder.items || [])
+                        .filter((item: any) => partialIds.includes(item.id))
+                        .map((item: any) => ({ id: item.id, quantity: item.quantity })),
+                    }),
+                  });
+                  const data = await res.json().catch(() => ({}));
+                  if (!res.ok) return toast.error(data.error || "부분 반품을 접수하지 못했습니다.");
+                  toast.success("선택한 상품의 반품을 접수했습니다.");
+                  setPartialIds([]);
+                  setDetailOrder(null);
+                  loadProfileData();
+                }}
+                className="text-sm font-bold text-venuea-green"
+              >
+                선택한 상품 반품 요청
+              </button>
+            )}
 
             <div className="border-t border-black/10 pt-4 space-y-1.5 text-sm">
               <div className="flex justify-between">
@@ -994,11 +1168,9 @@ export default function Profile() {
             )}
 
             {detailOrder.tracking_number && (
-              <iframe
-                title="배송조회"
-                src={`/api/orders/${detailOrder.id}/tracking-sky`}
-                className="w-full h-[760px] rounded-2xl border border-gray-200 bg-white"
-              />
+              <div className="rounded-2xl border border-black/10 bg-[#faf2e7] p-4">
+                <TrackingTimeline src={`/api/orders/${detailOrder.id}/tracking`} />
+              </div>
             )}
 
             <div className="border-t border-black/10 pt-4 space-y-3 text-sm">

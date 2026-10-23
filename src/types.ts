@@ -9,6 +9,16 @@ export interface Product {
   createdAt: string;
 }
 
+export interface CartItem {
+  id: string | number;
+  name: string;
+  price: number;
+  quantity: number;
+  image?: string;
+  stock?: number;
+  option_id?: number;
+}
+
 export interface Order {
   id: string;
   userId: string;

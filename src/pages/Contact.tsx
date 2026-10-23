@@ -27,6 +27,7 @@ export default function Contact() {
   const [authChecked, setAuthChecked] = useState(false);
   const [orders, setOrders] = useState<OrderOption[]>([]);
   const [submitting, setSubmitting] = useState(false);
+  const [imageUrl, setImageUrl] = useState("");
 
   const needsOrder = ORDER_CATEGORIES.includes(form.category);
 
@@ -70,7 +71,7 @@ export default function Contact() {
       const res = await apiFetch("/api/inquiries", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(form),
+        body: JSON.stringify({ ...form, image_url: imageUrl }),
       });
       const data = await res.json().catch(() => ({}));
       if (res.ok) {
@@ -83,6 +84,7 @@ export default function Contact() {
           message: "",
           order_number: "",
         });
+        setImageUrl("");
       } else {
         toast.error(data.error || "문의 접수에 실패했습니다.");
       }
@@ -181,6 +183,28 @@ export default function Contact() {
           onChange={(e) => setForm({ ...form, message: e.target.value })}
           className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm"
         />
+        <label className="block text-xs font-bold text-gray-500">
+          사진 첨부
+          <input
+            type="file"
+            accept="image/*"
+            className="mt-2 block w-full text-sm"
+            onChange={async (e) => {
+              const file = e.target.files?.[0];
+              if (!file) return;
+              const body = new FormData();
+              body.append("image", file);
+              const res = await apiFetch("/api/uploads/image", { method: "POST", body });
+              const data = await res.json().catch(() => ({}));
+              if (!res.ok) {
+                toast.error(data.error || "사진을 올리지 못했습니다. 로그인 후 다시 시도해주세요.");
+                return;
+              }
+              setImageUrl(data.image_url || "");
+            }}
+          />
+        </label>
+        {imageUrl && <img src={imageUrl} alt="" className="w-24 h-24 object-cover rounded-xl" />}
         <button
           type="submit"
           disabled={submitting || (needsOrder && (!user || orders.length === 0))}

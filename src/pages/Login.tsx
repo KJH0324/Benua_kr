@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { CheckCircle2, Loader2, MailCheck } from "lucide-react";
 import { toast } from "sonner";
 import { apiFetch, authStorage } from "../lib/api";
+import { mergeServerCart } from "../lib/cart";
 
 export default function Login() {
   const navigate = useNavigate();
@@ -19,6 +20,7 @@ export default function Login() {
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
   const [newsletter, setNewsletter] = useState(false);
+  const [remember, setRemember] = useState(false);
   const [formError, setFormError] = useState("");
 
   // 이메일 인증 상태
@@ -118,11 +120,12 @@ export default function Login() {
       const res = await apiFetch("/api/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, password }),
+        body: JSON.stringify({ email, password, remember }),
       });
       const data = await res.json();
       if (res.ok) {
         if (data.token) authStorage.setUserToken(data.token);
+        await mergeServerCart().catch(() => {});
         toast.success("로그인되었습니다.");
         navigate(afterAuthPath);
       } else {
@@ -269,6 +272,13 @@ export default function Login() {
             onChange={(e) => setPassword(e.target.value)}
             className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm"
           />
+        )}
+
+        {mode === "LOGIN" && (
+          <label className="flex items-center gap-2 text-sm text-venuea-dark">
+            <input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} />
+            로그인 상태 유지 (14일)
+          </label>
         )}
 
         {mode === "REGISTER" && (

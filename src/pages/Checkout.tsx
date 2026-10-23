@@ -6,6 +6,7 @@ import { ShieldCheck, CreditCard, Loader2, CheckCircle2, MapPin, X } from "lucid
 import { toast } from "sonner";
 import { apiFetch } from "../lib/api";
 import { formatPrice, cn } from "../lib/utils";
+import { saveCart } from "../lib/cart";
 import type { CartItem, UserProfile } from "../types";
 
 const TOSS_CLIENT_KEY =
@@ -48,6 +49,8 @@ export default function Checkout() {
   const [completedOrderNumber, setCompletedOrderNumber] = useState<string | null>(null);
   const [vbankResult, setVbankResult] = useState<any>(null);
   const [stockReady, setStockReady] = useState(false);
+  const [addresses, setAddresses] = useState<any[]>([]);
+  const [shipRule, setShipRule] = useState({ extra: 0, shipping_fee: 3000, free_min: 50000 });
 
   // 1. Handle Toss Redirect Callback (?paymentKey=...&orderId=...&amount=...)
   useEffect(() => {
@@ -88,8 +91,7 @@ export default function Checkout() {
             return;
           }
 
-          localStorage.removeItem("benua_cart");
-          window.dispatchEvent(new Event("cart-updated"));
+          saveCart([], "replace");
           setCompletedOrderNumber(data.order_number);
           if (data.vbank) setVbankResult(data.vbank);
           toast.success("주문이 성공적으로 완료되었습니다.");
@@ -190,6 +192,10 @@ export default function Checkout() {
       .then((r) => (r.ok ? r.json() : []))
       .then((list) => setCoupons(Array.isArray(list) ? list : []))
       .catch(() => {});
+    apiFetch("/api/addresses")
+      .then((r) => (r.ok ? r.json() : []))
+      .then((list) => setAddresses(Array.isArray(list) ? list : []))
+      .catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -205,6 +211,25 @@ export default function Checkout() {
       })
     );
   }, [customerName, customerEmail, customerPhone, zipcode, address, detailAddress]);
+
+  useEffect(() => {
+    const zip = zipcode.replace(/\D/g, "");
+    if (zip.length < 5) {
+      setShipRule((prev) => ({ ...prev, extra: 0 }));
+      return;
+    }
+    apiFetch(`/api/shipping/extra?zip=${zip}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (!data) return;
+        setShipRule({
+          extra: Number(data.extra) || 0,
+          shipping_fee: Number(data.shipping_fee) || 3000,
+          free_min: Number(data.free_min) || 50000,
+        });
+      })
+      .catch(() => {});
+  }, [zipcode]);
 
   const subtotal = cart.reduce((sum, item) => sum + item.price * item.quantity, 0);
   const selectedCoupon = coupons.find((c) => c.id === selectedCouponId);
@@ -229,8 +254,8 @@ export default function Checkout() {
 
   const isFreeShippingTier =
     user?.tier === "BLACK" || user?.tier === "THE_BLACK";
-  const baseShippingFee = subtotal >= 50000 || subtotal === 0 ? 0 : 3000;
-  const shippingFee = isFreeShippingTier || isShippingCoupon ? 0 : baseShippingFee;
+  const baseShippingFee = subtotal >= shipRule.free_min || subtotal === 0 ? 0 : shipRule.shipping_fee;
+  const shippingFee = (isFreeShippingTier || isShippingCoupon ? 0 : baseShippingFee) + (subtotal === 0 ? 0 : shipRule.extra);
   const payableBeforePoints = Math.max(0, subtotal + shippingFee - couponDiscount);
   const pointBalance = Number(user?.points || 0);
   const maxUsablePoints = Math.min(pointBalance, payableBeforePoints);
@@ -269,6 +294,7 @@ export default function Checkout() {
           customer_email: customerEmail,
           customer_phone: customerPhone,
           shipping_address: fullAddress,
+          zipcode,
           total_amount: totalAmount,
           shipping_fee: shippingFee,
           items: cart,
@@ -289,8 +315,7 @@ export default function Checkout() {
       if (prepData.order_number) prepOrderNumber = prepData.order_number;
 
       if (prepData.zeroAmountPaid) {
-        localStorage.removeItem("benua_cart");
-        window.dispatchEvent(new Event("cart-updated"));
+        saveCart([], "replace");
         setCompletedOrderNumber(prepData.order_number);
         setIsProcessing(false);
         return;
@@ -486,6 +511,51 @@ export default function Checkout() {
               onChange={(e) => setDetailAddress(e.target.value)}
               className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm"
             />
+            {user && (
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={async () => {
+                    const res = await apiFetch("/api/addresses", {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({
+                        label: "배송지",
+                        name: customerName,
+                        phone: customerPhone,
+                        zipcode,
+                        address,
+                        detail_address: detailAddress,
+                        is_default: addresses.length === 0,
+                      }),
+                    });
+                    if (!res.ok) return toast.error("주소를 저장하지 못했습니다.");
+                    const list = await apiFetch("/api/addresses");
+                    setAddresses(list.ok ? await list.json() : []);
+                    toast.success("주소록에 저장했습니다.");
+                  }}
+                  className="text-xs font-bold text-venuea-green"
+                >
+                  이 주소 저장
+                </button>
+                {addresses.map((row) => (
+                  <button
+                    key={row.id}
+                    type="button"
+                    onClick={() => {
+                      setCustomerName(row.name || customerName);
+                      setCustomerPhone(row.phone || customerPhone);
+                      setZipcode(row.zipcode || "");
+                      setAddress(row.address || "");
+                      setDetailAddress(row.detail_address || "");
+                    }}
+                    className="px-3 py-1.5 rounded-full bg-[#faf2e7] text-xs font-bold text-venuea-dark"
+                  >
+                    {row.label || row.address}
+                  </button>
+                ))}
+              </div>
+            )}
           </section>
 
           {user && (
@@ -599,6 +669,9 @@ export default function Checkout() {
               <span>배송비</span>
               <span>{shippingFee === 0 ? "무료" : formatPrice(shippingFee)}</span>
             </div>
+            {shipRule.extra > 0 && (
+              <p className="text-[11px] text-venuea-brown">제주·도서산간 추가배송비 {formatPrice(shipRule.extra)} 포함</p>
+            )}
             {couponDiscount > 0 && (
               <div className="flex justify-between text-venuea-gold font-bold">
                 <span>쿠폰 할인</span>

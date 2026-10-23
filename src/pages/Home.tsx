@@ -10,6 +10,9 @@ type StoreProduct = CardProduct & { show_on_main?: number };
 export default function Home() {
   const [products, setProducts] = useState<StoreProduct[]>([]);
   const [banner, setBanner] = useState<{ image_url?: string; link_url?: string }>({});
+  const [promo, setPromo] = useState<{ image_url?: string; link_url?: string } | null>(null);
+  const [popup, setPopup] = useState<{ image_url?: string; link_url?: string } | null>(null);
+  const [showPopup, setShowPopup] = useState(false);
 
   useEffect(() => {
     apiFetch("/api/products")
@@ -27,7 +30,16 @@ export default function Home() {
       .then((items) => {
         if (Array.isArray(items)) {
           const main = items.find((i) => i.id === "main-banner");
+          const mid = items.find((i) => i.id === "promo-section" && i.image_url);
+          const pop = items.find((i) => i.id === "popup" && i.image_url && i.is_active !== 0);
           if (main) setBanner(main);
+          if (mid) setPromo(mid);
+          if (pop) {
+            setPopup(pop);
+            const hidden = localStorage.getItem("benua_popup_hide");
+            const today = new Date().toISOString().slice(0, 10);
+            setShowPopup(hidden !== today);
+          }
         }
       })
       .catch(() => {});
@@ -74,6 +86,14 @@ export default function Home() {
         </div>
       </section>
 
+      {promo?.image_url && (
+        <section className="px-6 md:px-[60px] max-w-7xl mx-auto pt-10">
+          <Link to={promo.link_url || "/shop"}>
+            <img src={promo.image_url} alt="" className="w-full rounded-2xl object-cover max-h-[360px]" />
+          </Link>
+        </section>
+      )}
+
       <section className="py-16 px-6 md:px-[60px] max-w-7xl mx-auto">
         <div className="flex justify-between items-end mb-8">
           <h2 className="text-2xl md:text-3xl font-serif font-bold text-venuea-dark">신상품</h2>
@@ -92,6 +112,30 @@ export default function Home() {
           </div>
         )}
       </section>
+      {showPopup && popup?.image_url && (
+        <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-6">
+          <div className="bg-[#faf2e7] rounded-2xl max-w-md w-full overflow-hidden">
+            <Link to={popup.link_url || "/shop"} onClick={() => setShowPopup(false)}>
+              <img src={popup.image_url} alt="" className="w-full object-cover" />
+            </Link>
+            <div className="flex">
+              <button
+                type="button"
+                className="flex-1 py-3 text-sm text-[#463221]"
+                onClick={() => {
+                  localStorage.setItem("benua_popup_hide", new Date().toISOString().slice(0, 10));
+                  setShowPopup(false);
+                }}
+              >
+                오늘 하루 보지 않기
+              </button>
+              <button type="button" className="flex-1 py-3 text-sm font-bold text-[#385c37]" onClick={() => setShowPopup(false)}>
+                닫기
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

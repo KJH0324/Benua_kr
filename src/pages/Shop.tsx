@@ -7,7 +7,8 @@ export default function Shop() {
   const [products, setProducts] = useState<CardProduct[]>([]);
   const [selectedCategory, setSelectedCategory] = useState("전체");
   const [keyword, setKeyword] = useState("");
-  const [sort, setSort] = useState<"new" | "price-asc" | "price-desc">("new");
+  const [sort, setSort] = useState<"new" | "price-asc" | "price-desc" | "popular" | "reviews" | "discount">("new");
+  const [hideSoldOut, setHideSoldOut] = useState(false);
 
   useEffect(() => {
     apiFetch("/api/products")
@@ -26,12 +27,16 @@ export default function Shop() {
     const list = products.filter((p) => {
       const inCategory = selectedCategory === "전체" || p.category === selectedCategory;
       const inName = !q || p.name.toLowerCase().includes(q);
-      return inCategory && inName;
+      const soldOut = Number(p.stock) === 0 && p.sale_mode !== "preorder";
+      return inCategory && inName && !(hideSoldOut && soldOut);
     });
     if (sort === "price-asc") return [...list].sort((a, b) => salePrice(a) - salePrice(b));
     if (sort === "price-desc") return [...list].sort((a, b) => salePrice(b) - salePrice(a));
+    if (sort === "popular") return [...list].sort((a, b) => Number((b as any).sold_count || 0) - Number((a as any).sold_count || 0));
+    if (sort === "reviews") return [...list].sort((a, b) => Number(b.review_count || 0) - Number(a.review_count || 0));
+    if (sort === "discount") return [...list].sort((a, b) => Number(b.discount_rate || 0) - Number(a.discount_rate || 0));
     return list;
-  }, [products, selectedCategory, keyword, sort]);
+  }, [products, selectedCategory, keyword, sort, hideSoldOut]);
 
   const wide = filtered.length >= 4;
 
@@ -72,13 +77,26 @@ export default function Shop() {
         />
         <select
           value={sort}
-          onChange={(e) => setSort(e.target.value as "new" | "price-asc" | "price-desc")}
+          onChange={(e) => setSort(e.target.value as "new" | "price-asc" | "price-desc" | "popular" | "reviews" | "discount")}
           className="px-4 py-3 bg-white border border-black/10 rounded-xl text-sm font-bold"
         >
           <option value="new">신상품순</option>
+          <option value="popular">인기순</option>
+          <option value="reviews">리뷰많은순</option>
+          <option value="discount">할인율순</option>
           <option value="price-asc">낮은 가격순</option>
           <option value="price-desc">높은 가격순</option>
         </select>
+        <button
+          type="button"
+          onClick={() => setHideSoldOut((value) => !value)}
+          className={cn(
+            "px-4 py-3 rounded-xl text-sm font-bold",
+            hideSoldOut ? "bg-venuea-green text-white" : "bg-white text-venuea-dark border border-black/10"
+          )}
+        >
+          품절 제외
+        </button>
       </div>
 
       {filtered.length === 0 ? (

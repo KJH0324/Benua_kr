@@ -22,6 +22,7 @@ import ResetPassword from "./pages/ResetPassword";
 import { AnimatePresence } from "motion/react";
 import ErrorBoundary from "./components/ErrorBoundary";
 import CouponPopup from "./components/CouponPopup";
+import RecentFloat from "./components/RecentFloat";
 import { isAdminSubdomain } from "./lib/subdomain";
 
 const AdminDashboard = lazy(() => import("./pages/AdminDashboard"));
@@ -134,6 +135,7 @@ export default function App() {
           </main>
           <Footer />
           <CouponPopup />
+          <RecentFloat />
           <Toaster position="bottom-center" />
         </div>
       </Router>

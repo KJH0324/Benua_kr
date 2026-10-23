@@ -300,6 +300,33 @@ const upload = multer({
   limits: { fileSize: 20 * 1024 * 1024 },
 });
 
+const toWebp = async (file?: { path?: string; filename?: string; mimetype?: string } | null) => {
+  if (!file?.path || !String(file.mimetype || "").startsWith("image/") || file.mimetype === "image/gif") return;
+  const dest = file.path.replace(/\.[^.]+$/, "") + ".webp";
+  const tmp = `${dest}.part`;
+  try {
+    const sharpMod = await import("sharp");
+    const sharp = sharpMod.default;
+    await sharp(file.path)
+      .rotate()
+      .resize({ width: 1600, height: 1600, fit: "inside", withoutEnlargement: true })
+      .webp({ quality: 80 })
+      .toFile(tmp);
+    if (file.path !== dest && fs.existsSync(file.path)) fs.unlinkSync(file.path);
+    fs.renameSync(tmp, dest);
+    file.filename = path.basename(dest);
+    file.path = dest;
+    file.mimetype = "image/webp";
+  } catch (err) {
+    console.error("[IMAGE]", err);
+    if (fs.existsSync(tmp)) fs.unlinkSync(tmp);
+  }
+};
+
+const toWebpMany = async (files?: Array<{ path?: string; filename?: string; mimetype?: string }>) => {
+  for (const file of files || []) await toWebp(file);
+};
+
 db.exec(`
   CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -588,6 +615,75 @@ const runMigrations = () => {
   ensureColumn("orders", "status_updated_at", "DATETIME DEFAULT '2024-01-01 00:00:00'");
   ensureColumn("orders", "confirmed_at", "DATETIME");
   ensureColumn("orders", "toss_secret", "TEXT");
+  ensureColumn("orders", "tracking_checked_at", "TEXT");
+  ensureColumn("orders", "tracking_cache", "TEXT");
+  ensureColumn("orders", "resume_status", "TEXT");
+  ensureColumn("order_items", "item_status", "TEXT DEFAULT 'normal'");
+  ensureColumn("order_items", "refund_quantity", "INTEGER DEFAULT 0");
+  ensureColumn("order_items", "option_id", "INTEGER");
+  ensureColumn("coupons", "valid_days", "INTEGER");
+  ensureColumn("inbound_emails", "replied_at", "TEXT");
+  ensureColumn("inbound_emails", "reply_body", "TEXT");
+  ensureColumn("point_history", "expired", "INTEGER DEFAULT 0");
+  ensureColumn("point_history", "warn_sent", "INTEGER DEFAULT 0");
+  ensureColumn("inquiries", "image_url", "TEXT");
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS product_images (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      product_id INTEGER NOT NULL,
+      image_url TEXT NOT NULL,
+      sort_order INTEGER DEFAULT 0
+    );
+    CREATE TABLE IF NOT EXISTS product_options (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      product_id INTEGER NOT NULL,
+      name TEXT NOT NULL,
+      extra_price INTEGER DEFAULT 0,
+      stock INTEGER DEFAULT 0
+    );
+    CREATE TABLE IF NOT EXISTS product_questions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      product_id INTEGER NOT NULL,
+      user_id INTEGER,
+      author TEXT,
+      question TEXT NOT NULL,
+      answer TEXT,
+      is_secret INTEGER DEFAULT 0,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE TABLE IF NOT EXISTS user_addresses (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      label TEXT,
+      name TEXT,
+      phone TEXT,
+      zipcode TEXT,
+      address TEXT,
+      detail_address TEXT,
+      is_default INTEGER DEFAULT 0
+    );
+    CREATE TABLE IF NOT EXISTS carts (
+      user_id INTEGER NOT NULL,
+      product_id INTEGER NOT NULL,
+      quantity INTEGER DEFAULT 1,
+      option_id INTEGER,
+      PRIMARY KEY (user_id, product_id, option_id)
+    );
+    CREATE TABLE IF NOT EXISTS shop_settings (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL
+    );
+  `);
+  const settingDefaults: Record<string, string> = {
+    shipping_fee: "3000",
+    free_min: "50000",
+    return_fee: "5000",
+    jeju_fee: "3000",
+    island_fee: "5000",
+  };
+  const putSetting = db.prepare("INSERT OR IGNORE INTO shop_settings (key, value) VALUES (?, ?)");
+  for (const [key, value] of Object.entries(settingDefaults)) putSetting.run(key, value);
 
   ensureColumn("reviews", "is_best", "INTEGER DEFAULT 0");
   ensureColumn("reviews", "is_hidden", "INTEGER DEFAULT 0");
@@ -873,10 +969,10 @@ const getCookieOptions = () => ({
   domain: isProduction ? ".benua.shop" : undefined,
 });
 
-const setAuthCookie = (res: express.Response, name: string, token: string) => {
+const setAuthCookie = (res: express.Response, name: string, token: string, days = 1) => {
   res.cookie(name, token, {
     ...getCookieOptions(),
-    maxAge: 24 * 60 * 60 * 1000,
+    maxAge: days * 24 * 60 * 60 * 1000,
   });
 };
 
@@ -1036,10 +1132,10 @@ const finalizeOrderPaymentTx = db.transaction(
 
     const items = db.prepare("SELECT * FROM order_items WHERE order_id = ?").all(orderId) as any[];
     const deductStock = db.prepare("UPDATE products SET stock = MAX(0, stock - ?) WHERE id = ?");
+    const deductOption = db.prepare("UPDATE product_options SET stock = MAX(0, stock - ?) WHERE id = ?");
     for (const item of items) {
-      if (item.product_id) {
-        deductStock.run(item.quantity, item.product_id);
-      }
+      if (item.product_id) deductStock.run(item.quantity, item.product_id);
+      if (item.option_id) deductOption.run(item.quantity, item.option_id);
     }
 
     if (order.user_id && order.used_points > 0) {
@@ -1122,21 +1218,80 @@ const refundOrderTx = db.transaction(
     if (!order) throw new Error("주문을 찾을 수 없습니다.");
     if (order.status === "refunded") return order;
 
-    const finalRefundAmount = refundAmount !== undefined ? refundAmount : order.total_amount;
+    let finalRefundAmount = refundAmount !== undefined ? refundAmount : order.total_amount;
     const finalReason = reason !== undefined ? reason : order.refund_reason;
+
+    const items = db.prepare("SELECT * FROM order_items WHERE order_id = ?").all(orderId) as any[];
+    const requested = items.filter((item) => item.item_status === "refund_requested");
+    const coversAll =
+      items.length > 0 &&
+      items.every(
+        (item) =>
+          item.item_status === "refund_requested" &&
+          Number(item.refund_quantity || item.quantity) >= Number(item.quantity)
+      );
+    const isPartial = requested.length > 0 && !coversAll;
+    const restoreItem = (item: any, qty: number) => {
+      if (!qty) return;
+      if (item.product_id) {
+        db.prepare("UPDATE products SET stock = stock + ? WHERE id = ?").run(qty, item.product_id);
+      }
+      if (item.option_id) {
+        db.prepare("UPDATE product_options SET stock = stock + ? WHERE id = ?").run(qty, item.option_id);
+      }
+    };
+
+    if (isPartial) {
+      let goods = 0;
+      let refundGoods = 0;
+      for (const item of items) goods += Number(item.price) * Number(item.quantity);
+      for (const item of requested) {
+        const qty = Math.min(Number(item.quantity) || 0, Number(item.refund_quantity) || Number(item.quantity) || 0);
+        refundGoods += Number(item.price) * qty;
+        restoreItem(item, qty);
+        db.prepare("UPDATE order_items SET item_status = 'refunded', refund_quantity = ? WHERE id = ?").run(
+          qty,
+          item.id
+        );
+      }
+      if (order.user_id && order.earned_points > 0 && goods > 0) {
+        const clawTarget = Math.round(Number(order.earned_points) * (refundGoods / goods));
+        const holder = db.prepare("SELECT points FROM users WHERE id = ?").get(order.user_id) as any;
+        const have = Number(holder?.points) || 0;
+        const claw = Math.min(have, clawTarget);
+        const shortfall = clawTarget - claw;
+        if (claw > 0) {
+          db.prepare("UPDATE users SET points = points - ? WHERE id = ?").run(claw, order.user_id);
+          db.prepare("INSERT INTO point_history (user_id, amount, reason, type) VALUES (?, ?, ?, 'USED')").run(
+            order.user_id,
+            -claw,
+            `주문(${order.order_number}) 부분환불 적립금 회수`
+          );
+        }
+        if (shortfall > 0) finalRefundAmount = Math.max(0, Number(finalRefundAmount) - shortfall);
+      }
+      const nextStatus =
+        order.resume_status && !["refund_requested", "refunded"].includes(order.resume_status)
+          ? order.resume_status
+          : "paid";
+      db.prepare(
+        "UPDATE orders SET status = ?, refund_amount = ?, refund_reason = ?, status_updated_at = CURRENT_TIMESTAMP WHERE id = ?"
+      ).run(nextStatus, finalRefundAmount, finalReason, orderId);
+      if (order.user_id) updateUserTierStatus(order.user_id);
+      return order;
+    }
 
     db.prepare(
       "UPDATE orders SET status = 'refunded', vbank_account = NULL, refund_amount = ?, refund_reason = ?, status_updated_at = CURRENT_TIMESTAMP WHERE id = ?"
     ).run(finalRefundAmount, finalReason, orderId);
 
-    const items = db.prepare("SELECT * FROM order_items WHERE order_id = ?").all(orderId) as any[];
     for (const item of items) {
-      if (item.product_id) {
-        db.prepare("UPDATE products SET stock = stock + ? WHERE id = ?").run(
-          item.quantity,
-          item.product_id
-        );
-      }
+      const qty =
+        item.item_status === "refund_requested" && Number(item.refund_quantity) > 0
+          ? Number(item.refund_quantity)
+          : Number(item.quantity);
+      restoreItem(item, qty);
+      db.prepare("UPDATE order_items SET item_status = 'refunded' WHERE id = ?").run(item.id);
     }
 
     if (order.user_id) {
@@ -1151,13 +1306,20 @@ const refundOrderTx = db.transaction(
       }
 
       if (order.earned_points > 0) {
-        db.prepare("UPDATE users SET points = MAX(0, points - ?) WHERE id = ?").run(
-          order.earned_points,
-          order.user_id
-        );
-        db.prepare(
-          "INSERT INTO point_history (user_id, amount, reason, type) VALUES (?, ?, ?, 'USED')"
-        ).run(order.user_id, -order.earned_points, `주문(${order.order_number}) 환불 적립금 회수`);
+        const holder = db.prepare("SELECT points FROM users WHERE id = ?").get(order.user_id) as any;
+        const have = Number(holder?.points) || 0;
+        const claw = Math.min(have, order.earned_points);
+        const shortfall = order.earned_points - claw;
+        if (claw > 0) {
+          db.prepare("UPDATE users SET points = points - ? WHERE id = ?").run(claw, order.user_id);
+          db.prepare(
+            "INSERT INTO point_history (user_id, amount, reason, type) VALUES (?, ?, ?, 'USED')"
+          ).run(order.user_id, -claw, `주문(${order.order_number}) 환불 적립금 회수`);
+        }
+        if (shortfall > 0) {
+          finalRefundAmount = Math.max(0, finalRefundAmount - shortfall);
+          db.prepare("UPDATE orders SET refund_amount = ? WHERE id = ?").run(finalRefundAmount, orderId);
+        }
       }
 
       if (order.used_coupon_id) {
@@ -1244,6 +1406,25 @@ const runAutoCompletion = () => {
        WHERE status = 'pending' AND payment_key IS NULL
          AND created_at < datetime('now', '-2 hours')`
     ).run();
+
+    const expiredVbank = db
+      .prepare(
+        `SELECT id FROM orders
+         WHERE status = 'pending' AND payment_method = 'vbank'
+           AND vbank_due_date IS NOT NULL AND vbank_due_date != ''
+           AND datetime(vbank_due_date) < datetime('now')`
+      )
+      .all() as Array<{ id: number }>;
+    for (const order of expiredVbank) {
+      try {
+        refundOrderTx(order.id, undefined, "입금 기한 만료");
+        db.prepare("UPDATE orders SET status = 'cancelled' WHERE id = ? AND status = 'refunded'").run(order.id);
+      } catch (err) {
+        console.error("[AUTO] vbank expire failed", order.id, err);
+      }
+    }
+    void expirePoints();
+    void backupDatabase();
     void syncShippingDeliveries();
   } catch (err) {
     console.error("[AUTO] Error during auto-completion:", err);
@@ -1266,10 +1447,10 @@ const trackingIsDelivered = (info: any) =>
   info.result !== "N" &&
   (info.complete === true || info.completeYN === "Y" || Number(info.level) === 6);
 
-const sweetTrackerDelivered = async (company: string, invoice: string) => {
+const fetchTrackingInfo = async (company: string, invoice: string) => {
   const key = String(process.env.SWEETTRACKER_API_KEY || "").trim();
   const number = String(invoice || "").replace(/[^\d]/g, "");
-  if (!key || !number) return false;
+  if (!key || !number) return null;
   const response = await fetch("https://info.sweettracker.co.kr/api/v1/trackingInfo", {
     method: "POST",
     headers: { "Content-Type": "application/json", Accept: "application/json" },
@@ -1279,17 +1460,52 @@ const sweetTrackerDelivered = async (company: string, invoice: string) => {
       t_invoice: number,
     }),
   });
-  if (!response.ok) return false;
-  const info = await response.json().catch(() => null);
-  return trackingIsDelivered(info);
+  if (!response.ok) return null;
+  return response.json().catch(() => null);
 };
 
+const loadTracking = async (order: any) => {
+  const checked = order.tracking_checked_at ? new Date(order.tracking_checked_at).getTime() : 0;
+  if (order.tracking_cache && Date.now() - checked < 20 * 60 * 1000) {
+    try {
+      return JSON.parse(order.tracking_cache);
+    } catch {
+      /* refresh */
+    }
+  }
+  const info = await fetchTrackingInfo(order.shipping_company, order.tracking_number);
+  if (info) {
+    db.prepare("UPDATE orders SET tracking_cache = ?, tracking_checked_at = ? WHERE id = ?").run(
+      JSON.stringify(info),
+      new Date().toISOString(),
+      order.id
+    );
+  }
+  return info;
+};
+
+const sweetTrackerDelivered = async (company: string, invoice: string) =>
+  trackingIsDelivered(await fetchTrackingInfo(company, invoice));
+
 const markOrderDelivered = (orderId: number) => {
+  const order = db.prepare("SELECT * FROM orders WHERE id = ? AND status = 'shipping'").get(orderId) as any;
+  if (!order) return false;
   const updated = db
     .prepare(
       "UPDATE orders SET status = 'delivered', status_updated_at = CURRENT_TIMESTAMP WHERE id = ? AND status = 'shipping'"
     )
     .run(orderId);
+  if (updated.changes > 0 && order.customer_email) {
+    const link = `https://benua.shop/track?orderNumber=${encodeURIComponent(order.order_number)}`;
+    sendMail(
+      order.customer_email,
+      `${order.order_number} 배송이 완료되었습니다`,
+      `<p>${escapeHtml(order.customer_name || "")}님, 주문하신 상품이 도착했습니다.</p>
+       <p>마이페이지에서 구매확정과 리뷰를 남기면 포인트가 적립됩니다.</p>
+       <p><a href="${link}">주문 조회</a></p>`,
+      "SYSTEM"
+    ).catch(() => {});
+  }
   return updated.changes > 0;
 };
 
@@ -1298,23 +1514,122 @@ const syncShippingDeliveries = async (orderId?: number) => {
     orderId
       ? db
           .prepare(
-            "SELECT id, shipping_company, tracking_number FROM orders WHERE id = ? AND status = 'shipping' AND tracking_number IS NOT NULL"
+            "SELECT * FROM orders WHERE id = ? AND status = 'shipping' AND tracking_number IS NOT NULL"
           )
           .all(orderId)
       : db
           .prepare(
-            "SELECT id, shipping_company, tracking_number FROM orders WHERE status = 'shipping' AND tracking_number IS NOT NULL AND TRIM(tracking_number) != ''"
+            "SELECT * FROM orders WHERE status = 'shipping' AND tracking_number IS NOT NULL AND TRIM(tracking_number) != ''"
           )
           .all()
-  ) as Array<{ id: number; shipping_company: string; tracking_number: string }>;
+  ) as any[];
   for (const order of orders) {
     try {
-      if (await sweetTrackerDelivered(order.shipping_company, order.tracking_number)) {
-        markOrderDelivered(order.id);
-      }
+      const checked = order.tracking_checked_at ? new Date(order.tracking_checked_at).getTime() : 0;
+      if (!orderId && checked && Date.now() - checked < 20 * 60 * 1000) continue;
+      const info = await loadTracking(order);
+      if (trackingIsDelivered(info)) markOrderDelivered(order.id);
     } catch (err) {
       console.error("[TRACK] delivery check failed", order.id, err);
     }
+  }
+};
+
+const shopSetting = (key: string, fallback: number) => {
+  const row = db.prepare("SELECT value FROM shop_settings WHERE key = ?").get(key) as { value?: string } | undefined;
+  const value = Number(row?.value);
+  return Number.isFinite(value) ? value : fallback;
+};
+
+const extraShippingFee = (zipcode: string) => {
+  const zip = Number(String(zipcode || "").replace(/\D/g, ""));
+  if (!zip) return 0;
+  if (zip >= 63000 && zip <= 63644) return shopSetting("jeju_fee", 3000);
+  const islands: Array<[number, number]> = [
+    [22386, 22388],
+    [23004, 23012],
+    [23100, 23136],
+    [40200, 40240],
+    [52570, 52571],
+    [53031, 53033],
+    [54000, 54000],
+    [56347, 56349],
+    [57068, 57069],
+    [58760, 58762],
+    [58800, 58866],
+    [58953, 58958],
+    [59102, 59166],
+    [59781, 59790],
+  ];
+  if (islands.some(([start, end]) => zip >= start && zip <= end)) return shopSetting("island_fee", 5000);
+  return 0;
+};
+
+const expirePoints = () => {
+  const soon = db
+    .prepare(
+      `SELECT ph.id, ph.amount, ph.expires_at, u.email, u.name
+       FROM point_history ph JOIN users u ON u.id = ph.user_id
+       WHERE ph.type = 'EARNED' AND IFNULL(ph.expired, 0) = 0 AND IFNULL(ph.warn_sent, 0) = 0
+         AND ph.expires_at IS NOT NULL
+         AND datetime(ph.expires_at) > datetime('now')
+         AND datetime(ph.expires_at) <= datetime('now', '+7 days')`
+    )
+    .all() as any[];
+  for (const row of soon) {
+    if (row.email) {
+      const when = String(row.expires_at).slice(0, 10);
+      sendMail(
+        row.email,
+        "포인트가 곧 소멸됩니다",
+        `<p>${escapeHtml(row.name || "")}님, ${Number(row.amount || 0).toLocaleString()}P가 ${escapeHtml(when)}에 소멸됩니다.</p>`,
+        "SYSTEM"
+      ).catch(() => {});
+    }
+    db.prepare("UPDATE point_history SET warn_sent = 1 WHERE id = ?").run(row.id);
+  }
+  const rows = db
+    .prepare(
+      `SELECT * FROM point_history
+       WHERE type = 'EARNED' AND IFNULL(expired, 0) = 0 AND expires_at IS NOT NULL AND datetime(expires_at) < datetime('now')`
+    )
+    .all() as any[];
+  for (const row of rows) {
+    const user = db.prepare("SELECT points FROM users WHERE id = ?").get(row.user_id) as any;
+    const amount = Math.max(0, Number(row.amount) || 0);
+    const take = Math.min(Number(user?.points) || 0, amount);
+    if (take > 0) {
+      db.prepare("UPDATE users SET points = points - ? WHERE id = ?").run(take, row.user_id);
+      db.prepare("INSERT INTO point_history (user_id, amount, reason, type) VALUES (?, ?, ?, 'EXPIRED')").run(
+        row.user_id,
+        -take,
+        "포인트 유효기간 만료"
+      );
+    }
+    db.prepare("UPDATE point_history SET expired = 1 WHERE id = ?").run(row.id);
+  }
+};
+
+const backupDatabase = () => {
+  const dir = path.join(process.cwd(), "backups");
+  fs.mkdirSync(dir, { recursive: true });
+  const stamp = new Date().toISOString().slice(0, 10);
+  const target = path.join(dir, `benua-${stamp}.db`);
+  if (fs.existsSync(target)) return;
+  db.backup(target)
+    .then(() => {
+      const files = fs
+        .readdirSync(dir)
+        .filter((name) => name.startsWith("benua-") && name.endsWith(".db"))
+        .sort();
+      for (const name of files.slice(0, Math.max(0, files.length - 14))) fs.unlinkSync(path.join(dir, name));
+    })
+    .catch((err) => console.error("[BACKUP]", err));
+};
+
+const sendInBatches = async (jobs: Array<() => Promise<unknown>>) => {
+  for (let i = 0; i < jobs.length; i += 10) {
+    await Promise.all(jobs.slice(i, i + 10).map((job) => job().catch(() => {})));
   }
 };
 
@@ -1513,7 +1828,7 @@ async function startServer() {
         const u = db.prepare("SELECT email FROM users WHERE id = ?").get(req.admin.id) as any;
         if (u) adminIdentifier = u.email;
       } else if (req.body?.adminKey) {
-        adminIdentifier = String(req.body.adminKey);
+        adminIdentifier = "admin-key";
       }
 
       const ip = (req.headers["x-forwarded-for"] as string) || req.socket.remoteAddress || "";
@@ -1747,8 +2062,10 @@ async function startServer() {
         db.prepare("UPDATE users SET password = ? WHERE id = ?").run(hashPassword(password), user.id);
       }
 
-      const token = jwt.sign({ id: user.id, role: "user" }, JWT_SECRET, { expiresIn: "24h" });
-      setAuthCookie(res, "user_token", token);
+      const token = jwt.sign({ id: user.id, role: "user" }, JWT_SECRET, {
+        expiresIn: req.body?.remember ? "14d" : "24h",
+      });
+      setAuthCookie(res, "user_token", token, req.body?.remember ? 14 : 1);
 
       res.json({
         success: true,
@@ -2433,7 +2750,21 @@ async function startServer() {
   // ==========================================
   app.get("/api/products", (_req, res) => {
     try {
-      const products = db.prepare("SELECT * FROM products ORDER BY created_at DESC").all();
+      const products = db
+        .prepare(
+          `SELECT p.*,
+                  ROUND(AVG(CASE WHEN IFNULL(r.is_hidden, 0) = 0 THEN r.rating END), 1) as rating_avg,
+                  SUM(CASE WHEN IFNULL(r.is_hidden, 0) = 0 THEN 1 ELSE 0 END) as review_count,
+                  (SELECT COALESCE(SUM(oi.quantity), 0) FROM order_items oi
+                    JOIN orders o ON o.id = oi.order_id
+                    WHERE oi.product_id = p.id
+                      AND o.status IN ('paid', 'preparing', 'shipping', 'delivered', 'completed')) as sold_count
+           FROM products p
+           LEFT JOIN reviews r ON r.product_id = p.id
+           GROUP BY p.id
+           ORDER BY p.created_at DESC`
+        )
+        .all();
       res.json(products);
     } catch {
       res.status(500).json({ error: "상품 목록을 불러오지 못했습니다." });
@@ -2442,8 +2773,19 @@ async function startServer() {
 
   app.get("/api/products/:id", (req, res) => {
     try {
-      const product = db.prepare("SELECT * FROM products WHERE id = ?").get(req.params.id);
+      const product = db.prepare("SELECT * FROM products WHERE id = ?").get(req.params.id) as any;
       if (!product) return res.status(404).json({ error: "상품을 찾을 수 없습니다." });
+      product.images = db
+        .prepare("SELECT image_url FROM product_images WHERE product_id = ? ORDER BY sort_order, id")
+        .all(product.id);
+      product.options = db
+        .prepare("SELECT * FROM product_options WHERE product_id = ? ORDER BY id")
+        .all(product.id);
+      product.related = db
+        .prepare(
+          "SELECT id, name, price, image_url, discount_rate, category, stock, sale_mode FROM products WHERE category = ? AND id != ? LIMIT 4"
+        )
+        .all(product.category, product.id);
       res.json(product);
     } catch {
       res.status(500).json({ error: "상품 정보를 불러오지 못했습니다." });
@@ -2457,7 +2799,7 @@ async function startServer() {
       { name: "image", maxCount: 1 },
       { name: "description_image", maxCount: 1 },
     ]),
-    (req: any, res) => {
+    async (req: any, res) => {
       const {
         name,
         price,
@@ -2473,6 +2815,7 @@ async function startServer() {
         sale_mode,
       } = req.body;
       const files = req.files as { [fieldname: string]: Express.Multer.File[] };
+      await toWebpMany([...(files?.["image"] || []), ...(files?.["description_image"] || [])]);
 
       if (!name || isNaN(parseInt(price, 10))) {
         return res.status(400).json({ error: "상품명과 가격을 올바르게 입력해주세요." });
@@ -2522,7 +2865,7 @@ async function startServer() {
       { name: "image", maxCount: 1 },
       { name: "description_image", maxCount: 1 },
     ]),
-    (req: any, res) => {
+    async (req: any, res) => {
       const { id } = req.params;
       const {
         name,
@@ -2539,6 +2882,7 @@ async function startServer() {
         sale_mode,
       } = req.body;
       const files = req.files as { [fieldname: string]: Express.Multer.File[] };
+      await toWebpMany([...(files?.["image"] || []), ...(files?.["description_image"] || [])]);
 
       try {
         const product = db.prepare("SELECT * FROM products WHERE id = ?").get(id) as any;
@@ -2594,7 +2938,7 @@ async function startServer() {
     const price = Math.max(0, Math.floor(Number(req.body?.price) || 0));
     const discountRate = Math.min(100, Math.max(0, Math.floor(Number(req.body?.discount_rate) || 0)));
     const stock = Math.max(0, Math.floor(Number(req.body?.stock) || 0));
-    const product = db.prepare("SELECT id, name FROM products WHERE id = ?").get(req.params.id) as any;
+    const product = db.prepare("SELECT id, name, stock, sale_mode, image_url, price, discount_rate FROM products WHERE id = ?").get(req.params.id) as any;
     if (!product) return res.status(404).json({ error: "상품을 찾을 수 없습니다." });
     db.prepare("UPDATE products SET price = ?, discount_rate = ?, stock = ? WHERE id = ?").run(
       price,
@@ -2602,22 +2946,32 @@ async function startServer() {
       stock,
       product.id
     );
+    if (Number(product.stock) < 1 && stock > 0 && normalizeSaleMode(product.sale_mode) === "open") {
+      notifyRestock({ ...product, stock }).catch(() => {});
+    }
     logAdminAction(req, "UPDATE_PRODUCT", "products", product.id, `Quick update ${product.name}`);
     res.json({ success: true, price, discount_rate: discountRate, stock });
   });
 
-  app.post("/api/products/:id/preorder", authenticateUser, (req: any, res) => {
-    if (!allowRate(`preorder:${req.user.id}:${req.params.id}`, 8, 60 * 60 * 1000)) {
+  app.post("/api/products/:id/preorder", (req: any, res) => {
+    const viewer = readOptionalUser(req);
+    const email = String(
+      viewer?.id
+        ? (db.prepare("SELECT email FROM users WHERE id = ?").get(viewer.id) as any)?.email
+        : req.body?.email || ""
+    )
+      .trim()
+      .toLowerCase();
+    if (!allowRate(`preorder:${email}:${req.params.id}`, 8, 60 * 60 * 1000)) {
       return res.status(429).json({ error: "요청이 너무 많습니다. 잠시 후 다시 시도해주세요." });
     }
     try {
-      const user = db.prepare("SELECT email FROM users WHERE id = ?").get(req.user.id) as any;
-      const email = String(user?.email || "").trim().toLowerCase();
-      if (!email.includes("@")) return res.status(400).json({ error: "계정 이메일이 없습니다." });
-      const product = db.prepare("SELECT id, sale_mode FROM products WHERE id = ?").get(req.params.id) as any;
+      if (!email.includes("@")) return res.status(400).json({ error: "이메일을 입력해주세요." });
+      const product = db.prepare("SELECT id, name, stock, sale_mode FROM products WHERE id = ?").get(req.params.id) as any;
       if (!product) return res.status(404).json({ error: "상품을 찾을 수 없습니다." });
-      if (normalizeSaleMode(product.sale_mode) !== "preorder") {
-        return res.status(400).json({ error: "지금은 사전예약을 받지 않습니다." });
+      const mode = normalizeSaleMode(product.sale_mode);
+      if (mode !== "preorder" && !(mode === "open" && Number(product.stock) < 1)) {
+        return res.status(400).json({ error: "지금은 알림을 받지 않습니다." });
       }
       db.prepare("INSERT OR IGNORE INTO product_preorders (product_id, email) VALUES (?, ?)").run(product.id, email);
       res.json({ success: true });
@@ -2651,18 +3005,24 @@ async function startServer() {
       ? "사전예약하신 계정으로 구매할 수 있습니다."
       : "판매가 시작되었습니다.";
     const html = preorderNoticeHtml(full || product, note);
-    for (const row of rows) {
-      await sendMail(
-        row.email,
-        `${product.name}의 판매가 시작되었습니다`,
-        html,
-        "NEWS",
-        false,
-        "raw"
-      );
-    }
+    await sendInBatches(
+      rows.map(
+        (row) => () =>
+          sendMail(row.email, `${product.name}의 판매가 시작되었습니다`, html, "NEWS", false, "raw")
+      )
+    );
     db.prepare("UPDATE product_preorders SET notified_at = CURRENT_TIMESTAMP WHERE product_id = ?").run(product.id);
     logAdminAction(req, "NOTIFY_PREORDER", "products", product.id, `Auto notified ${rows.length}`);
+  };
+
+  const notifyRestock = async (product: any) => {
+    const rows = db
+      .prepare("SELECT email FROM product_preorders WHERE product_id = ?")
+      .all(product.id) as Array<{ email: string }>;
+    const html = preorderNoticeHtml(product, "다시 구매할 수 있습니다.");
+    await sendInBatches(
+      rows.map((row) => () => sendMail(row.email, `${product.name}이 입고되었습니다`, html, "NEWS", false, "raw"))
+    );
   };
 
   app.get("/api/admin/products/:id/preorders", authenticateAdmin, (req, res) => {
@@ -2677,15 +3037,20 @@ async function startServer() {
   app.post("/api/admin/products/:id/preorders/notify", authenticateAdmin, async (req: any, res) => {
     const subject = String(req.body?.subject || "").trim();
     const content = String(req.body?.content || "").trim();
+    const testEmail = String(req.body?.test_email || "").trim().toLowerCase();
     if (!subject) return res.status(400).json({ error: "제목을 입력해주세요." });
     try {
       const product = db
         .prepare("SELECT id, name, image_url, price, discount_rate FROM products WHERE id = ?")
         .get(req.params.id) as any;
       if (!product) return res.status(404).json({ error: "상품을 찾을 수 없습니다." });
-      const rows = db
-        .prepare("SELECT email FROM product_preorders WHERE product_id = ?")
-        .all(product.id) as Array<{ email: string }>;
+      const rows = (
+        testEmail
+          ? [{ email: testEmail }]
+          : (db
+              .prepare("SELECT email FROM product_preorders WHERE product_id = ?")
+              .all(product.id) as Array<{ email: string }>)
+      );
       const extra = content
         ? escapeHtml(content)
         : "사전예약하신 상품 안내입니다.";
@@ -2771,11 +3136,11 @@ async function startServer() {
   });
 
   app.post("/api/admin/coupons", authenticateAdmin, (req: any, res) => {
-    const { name, code, type, value, min_order_amount, max_discount_amount } = req.body;
+    const { name, code, type, value, min_order_amount, max_discount_amount, valid_days } = req.body;
     try {
       const info = db
         .prepare(
-          "INSERT INTO coupons (name, code, type, value, min_order_amount, max_discount_amount) VALUES (?, ?, ?, ?, ?, ?)"
+          "INSERT INTO coupons (name, code, type, value, min_order_amount, max_discount_amount, valid_days) VALUES (?, ?, ?, ?, ?, ?, ?)"
         )
         .run(
           name,
@@ -2783,7 +3148,8 @@ async function startServer() {
           type || "PERCENT",
           Number(value) || 0,
           Number(min_order_amount) || 0,
-          Number(max_discount_amount) || 0
+          Number(max_discount_amount) || 0,
+          Number(valid_days) || 0
         );
       logAdminAction(req, "CREATE_COUPON", "coupons", Number(info.lastInsertRowid), `Created coupon ${code}`);
       res.json({ success: true });
@@ -2804,21 +3170,32 @@ async function startServer() {
 
   app.post("/api/admin/coupons/:id/give", authenticateOperator, (req: any, res) => {
     const { id } = req.params;
-    const { target } = req.body;
+    const { target, valid_days, skip_duplicate } = req.body;
     try {
-      const coupon = db.prepare("SELECT * FROM coupons WHERE id = ?").get(id);
+      const coupon = db.prepare("SELECT * FROM coupons WHERE id = ?").get(id) as any;
       if (!coupon) return res.status(404).json({ error: "쿠폰을 찾을 수 없습니다." });
-
+      const days = Math.max(0, Number(valid_days) || Number(coupon.valid_days) || 0);
+      const expires = days ? new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString() : null;
+      const already = db.prepare(
+        "SELECT id FROM user_coupons WHERE user_id = ? AND coupon_id = ? AND is_used = 0"
+      );
+      const give = (userId: number) => {
+        if (skip_duplicate !== false && already.get(userId, id)) return;
+        db.prepare("INSERT INTO user_coupons (user_id, coupon_id, expires_at) VALUES (?, ?, ?)").run(
+          userId,
+          id,
+          expires
+        );
+      };
       if (target === "all") {
         const users = db.prepare("SELECT id FROM users").all() as Array<{ id: number }>;
-        const insert = db.prepare("INSERT INTO user_coupons (user_id, coupon_id) VALUES (?, ?)");
         db.transaction((list: Array<{ id: number }>) => {
-          for (const u of list) insert.run(u.id, id);
+          for (const u of list) give(u.id);
         })(users);
       } else {
         const user = db.prepare("SELECT id FROM users WHERE email = ?").get(target) as any;
         if (!user) return res.status(404).json({ error: "해당 이메일의 회원을 찾을 수 없습니다." });
-        db.prepare("INSERT INTO user_coupons (user_id, coupon_id) VALUES (?, ?)").run(user.id, id);
+        give(user.id);
       }
 
       logAdminAction(req, "ISSUE_COUPON", "coupons", Number(id), `Issued coupon to ${target}`);
@@ -2990,7 +3367,8 @@ async function startServer() {
     rawItems: any[],
     requestedPoints: number,
     couponId: number | null,
-    buyerEmail = ""
+    buyerEmail = "",
+    zipcode = ""
   ) => {
     if (!Array.isArray(rawItems) || rawItems.length === 0) {
       throw new Error("주문할 상품이 없습니다.");
@@ -3013,14 +3391,23 @@ async function startServer() {
       if (Number(product.stock) < qty) {
         throw new Error(`'${product.name}' 재고가 부족합니다.`);
       }
-      const price = unitPrice(product);
+      const optionId = Number(raw.option_id) || 0;
+      const option = optionId
+        ? (db.prepare("SELECT * FROM product_options WHERE id = ? AND product_id = ?").get(optionId, product.id) as any)
+        : null;
+      if (optionId && !option) throw new Error("옵션을 확인해주세요.");
+      if (option && Number(option.stock) < qty) {
+        throw new Error(`'${product.name} ${option.name}' 재고가 부족합니다.`);
+      }
+      const price = unitPrice(product) + (option ? Number(option.extra_price) || 0 : 0);
       goods += price * qty;
       priced.push({
         product_id: product.id,
-        name: product.name,
+        name: option ? `${product.name} (${option.name})` : product.name,
         price,
         quantity: qty,
         image_url: product.image_url,
+        option_id: option ? option.id : null,
       });
     }
 
@@ -3055,7 +3442,10 @@ async function startServer() {
 
     const tier = String(user?.tier || "").toUpperCase();
     const freeTier = tier === "BLACK" || tier === "THE_BLACK";
-    const shippingFee = freeTier || shippingCoupon || goods >= 50000 || goods === 0 ? 0 : 3000;
+    const freeMin = shopSetting("free_min", 50000);
+    const baseFee = shopSetting("shipping_fee", 3000);
+    const shippingFee =
+      (freeTier || shippingCoupon || goods >= freeMin || goods === 0 ? 0 : baseFee) + extraShippingFee(zipcode);
     const payable = Math.max(0, goods - couponDiscount + shippingFee);
     let points = Math.floor(Number(requestedPoints) || 0);
     if (points < 0) points = 0;
@@ -3082,6 +3472,7 @@ async function startServer() {
       customer_email,
       customer_phone,
       shipping_address,
+      zipcode,
       items,
       used_points,
       used_coupon_id,
@@ -3114,7 +3505,8 @@ async function startServer() {
         items,
         Number(used_points) || 0,
         used_coupon_id ? Number(used_coupon_id) : null,
-        String(customer_email || "")
+        String(customer_email || ""),
+        String(zipcode || "")
       );
       const orderId = db.transaction(() => {
         const info = db
@@ -3140,10 +3532,18 @@ async function startServer() {
 
         const newOrderId = Number(info.lastInsertRowid);
         const insertItem = db.prepare(
-          "INSERT INTO order_items (order_id, product_id, name, price, quantity, image_url) VALUES (?, ?, ?, ?, ?, ?)"
+          "INSERT INTO order_items (order_id, product_id, name, price, quantity, image_url, option_id) VALUES (?, ?, ?, ?, ?, ?, ?)"
         );
         for (const item of quote.items) {
-          insertItem.run(newOrderId, item.product_id, item.name, item.price, item.quantity, item.image_url);
+          insertItem.run(
+            newOrderId,
+            item.product_id,
+            item.name,
+            item.price,
+            item.quantity,
+            item.image_url,
+            item.option_id || null
+          );
         }
         return newOrderId;
       })();
@@ -3537,7 +3937,7 @@ async function startServer() {
     }
     try {
       const order = db
-        .prepare("SELECT id, status FROM orders WHERE id = ? AND user_id = ?")
+        .prepare("SELECT id, status, order_number FROM orders WHERE id = ? AND user_id = ?")
         .get(req.params.id, req.user.id) as any;
       if (!order) return res.status(404).json({ error: "주문을 찾을 수 없습니다." });
       if (!["pending", "paid"].includes(order.status)) {
@@ -3547,6 +3947,19 @@ async function startServer() {
       db.prepare(
         "UPDATE orders SET customer_name = ?, customer_phone = ?, shipping_address = ? WHERE id = ?"
       ).run(name, phone, shippingAddress, order.id);
+      if (order.status === "paid") {
+        const recipients = db
+          .prepare("SELECT notify_email FROM admin_keys WHERE notify_email IS NOT NULL AND TRIM(notify_email) != ''")
+          .all() as Array<{ notify_email: string }>;
+        for (const row of recipients) {
+          sendMail(
+            row.notify_email,
+            "배송지가 변경되었습니다",
+            `<p>${escapeHtml(order.order_number)} 배송지가 바뀌었습니다.</p><p>${escapeHtml(shippingAddress)}</p>`,
+            "ADMIN"
+          ).catch(() => {});
+        }
+      }
       res.json({
         success: true,
         customer_name: name,
@@ -3599,8 +4012,16 @@ async function startServer() {
       }
 
       let refundAmount = order.total_amount;
-      if (reason === "단순 변심" || reason === "옵션 오선택") {
-        refundAmount = Math.max(0, order.total_amount - 5000);
+      const simple = reason === "단순 변심" || reason === "옵션 오선택";
+      if (simple) {
+        const user = order.user_id
+          ? (db.prepare("SELECT tier FROM users WHERE id = ?").get(order.user_id) as any)
+          : null;
+        const tier = String(user?.tier || "").toUpperCase();
+        const fee = shopSetting("shipping_fee", 3000);
+        const deduction =
+          tier === "BLACK" || tier === "THE_BLACK" ? 0 : Number(order.shipping_fee) > 0 ? fee : fee * 2;
+        refundAmount = Math.max(0, order.total_amount - deduction);
       }
 
       db.prepare(
@@ -3787,7 +4208,7 @@ async function startServer() {
   // 12. Reviews APIs
   // ==========================================
   app.post("/api/reviews/image", authenticateUser, (req: any, res) => {
-    upload.single("image")(req, res, (err: any) => {
+    upload.single("image")(req, res, async (err: any) => {
       if (err) return res.status(400).json({ error: "이미지를 올리지 못했습니다." });
       const file = req.file;
       if (!file) return res.status(400).json({ error: "이미지 파일을 선택해주세요." });
@@ -3795,6 +4216,7 @@ async function startServer() {
         fs.unlink(file.path, () => {});
         return res.status(400).json({ error: "이미지 파일만 올릴 수 있습니다." });
       }
+      await toWebp(file);
       res.json({ image_url: `/uploads/${file.filename}` });
     });
   });
@@ -3813,11 +4235,11 @@ async function startServer() {
       const baseDateStr = order.confirmed_at || order.status_updated_at;
       if (baseDateStr) {
         const confirmedAt = new Date(baseDateStr);
-        const threeDaysInMs = 3 * 24 * 60 * 60 * 1000;
+        const threeDaysInMs = 14 * 24 * 60 * 60 * 1000;
         if (Date.now() - confirmedAt.getTime() > threeDaysInMs) {
           return res
             .status(400)
-            .json({ error: "구매확정 후 3일이 경과하여 리뷰를 작성할 수 없습니다." });
+            .json({ error: "구매확정 후 14일이 지나 리뷰를 작성할 수 없습니다." });
         }
       }
 
@@ -4033,12 +4455,12 @@ async function startServer() {
     try {
       const dailySales = db
         .prepare(
-          "SELECT SUM(total_amount) as amount FROM orders WHERE date(created_at) = date('now') AND status != 'refunded'"
+          "SELECT SUM(total_amount) as amount FROM orders WHERE date(created_at, '+9 hours') = date('now', '+9 hours') AND status IN ('paid', 'shipping', 'delivered', 'completed', 'preparing')"
         )
         .get() as any;
       const weeklySales = db
         .prepare(
-          "SELECT SUM(total_amount) as amount FROM orders WHERE created_at > date('now', '-7 days') AND status != 'refunded'"
+          "SELECT SUM(total_amount) as amount FROM orders WHERE datetime(created_at) > datetime('now', '-7 days') AND status IN ('paid', 'shipping', 'delivered', 'completed', 'preparing')"
         )
         .get() as any;
       const pendingCount = db
@@ -4063,9 +4485,10 @@ async function startServer() {
     try {
       const salesData = db
         .prepare(
-          `SELECT date(created_at) as date, SUM(total_amount) as amount
+          `SELECT date(created_at, '+9 hours') as date, SUM(total_amount) as amount
            FROM orders
-           WHERE created_at > date('now', '-30 days') AND status != 'refunded'
+           WHERE datetime(created_at) > datetime('now', '-30 days')
+             AND status IN ('paid', 'shipping', 'delivered', 'completed', 'preparing')
            GROUP BY date
            ORDER BY date ASC`
         )
@@ -4178,7 +4601,8 @@ async function startServer() {
     }
   });
 
-  app.post("/api/admin/display", authenticateAdmin, upload.single("image"), (req: any, res) => {
+  app.post("/api/admin/display", authenticateAdmin, upload.single("image"), async (req: any, res) => {
+    await toWebp(req.file);
     const { id, type, link_url, is_active } = req.body;
     const image_url = req.file ? `/uploads/${req.file.filename}` : req.body.image_url;
 
@@ -4241,14 +4665,29 @@ async function startServer() {
     }
   });
 
+  app.post("/api/uploads/image", (req, res) => {
+    if (!allowRate(`upload:${clientIp(req)}`, 20, 60 * 60 * 1000)) {
+      return res.status(429).json({ error: "요청이 너무 많습니다. 잠시 후 다시 시도해주세요." });
+    }
+    upload.single("image")(req, res, async (err: any) => {
+      if (err || !req.file) return res.status(400).json({ error: "이미지를 올리지 못했습니다." });
+      if (!String(req.file.mimetype || "").startsWith("image/")) {
+        fs.unlink(req.file.path, () => {});
+        return res.status(400).json({ error: "이미지 파일만 올릴 수 있습니다." });
+      }
+      await toWebp(req.file);
+      res.json({ image_url: `/uploads/${req.file.filename}` });
+    });
+  });
+
   app.post("/api/inquiries", (req, res) => {
-    const { name, email, category, subject, message, order_number } = req.body;
+    const { name, email, category, subject, message, order_number, image_url } = req.body;
     if (!name || !email || !subject || !message) {
       return res.status(400).json({ error: "모든 항목을 입력해주세요." });
     }
 
     const needsOrder = category === "배송 문의" || category === "교환/환불 문의";
-    let userId: number | null = null;
+    let userId: number | null = readOptionalUser(req)?.id || null;
     let linkedOrderNumber: string | null = null;
 
     if (needsOrder) {
@@ -4271,8 +4710,8 @@ async function startServer() {
 
     try {
       db.prepare(
-        `INSERT INTO inquiries (category, name, email, subject, message, order_number, user_id)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`
+        `INSERT INTO inquiries (category, name, email, subject, message, order_number, user_id, image_url)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
       ).run(
         category || "상품 문의",
         name,
@@ -4280,7 +4719,8 @@ async function startServer() {
         subject,
         message,
         linkedOrderNumber,
-        userId
+        userId,
+        String(image_url || "").startsWith("/uploads/") ? String(image_url) : null
       );
       res.json({ success: true });
     } catch {
@@ -4428,11 +4868,12 @@ async function startServer() {
   });
 
   app.post("/api/admin/newsletter/send", authenticateAdmin, async (req, res) => {
-    const { subject, content } = req.body;
+    const { subject, content, test_email } = req.body;
     if (!subject || !content) {
       return res.status(400).json({ error: "제목과 본문을 모두 입력해주세요." });
     }
     try {
+      const testEmail = String(test_email || "").trim().toLowerCase();
       const guestEmails = (
         db.prepare("SELECT email FROM newsletter_subscribers").all() as Array<{ email: string }>
       ).map((s) => s.email);
@@ -4441,18 +4882,21 @@ async function startServer() {
           .prepare("SELECT email FROM users WHERE newsletter_subscribed = 1")
           .all() as Array<{ email: string }>
       ).map((u) => u.email);
-      const allEmails = [...new Set([...guestEmails, ...userEmails])].filter(Boolean);
+      const allEmails = testEmail
+        ? [testEmail]
+        : [...new Set([...guestEmails, ...userEmails])].filter(Boolean);
 
       const host = req.get("host") || "benua.shop";
       const mainDomainHost = host.startsWith("dash.") ? host.replace("dash.", "") : host;
 
-      for (const email of allEmails) {
-        const encodedEmail = Buffer.from(email).toString("base64");
-        const unsubLink = `https://${mainDomainHost}/unsubscribe?token=${encodedEmail}`;
-        await sendMail(
-          email,
-          subject,
-          `
+      await sendInBatches(
+        allEmails.map((email) => () => {
+          const encodedEmail = Buffer.from(email).toString("base64");
+          const unsubLink = `https://${mainDomainHost}/unsubscribe?token=${encodedEmail}`;
+          return sendMail(
+            email,
+            subject,
+            `
           <div>
             <div style="margin-bottom: 30px;">${content}</div>
             <div style="margin-top: 40px; padding-top: 20px; border-top: 1px dashed #eee; font-size: 11px; color: #999;">
@@ -4460,9 +4904,10 @@ async function startServer() {
             </div>
           </div>
           `,
-          "NEWS"
-        );
-      }
+            "NEWS"
+          );
+        })
+      );
 
       res.json({ success: true, count: allEmails.length });
     } catch {
@@ -4535,6 +4980,11 @@ async function startServer() {
         true
       );
       if (!sent) return res.status(500).json({ error: "답장을 보내지 못했습니다." });
+      db.prepare("UPDATE inbound_emails SET replied_at = ?, reply_body = ? WHERE id = ?").run(
+        new Date().toISOString(),
+        message,
+        row.id
+      );
       logAdminAction(req, "REPLY_INBOX", "inbound_emails", Number(row.id), `Replied to ${to}`);
       res.json({ success: true });
     } catch {
@@ -4558,6 +5008,287 @@ async function startServer() {
         error: err instanceof Error ? err.message : "받은 메일을 가져오지 못했습니다.",
       });
     }
+  });
+
+  setInterval(() => {
+    const now = Date.now();
+    for (const [key, times] of rateBuckets) {
+      const recent = times.filter((at) => now - at < 60 * 60 * 1000);
+      if (recent.length === 0) rateBuckets.delete(key);
+      else rateBuckets.set(key, recent);
+    }
+  }, 10 * 60 * 1000);
+
+  app.get("/api/orders/:id/tracking", authenticateUser, async (req: any, res, next) => {
+    if (!/^\d+$/.test(String(req.params.id))) return next();
+    const order = db
+      .prepare("SELECT * FROM orders WHERE id = ? AND user_id = ?")
+      .get(req.params.id, req.user.id) as any;
+    if (!order?.tracking_number) return res.status(404).json({ error: "운송장이 없습니다." });
+    const info = await loadTracking(order);
+    if (trackingIsDelivered(info) && order.status === "shipping") markOrderDelivered(order.id);
+    res.json({ company: order.shipping_company, invoice: order.tracking_number, info });
+  });
+
+  app.get("/api/orders/track/:orderNumber/tracking", async (req, res) => {
+    const normalizePhone = (value: unknown) => {
+      let digits = String(value || "").replace(/\D/g, "");
+      if (digits.startsWith("82")) digits = `0${digits.slice(2)}`;
+      return digits;
+    };
+    const order = db.prepare("SELECT * FROM orders WHERE order_number = ?").get(req.params.orderNumber) as any;
+    if (!order || normalizePhone(order.customer_phone) !== normalizePhone(req.query.phone)) {
+      return res.status(404).json({ error: "주문을 찾을 수 없습니다." });
+    }
+    if (!order.tracking_number) return res.status(404).json({ error: "운송장이 없습니다." });
+    const info = await loadTracking(order);
+    if (trackingIsDelivered(info) && order.status === "shipping") markOrderDelivered(order.id);
+    res.json({ company: order.shipping_company, invoice: order.tracking_number, info });
+  });
+
+  app.post("/api/orders/:id/partial-refund", authenticateUser, async (req: any, res) => {
+    const picks = Array.isArray(req.body?.items) ? req.body.items : [];
+    const reason = String(req.body?.reason || "부분 반품");
+    const order = db
+      .prepare("SELECT * FROM orders WHERE id = ? AND user_id = ?")
+      .get(req.params.id, req.user.id) as any;
+    if (!order) return res.status(404).json({ error: "주문을 찾을 수 없습니다." });
+    let amount = 0;
+    for (const pick of picks) {
+      const item = db
+        .prepare("SELECT * FROM order_items WHERE id = ? AND order_id = ?")
+        .get(pick.id, order.id) as any;
+      if (!item) continue;
+      const qty = Math.min(Number(item.quantity) || 0, Math.max(1, Number(pick.quantity) || 1));
+      amount += Number(item.price) * qty;
+      db.prepare(
+        "UPDATE order_items SET item_status = 'refund_requested', refund_quantity = ? WHERE id = ?"
+      ).run(qty, item.id);
+    }
+    if (amount <= 0) return res.status(400).json({ error: "반품할 상품을 선택해주세요." });
+    if (order.status !== "refund_requested") {
+      db.prepare("UPDATE orders SET resume_status = ? WHERE id = ?").run(order.status, order.id);
+    }
+    db.prepare(
+      "UPDATE orders SET status = 'refund_requested', refund_reason = ?, refund_amount = ?, status_updated_at = CURRENT_TIMESTAMP WHERE id = ?"
+    ).run(reason, amount, order.id);
+    res.json({ success: true, refund_amount: amount });
+  });
+
+  app.put("/api/auth/password", authenticateUser, (req: any, res) => {
+    const current = String(req.body?.current || "");
+    const next = String(req.body?.next || "");
+    if (next.length < 8) return res.status(400).json({ error: "비밀번호는 8자 이상이어야 합니다." });
+    const user = db.prepare("SELECT * FROM users WHERE id = ?").get(req.user.id) as any;
+    if (!user || !verifyPassword(current, user.password)) {
+      return res.status(400).json({ error: "현재 비밀번호가 맞지 않습니다." });
+    }
+    db.prepare("UPDATE users SET password = ? WHERE id = ?").run(hashPassword(next), user.id);
+    res.json({ success: true });
+  });
+
+  app.post("/api/auth/unlink", authenticateUser, (req: any, res) => {
+    const provider = String(req.body?.provider || "");
+    const column = provider === "google" ? "google_id" : provider === "naver" ? "naver_id" : provider === "kakao" ? "kakao_id" : "";
+    if (!column) return res.status(400).json({ error: "연결을 해제할 계정을 확인해주세요." });
+    db.prepare(`UPDATE users SET ${column} = NULL WHERE id = ?`).run(req.user.id);
+    res.json({ success: true });
+  });
+
+  app.post("/api/coupons/claim", authenticateUser, (req: any, res) => {
+    const code = String(req.body?.code || "").trim();
+    const coupon = db.prepare("SELECT * FROM coupons WHERE code = ? AND is_active = 1").get(code) as any;
+    if (!coupon) return res.status(404).json({ error: "쿠폰 코드를 확인해주세요." });
+    const exists = db
+      .prepare("SELECT id FROM user_coupons WHERE user_id = ? AND coupon_id = ? AND is_used = 0")
+      .get(req.user.id, coupon.id);
+    if (exists) return res.status(400).json({ error: "이미 가진 쿠폰입니다." });
+    const days = Number(coupon.valid_days) || 0;
+    const expires = days ? new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString() : null;
+    db.prepare("INSERT INTO user_coupons (user_id, coupon_id, expires_at) VALUES (?, ?, ?)").run(
+      req.user.id,
+      coupon.id,
+      expires
+    );
+    res.json({ success: true });
+  });
+
+  app.get("/api/cart", authenticateUser, (req: any, res) => {
+    const items = db
+      .prepare(
+        `SELECT c.product_id as id, c.quantity, IFNULL(c.option_id, 0) as option_id,
+                p.name, p.price, p.image_url, p.discount_rate, p.stock, p.sale_mode,
+                o.name as option_name, IFNULL(o.extra_price, 0) as extra_price, o.stock as option_stock
+         FROM carts c JOIN products p ON p.id = c.product_id
+         LEFT JOIN product_options o ON o.id = c.option_id
+         WHERE c.user_id = ?`
+      )
+      .all(req.user.id);
+    res.json(items);
+  });
+
+  app.put("/api/cart", authenticateUser, (req: any, res) => {
+    const items = Array.isArray(req.body?.items) ? req.body.items : [];
+    const current = req.body?.replace
+      ? []
+      : (db.prepare("SELECT product_id, quantity, option_id FROM carts WHERE user_id = ?").all(req.user.id) as any[]);
+    const merged = new Map<string, any>();
+    for (const item of [...current, ...items]) {
+      const key = `${item.id || item.product_id}:${item.option_id || 0}`;
+      const prev = merged.get(key);
+      merged.set(key, {
+        id: Number(item.id || item.product_id),
+        option_id: Number(item.option_id) || 0,
+        quantity: Math.max(prev?.quantity || 0, Number(item.quantity) || 1),
+      });
+    }
+    db.prepare("DELETE FROM carts WHERE user_id = ?").run(req.user.id);
+    const insert = db.prepare(
+      "INSERT INTO carts (user_id, product_id, quantity, option_id) VALUES (?, ?, ?, ?)"
+    );
+    for (const item of merged.values()) {
+      if (item.id) insert.run(req.user.id, item.id, item.quantity, item.option_id);
+    }
+    res.json({ success: true });
+  });
+
+  app.get("/api/addresses", authenticateUser, (req: any, res) => {
+    res.json(db.prepare("SELECT * FROM user_addresses WHERE user_id = ? ORDER BY is_default DESC, id DESC").all(req.user.id));
+  });
+
+  app.post("/api/addresses", authenticateUser, (req: any, res) => {
+    const body = req.body || {};
+    if (body.is_default) db.prepare("UPDATE user_addresses SET is_default = 0 WHERE user_id = ?").run(req.user.id);
+    const info = db
+      .prepare(
+        "INSERT INTO user_addresses (user_id, label, name, phone, zipcode, address, detail_address, is_default) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+      )
+      .run(
+        req.user.id,
+        body.label || "",
+        body.name || "",
+        body.phone || "",
+        body.zipcode || "",
+        body.address || "",
+        body.detail_address || "",
+        body.is_default ? 1 : 0
+      );
+    res.json({ id: info.lastInsertRowid });
+  });
+
+  app.delete("/api/addresses/:id", authenticateUser, (req: any, res) => {
+    db.prepare("DELETE FROM user_addresses WHERE id = ? AND user_id = ?").run(req.params.id, req.user.id);
+    res.json({ success: true });
+  });
+
+  app.get("/api/products/:id/questions", (req, res) => {
+    const viewer = readOptionalUser(req);
+    const rows = db
+      .prepare("SELECT * FROM product_questions WHERE product_id = ? ORDER BY id DESC")
+      .all(req.params.id) as any[];
+    res.json(
+      rows.map((row) => ({
+        ...row,
+        question: row.is_secret && row.user_id !== viewer?.id ? "비밀글입니다." : row.question,
+      }))
+    );
+  });
+
+  app.post("/api/products/:id/questions", authenticateUser, (req: any, res) => {
+    const question = String(req.body?.question || "").trim();
+    if (!question) return res.status(400).json({ error: "질문을 입력해주세요." });
+    const user = db.prepare("SELECT name FROM users WHERE id = ?").get(req.user.id) as any;
+    db.prepare(
+      "INSERT INTO product_questions (product_id, user_id, author, question, is_secret) VALUES (?, ?, ?, ?, ?)"
+    ).run(req.params.id, req.user.id, user?.name || "회원", question, req.body?.secret ? 1 : 0);
+    res.json({ success: true });
+  });
+
+  app.post("/api/admin/questions/:id/answer", authenticateCS, (req: any, res) => {
+    db.prepare("UPDATE product_questions SET answer = ? WHERE id = ?").run(String(req.body?.answer || ""), req.params.id);
+    res.json({ success: true });
+  });
+
+  app.get("/api/inquiries/me", authenticateUser, (req: any, res) => {
+    res.json(db.prepare("SELECT * FROM inquiries WHERE user_id = ? ORDER BY created_at DESC").all(req.user.id));
+  });
+
+  app.get("/api/admin/badges", authenticateCS, (_req, res) => {
+    const orders = db
+      .prepare("SELECT COUNT(*) as count FROM orders WHERE status IN ('paid', 'preparing', 'refund_requested')")
+      .get() as any;
+    const inquiries = db
+      .prepare("SELECT COUNT(*) as count FROM inquiries WHERE status = 'pending' OR reply_message IS NULL OR reply_message = ''")
+      .get() as any;
+    const mail = db.prepare("SELECT COUNT(*) as count FROM inbound_emails WHERE is_read = 0").get() as any;
+    res.json({ orders: orders.count || 0, inquiries: inquiries.count || 0, mail: mail.count || 0 });
+  });
+
+  app.get("/api/admin/settings", authenticateAdmin, (_req, res) => {
+    res.json(db.prepare("SELECT * FROM shop_settings").all());
+  });
+
+  app.put("/api/admin/settings", authenticateAdmin, (req: any, res) => {
+    const put = db.prepare("INSERT INTO shop_settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value");
+    for (const [key, value] of Object.entries(req.body || {})) put.run(key, String(value));
+    res.json({ success: true });
+  });
+
+  app.delete("/api/admin/inbox/:id", authenticateCS, (req: any, res) => {
+    db.prepare("DELETE FROM inbound_emails WHERE id = ?").run(req.params.id);
+    res.json({ success: true });
+  });
+
+  app.post("/api/admin/products/:id/images", authenticateAdmin, upload.array("images", 8), async (req: any, res) => {
+    const files = (req.files || []) as Express.Multer.File[];
+    await toWebpMany(files);
+    const insert = db.prepare("INSERT INTO product_images (product_id, image_url, sort_order) VALUES (?, ?, ?)");
+    files.forEach((file, index) => insert.run(req.params.id, `/uploads/${file.filename}`, index));
+    res.json({ success: true });
+  });
+
+  app.post("/api/admin/products/:id/options", authenticateAdmin, (req: any, res) => {
+    const info = db
+      .prepare("INSERT INTO product_options (product_id, name, extra_price, stock) VALUES (?, ?, ?, ?)")
+      .run(req.params.id, req.body?.name || "", Number(req.body?.extra_price) || 0, Number(req.body?.stock) || 0);
+    res.json({ id: info.lastInsertRowid });
+  });
+
+  app.delete("/api/admin/options/:id", authenticateAdmin, (req: any, res) => {
+    db.prepare("DELETE FROM product_options WHERE id = ?").run(req.params.id);
+    res.json({ success: true });
+  });
+
+  app.get("/api/admin/questions", authenticateCS, (_req, res) => {
+    res.json(
+      db
+        .prepare(
+          `SELECT q.*, p.name as product_name FROM product_questions q
+           LEFT JOIN products p ON p.id = q.product_id
+           ORDER BY q.id DESC LIMIT 100`
+        )
+        .all()
+    );
+  });
+
+  app.get("/sitemap.xml", (_req, res) => {
+    const products = db.prepare("SELECT id FROM products").all() as Array<{ id: number }>;
+    const urls = ["/", "/shop", "/about", "/contact", ...products.map((p) => `/product/${p.id}`)]
+      .map((url) => `<url><loc>https://benua.shop${url}</loc></url>`)
+      .join("");
+    res.type("xml").send(`<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">${urls}</urlset>`);
+  });
+
+  app.get("/robots.txt", (_req, res) => {
+    res.type("text").send("User-agent: *\nAllow: /\nSitemap: https://benua.shop/sitemap.xml\n");
+  });
+
+  app.get("/api/shipping/extra", (req, res) => {
+    res.json({
+      extra: extraShippingFee(String(req.query.zip || "")),
+      shipping_fee: shopSetting("shipping_fee", 3000),
+      free_min: shopSetting("free_min", 50000),
+    });
   });
 
   app.get("/api/health", (_req, res) => {
@@ -4598,7 +5329,25 @@ async function startServer() {
         req.path.startsWith("/product/") ||
         req.path.startsWith("/admin") ||
         (onAdminHost && !looksLikeFile);
-      res.status(known ? 200 : 404).sendFile(path.join(distPath, "index.html"));
+      const file = path.join(distPath, "index.html");
+      const productMatch = req.path.match(/^\/product\/(\d+)/);
+      if (productMatch) {
+        const product = db.prepare("SELECT name, description, image_url FROM products WHERE id = ?").get(productMatch[1]) as any;
+        if (product) {
+          let html = fs.readFileSync(file, "utf8");
+          const image = String(product.image_url || "").startsWith("http")
+            ? product.image_url
+            : `https://benua.shop${product.image_url || ""}`;
+          html = html
+            .replace(/<title>.*?<\/title>/, `<title>${escapeHtml(product.name)} | Benua</title>`)
+            .replace(/property="og:title" content="[^"]*"/, `property="og:title" content="${escapeHtml(product.name)}"`)
+            .replace(/property="og:description" content="[^"]*"/, `property="og:description" content="${escapeHtml(String(product.description || "").slice(0, 120))}"`)
+            .replace(/property="og:image" content="[^"]*"/, `property="og:image" content="${escapeHtml(image)}"`);
+          res.status(200).type("html").send(html);
+          return;
+        }
+      }
+      res.status(known ? 200 : 404).sendFile(file);
     });
   }
 

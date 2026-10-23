@@ -1,14 +1,18 @@
 import { useState, useEffect } from "react";
 import { Link, useLocation } from "react-router-dom";
-import { ShoppingBag, User, Menu, X } from "lucide-react";
+import { ShoppingBag, User, Menu, X, Search } from "lucide-react";
 import { apiFetch } from "../lib/api";
 import { cn } from "../lib/utils";
+import { mergeServerCart } from "../lib/cart";
 
 export default function Navbar() {
   const location = useLocation();
   const [cartCount, setCartCount] = useState(0);
   const [user, setUser] = useState<any>(null);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [keyword, setKeyword] = useState("");
+  const [results, setResults] = useState<any[]>([]);
 
   const updateCartCount = () => {
     try {
@@ -34,12 +38,38 @@ export default function Navbar() {
 
   useEffect(() => {
     setMobileMenuOpen(false);
+    setSearchOpen(false);
     updateCartCount();
     apiFetch("/api/auth/me")
       .then((r) => r.json())
       .then((d) => setUser(d.user || null))
       .catch(() => setUser(null));
   }, [location.pathname]);
+
+  useEffect(() => {
+    if (!user || sessionStorage.getItem("benua_cart_synced")) return;
+    sessionStorage.setItem("benua_cart_synced", "1");
+    mergeServerCart().catch(() => {});
+  }, [user]);
+
+  useEffect(() => {
+    if (!searchOpen) return;
+    const q = keyword.trim().toLowerCase();
+    if (!q) {
+      setResults([]);
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      apiFetch("/api/products")
+        .then((r) => (r.ok ? r.json() : []))
+        .then((rows) => {
+          const list = Array.isArray(rows) ? rows : [];
+          setResults(list.filter((item) => String(item.name || "").toLowerCase().includes(q)).slice(0, 8));
+        })
+        .catch(() => {});
+    }, 200);
+    return () => window.clearTimeout(timer);
+  }, [keyword, searchOpen]);
 
   const navLinks = [
     { name: "컬렉션", path: "/shop" },
@@ -72,6 +102,14 @@ export default function Navbar() {
       </nav>
 
       <div className="flex items-center">
+        <button
+          type="button"
+          aria-label="상품 검색"
+          onClick={() => setSearchOpen((open) => !open)}
+          className="w-11 h-11 text-venuea-dark hover:text-venuea-green flex items-center justify-center"
+        >
+          <Search size={20} />
+        </button>
         <Link
           to={user ? "/profile" : "/login"}
           aria-label={user ? "마이페이지" : "로그인"}
@@ -104,6 +142,32 @@ export default function Navbar() {
           {mobileMenuOpen ? <X size={22} /> : <Menu size={22} />}
         </button>
       </div>
+
+      {searchOpen && (
+        <div className="fixed inset-x-0 top-[76px] z-50 bg-venuea-beige border-b border-black/5 px-6 md:px-[60px] py-4">
+          <input
+            autoFocus
+            value={keyword}
+            onChange={(e) => setKeyword(e.target.value)}
+            placeholder="상품명 검색"
+            className="w-full px-4 py-3 bg-white border border-black/10 rounded-xl text-sm"
+          />
+          {results.length > 0 && (
+            <div className="mt-3 grid gap-2">
+              {results.map((item) => (
+                <Link key={item.id} to={`/product/${item.id}`} className="flex items-center gap-3 text-sm font-bold text-venuea-dark">
+                  {item.image_url ? (
+                    <img src={item.image_url} alt="" className="w-10 h-12 object-cover rounded-lg" />
+                  ) : (
+                    <span className="w-10 h-12 bg-white rounded-lg" />
+                  )}
+                  {item.name}
+                </Link>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {mobileMenuOpen && (
         <div className="md:hidden">

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { Routes, Route, Link, useLocation, useNavigate } from "react-router-dom";
+import { Routes, Route, Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import Papa from "papaparse";
 import {
   LayoutDashboard,
@@ -48,6 +48,7 @@ const getStatusText = (status: string) => {
   const map: Record<string, string> = {
     pending: "결제대기",
     paid: "결제완료",
+    preparing: "상품준비중",
     shipping: "배송중",
     delivered: "배송완료",
     completed: "구매확정",
@@ -84,7 +85,7 @@ export default function AdminDashboard() {
   const isAdminSub = isAdminSubdomain();
   const adminPathBase = isAdminSub ? "" : "/admin";
   const [adminRole, setAdminRole] = useState<string>("MASTER");
-  const [unreadMail, setUnreadMail] = useState(0);
+  const [badges, setBadges] = useState({ orders: 0, inquiries: 0, mail: 0 });
 
   useEffect(() => {
     const checkAuth = async () => {
@@ -107,10 +108,10 @@ export default function AdminDashboard() {
 
   useEffect(() => {
     if (isCheckingAuth) return;
-    apiFetch("/api/admin/inbox")
-      .then((r) => (r.ok ? r.json() : []))
-      .then((rows) => {
-        setUnreadMail(Array.isArray(rows) ? rows.filter((mail) => !mail.is_read).length : 0);
+    apiFetch("/api/admin/badges")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (data) setBadges({ orders: data.orders || 0, inquiries: data.inquiries || 0, mail: data.mail || 0 });
       })
       .catch(() => {});
   }, [isCheckingAuth, location.pathname]);
@@ -136,6 +137,7 @@ export default function AdminDashboard() {
     { name: "고객/포인트 관리", path: `${adminPathBase}/customers`, icon: Users },
     { name: "쿠폰 관리", path: `${adminPathBase}/coupons`, icon: Ticket },
     { name: "뉴스레터 발송", path: `${adminPathBase}/newsletter`, icon: FileText },
+    { name: "운영 설정", path: `${adminPathBase}/settings`, icon: Settings, requiresAdmin: true },
     { name: "감사 로그", path: `${adminPathBase}/logs`, icon: Activity, requiresAdmin: true },
     { name: "보안 키 관리", path: `${adminPathBase}/keys`, icon: Settings, requiresAdmin: true },
   ];
@@ -146,6 +148,13 @@ export default function AdminDashboard() {
     }
     return true;
   });
+
+  const badgeFor = (path: string) => {
+    if (path.endsWith("/orders")) return badges.orders;
+    if (path.endsWith("/inquiries")) return badges.inquiries;
+    if (path.endsWith("/inbox")) return badges.mail;
+    return 0;
+  };
 
   const handleLogout = async () => {
     await apiFetch("/api/admin/logout", { method: "POST" });
@@ -221,9 +230,9 @@ export default function AdminDashboard() {
                     >
                       <Icon size={18} />
                       <span className="flex-1">{link.name}</span>
-                      {link.path.endsWith("/inbox") && unreadMail > 0 && (
+                      {badgeFor(link.path) > 0 && (
                         <span className="min-w-5 h-5 px-1 rounded-full bg-venuea-green text-white text-[10px] font-bold flex items-center justify-center">
-                          {unreadMail}
+                          {badgeFor(link.path)}
                         </span>
                       )}
                     </Link>
@@ -270,7 +279,12 @@ export default function AdminDashboard() {
                   )}
                 >
                   <Icon size={18} />
-                  <span>{link.name}</span>
+                  <span className="flex-1">{link.name}</span>
+                  {badgeFor(link.path) > 0 && (
+                    <span className="min-w-5 h-5 px-1 rounded-full bg-venuea-green text-white text-[10px] font-bold flex items-center justify-center">
+                      {badgeFor(link.path)}
+                    </span>
+                  )}
                 </Link>
               );
             })}
@@ -302,6 +316,7 @@ export default function AdminDashboard() {
           <Route path="/inquiries" element={<AdminInquiries adminRole={adminRole} />} />
           <Route path="/inbox" element={<AdminInbox />} />
           <Route path="/newsletter" element={<AdminNewsletter />} />
+          <Route path="/settings" element={<AdminSettings />} />
           {(adminRole === "MASTER" || adminRole === "ADMIN") && (
             <>
               <Route path="/logs" element={<AdminLogs />} />
@@ -419,6 +434,7 @@ function AdminProducts() {
   const [reserves, setReserves] = useState<Array<{ id: number; email: string; notified_at?: string }>>([]);
   const [mailSubject, setMailSubject] = useState("");
   const [mailBody, setMailBody] = useState("");
+  const [testMail, setTestMail] = useState("");
   const [sendingMail, setSendingMail] = useState(false);
 
   const fetchProducts = async () => {
@@ -614,10 +630,14 @@ function AdminProducts() {
     }
   };
 
-  const sendReserveMail = async () => {
+  const sendReserveMail = async (test = false) => {
     if (!reserveProduct) return;
     if (!mailSubject.trim()) {
       toast.error("제목을 입력해주세요.");
+      return;
+    }
+    if (test && !testMail.includes("@")) {
+      toast.error("테스트 이메일을 입력해주세요.");
       return;
     }
     setSendingMail(true);
@@ -625,7 +645,11 @@ function AdminProducts() {
       const res = await apiFetch(`/api/admin/products/${reserveProduct.id}/preorders/notify`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ subject: mailSubject.trim(), content: mailBody.trim() }),
+        body: JSON.stringify({
+          subject: mailSubject.trim(),
+          content: mailBody.trim(),
+          test_email: test ? testMail.trim() : "",
+        }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -1033,6 +1057,52 @@ function AdminProducts() {
                 >
                   {editingId ? "저장" : "등록"}
                 </button>
+                {editingId && (
+                  <div className="space-y-3 border-t border-gray-100 pt-4">
+                    <label className="text-xs font-bold text-gray-500">
+                      추가 이미지
+                      <input
+                        type="file"
+                        accept="image/*"
+                        multiple
+                        className="mt-1 block w-full text-sm"
+                        onChange={async (e) => {
+                          const files = e.target.files;
+                          if (!files?.length) return;
+                          const body = new FormData();
+                          Array.from(files).forEach((file) => body.append("images", file));
+                          const res = await apiFetch(`/api/admin/products/${editingId}/images`, { method: "POST", body });
+                          if (!res.ok) toast.error("이미지를 올리지 못했습니다.");
+                          else toast.success("추가 이미지를 저장했습니다.");
+                        }}
+                      />
+                    </label>
+                    <div className="flex gap-2">
+                      <input id="option-name" placeholder="옵션명" className="flex-1 border rounded-lg px-3 py-2 text-sm" />
+                      <input id="option-price" type="number" placeholder="추가금" className="w-24 border rounded-lg px-3 py-2 text-sm" />
+                      <input id="option-stock" type="number" placeholder="재고" className="w-20 border rounded-lg px-3 py-2 text-sm" />
+                      <button
+                        type="button"
+                        className="text-xs font-bold text-venuea-green"
+                        onClick={async () => {
+                          const name = (document.getElementById("option-name") as HTMLInputElement)?.value;
+                          const extra = Number((document.getElementById("option-price") as HTMLInputElement)?.value || 0);
+                          const stock = Number((document.getElementById("option-stock") as HTMLInputElement)?.value || 0);
+                          if (!name) return;
+                          const res = await apiFetch(`/api/admin/products/${editingId}/options`, {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({ name, extra_price: extra, stock }),
+                          });
+                          if (!res.ok) toast.error("옵션을 추가하지 못했습니다.");
+                          else toast.success("옵션을 추가했습니다.");
+                        }}
+                      >
+                        옵션 추가
+                      </button>
+                    </div>
+                  </div>
+                )}
               </form>
             </motion.div>
           </div>
@@ -1073,10 +1143,24 @@ function AdminProducts() {
               placeholder="내용"
               className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm"
             />
+            <input
+              value={testMail}
+              onChange={(e) => setTestMail(e.target.value)}
+              placeholder="테스트 받을 이메일"
+              className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm"
+            />
             <button
               type="button"
               disabled={sendingMail}
-              onClick={sendReserveMail}
+              onClick={() => sendReserveMail(true)}
+              className="w-full py-3 border border-venuea-dark text-venuea-dark rounded-xl text-sm font-bold disabled:opacity-40"
+            >
+              테스트 메일 발송
+            </button>
+            <button
+              type="button"
+              disabled={sendingMail}
+              onClick={() => sendReserveMail(false)}
               className="w-full py-3 bg-venuea-dark text-white rounded-xl text-sm font-bold disabled:opacity-40"
             >
               {sendingMail ? "보내는 중" : "예약자에게 메일 보내기"}
@@ -1092,6 +1176,7 @@ function AdminProducts() {
    3. Orders & Claims Management (Complete Implementation)
 ========================================================= */
 function AdminOrders() {
+  const [params] = useSearchParams();
   const [orders, setOrders] = useState<Order[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState<string>("ALL");
@@ -1112,6 +1197,11 @@ function AdminOrders() {
       if (!res.ok) throw new Error("Failed");
       const data = await res.json();
       setOrders(Array.isArray(data) ? data : []);
+      const focus = params.get("order");
+      if (focus) {
+        const found = (Array.isArray(data) ? data : []).find((order: Order) => String(order.id) === focus);
+        if (found) setSelectedOrder(found);
+      }
     } catch {
       toast.error("주문 내역을 불러오지 못했습니다.");
     } finally {
@@ -1276,7 +1366,7 @@ function AdminOrders() {
       </header>
 
       <div className="flex flex-wrap gap-2">
-        {["ALL", "pending", "paid", "shipping", "delivered", "completed", "refund_requested", "refunded"].map(
+        {["ALL", "pending", "paid", "preparing", "shipping", "delivered", "completed", "refund_requested", "refunded"].map(
           (st) => (
             <button
               key={st}
@@ -1356,6 +1446,7 @@ function AdminOrders() {
                       >
                         <option value="pending">결제대기</option>
                         <option value="paid">결제완료</option>
+                        <option value="preparing">상품준비중</option>
                         <option value="shipping">배송중</option>
                         <option value="delivered">배송완료</option>
                         <option value="completed">구매확정</option>
@@ -1990,8 +2081,14 @@ function AdminCoupons() {
     value: 10,
     min_order_amount: 30000,
     max_discount_amount: 10000,
+    valid_days: 14,
   });
-  const [giveTarget, setGiveTarget] = useState<{ id: string; email: string }>({ id: "", email: "" });
+  const [giveTarget, setGiveTarget] = useState<{ id: string; email: string; days: string; skip: boolean }>({
+    id: "",
+    email: "",
+    days: "14",
+    skip: true,
+  });
 
   const fetchCoupons = async () => {
     const res = await apiFetch("/api/admin/coupons");
@@ -2018,6 +2115,7 @@ function AdminCoupons() {
         value: 10,
         min_order_amount: 30000,
         max_discount_amount: 10000,
+        valid_days: 14,
       });
       fetchCoupons();
     }
@@ -2027,7 +2125,11 @@ function AdminCoupons() {
     const res = await apiFetch(`/api/admin/coupons/${id}/give`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ target }),
+      body: JSON.stringify({
+        target,
+        valid_days: Number(giveTarget.days) || 0,
+        skip_duplicate: giveTarget.skip,
+      }),
     });
     if (res.ok) toast.success("쿠폰이 발급되었습니다.");
     else toast.error("발급에 실패했습니다.");
@@ -2082,6 +2184,13 @@ function AdminCoupons() {
           onChange={(e) => setNewCoupon({ ...newCoupon, min_order_amount: Number(e.target.value) })}
           className="border rounded-lg px-3 py-2 text-sm"
         />
+        <input
+          type="number"
+          placeholder="유효일수"
+          value={newCoupon.valid_days}
+          onChange={(e) => setNewCoupon({ ...newCoupon, valid_days: Number(e.target.value) })}
+          className="border rounded-lg px-3 py-2 text-sm"
+        />
         <button
           type="submit"
           className="bg-venuea-dark text-white rounded-lg text-sm font-bold py-2 hover:bg-venuea-gold"
@@ -2109,14 +2218,29 @@ function AdminCoupons() {
               >
                 전체 회원 지급
               </button>
-              <div className="flex gap-2">
+              <div className="flex gap-2 items-center">
                 <input
                   type="email"
                   placeholder="특정 회원 이메일"
                   value={giveTarget.id === String(c.id) ? giveTarget.email : ""}
-                  onChange={(e) => setGiveTarget({ id: String(c.id), email: e.target.value })}
+                  onChange={(e) => setGiveTarget({ ...giveTarget, id: String(c.id), email: e.target.value })}
                   className="border rounded px-2 py-1 text-xs"
                 />
+                <input
+                  type="number"
+                  placeholder="일"
+                  value={giveTarget.id === String(c.id) ? giveTarget.days : "14"}
+                  onChange={(e) => setGiveTarget({ ...giveTarget, id: String(c.id), days: e.target.value })}
+                  className="w-14 border rounded px-2 py-1 text-xs"
+                />
+                <label className="text-[11px] whitespace-nowrap">
+                  <input
+                    type="checkbox"
+                    checked={giveTarget.skip}
+                    onChange={(e) => setGiveTarget({ ...giveTarget, skip: e.target.checked })}
+                  />
+                  중복 제외
+                </label>
                 <button
                   onClick={() => handleGive(c.id, giveTarget.email)}
                   className="text-xs font-bold text-venuea-gold"
@@ -2217,6 +2341,7 @@ function AdminInquiries({ adminRole }: { adminRole: string }) {
             </div>
           </div>
           <p className="text-sm text-gray-700 bg-gray-50 p-3 rounded-lg">{inq.message}</p>
+          {inq.image_url && <img src={inq.image_url} alt="" className="w-32 h-32 object-cover rounded-xl" />}
 
           {inq.order_number && (
             <div className="rounded-xl border border-gray-200 bg-[#fbf7f1] p-4 space-y-2 text-sm">
@@ -2224,6 +2349,14 @@ function AdminInquiries({ adminRole }: { adminRole: string }) {
                 <p className="font-bold text-venuea-dark">
                   연결 주문 {inq.order_number}
                 </p>
+                {inq.linked_order_id && (
+                  <Link
+                    to={`${isAdminSubdomain() ? "" : "/admin"}/orders?order=${inq.linked_order_id}`}
+                    className="text-xs font-bold underline text-venuea-green"
+                  >
+                    주문 상세 열기
+                  </Link>
+                )}
                 <span className="text-xs font-bold text-venuea-gold">
                   {inq.linked_order_id ? formatOrderStatus(inq.order_status) : "주문을 찾을 수 없음"}
                 </span>
@@ -2308,6 +2441,58 @@ function AdminInquiries({ adminRole }: { adminRole: string }) {
           )}
         </div>
       ))}
+      <ProductQuestions />
+    </div>
+  );
+}
+
+function ProductQuestions() {
+  const [rows, setRows] = useState<any[]>([]);
+  const [answer, setAnswer] = useState<Record<number, string>>({});
+  const load = () => {
+    apiFetch("/api/admin/questions")
+      .then((r) => (r.ok ? r.json() : []))
+      .then((data) => setRows(Array.isArray(data) ? data : []))
+      .catch(() => {});
+  };
+  useEffect(() => {
+    load();
+  }, []);
+  if (rows.length === 0) return null;
+  return (
+    <div className="space-y-3 pt-8">
+      <h2 className="text-xl font-bold font-serif">상품 질문</h2>
+      {rows.map((row) => (
+        <div key={row.id} className="bg-white p-4 rounded-xl border border-gray-200 text-sm space-y-2">
+          <p className="text-xs text-gray-400">{row.product_name}</p>
+          <p className="font-bold">{row.question}</p>
+          {row.answer ? (
+            <p className="text-venuea-green">{row.answer}</p>
+          ) : (
+            <div className="flex gap-2">
+              <input
+                value={answer[row.id] || ""}
+                onChange={(e) => setAnswer({ ...answer, [row.id]: e.target.value })}
+                className="flex-1 border rounded-lg px-3 py-2"
+              />
+              <button
+                type="button"
+                className="text-xs font-bold text-white bg-venuea-dark px-3 rounded-lg"
+                onClick={async () => {
+                  const res = await apiFetch(`/api/admin/questions/${row.id}/answer`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ answer: answer[row.id] || "" }),
+                  });
+                  if (res.ok) load();
+                }}
+              >
+                답변
+              </button>
+            </div>
+          )}
+        </div>
+      ))}
     </div>
   );
 }
@@ -2379,6 +2564,7 @@ function AdminInbox() {
       const data = await res.json().catch(() => ({}));
       if (!res.ok) return toast.error(data.error || "답장을 보내지 못했습니다.");
       toast.success("답장을 보냈습니다.");
+      setSelected({ ...selected, replied_at: new Date().toISOString(), reply_body: reply.trim() });
       setReply("");
     } finally {
       setSendingReply(false);
@@ -2461,6 +2647,14 @@ function AdminInbox() {
               <pre className="whitespace-pre-wrap text-sm leading-7 text-gray-800 font-sans">
                 {plainMailBody(selected) || "본문이 없습니다."}
               </pre>
+              {selected.reply_body && (
+                <div className="text-sm border-l-2 border-venuea-green pl-3">
+                  <p className="text-xs text-gray-400">
+                    답장 {selected.replied_at ? new Date(selected.replied_at).toLocaleString("ko-KR") : ""}
+                  </p>
+                  <p>{selected.reply_body}</p>
+                </div>
+              )}
               <div className="border-t border-gray-100 pt-4 space-y-3">
                 <textarea
                   rows={5}
@@ -2469,20 +2663,95 @@ function AdminInbox() {
                   placeholder="답장"
                   className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm"
                 />
-                <button
-                  type="button"
-                  onClick={sendReply}
-                  disabled={sendingReply}
-                  className="bg-venuea-dark text-white px-5 py-2.5 rounded-xl text-sm font-bold disabled:opacity-40"
-                >
-                  {sendingReply ? "보내는 중" : "답장 보내기"}
-                </button>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={sendReply}
+                    disabled={sendingReply}
+                    className="bg-venuea-dark text-white px-5 py-2.5 rounded-xl text-sm font-bold disabled:opacity-40"
+                  >
+                    {sendingReply ? "보내는 중" : "답장 보내기"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      const res = await apiFetch(`/api/admin/inbox/${selected.id}`, { method: "DELETE" });
+                      if (!res.ok) return toast.error("메일을 삭제하지 못했습니다.");
+                      setMails((prev) => prev.filter((mail) => mail.id !== selected.id));
+                      setSelected(null);
+                    }}
+                    className="px-5 py-2.5 rounded-xl text-sm font-bold text-red-600 border border-red-200"
+                  >
+                    삭제
+                  </button>
+                </div>
               </div>
             </div>
           )}
         </div>
       </div>
     </div>
+  );
+}
+
+function AdminSettings() {
+  const [form, setForm] = useState({
+    shipping_fee: "3000",
+    free_min: "50000",
+    return_fee: "5000",
+    jeju_fee: "3000",
+    island_fee: "5000",
+  });
+
+  useEffect(() => {
+    apiFetch("/api/admin/settings")
+      .then((r) => (r.ok ? r.json() : []))
+      .then((rows) => {
+        if (!Array.isArray(rows)) return;
+        const next = { ...form };
+        for (const row of rows) {
+          if (row.key in next) (next as any)[row.key] = String(row.value);
+        }
+        setForm(next);
+      })
+      .catch(() => {});
+  }, []);
+
+  return (
+    <form
+      className="bg-white p-6 rounded-2xl border border-gray-100 max-w-lg space-y-3"
+      onSubmit={async (e) => {
+        e.preventDefault();
+        const res = await apiFetch("/api/admin/settings", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(form),
+        });
+        if (!res.ok) toast.error("설정을 저장하지 못했습니다.");
+        else toast.success("운영 설정을 저장했습니다.");
+      }}
+    >
+      <h2 className="text-xl font-serif font-bold">운영 설정</h2>
+      {[
+        ["shipping_fee", "기본 배송비"],
+        ["free_min", "무료배송 기준"],
+        ["return_fee", "반품비"],
+        ["jeju_fee", "제주 추가배송비"],
+        ["island_fee", "도서산간 추가배송비"],
+      ].map(([key, label]) => (
+        <label key={key} className="block text-sm">
+          {label}
+          <input
+            value={(form as any)[key]}
+            onChange={(e) => setForm({ ...form, [key]: e.target.value })}
+            className="mt-1 w-full border rounded-xl px-3 py-2"
+          />
+        </label>
+      ))}
+      <button type="submit" className="bg-venuea-dark text-white px-4 py-3 rounded-xl text-sm font-bold">
+        저장
+      </button>
+    </form>
   );
 }
 
@@ -2494,6 +2763,7 @@ function AdminNewsletter() {
   const [subject, setSubject] = useState("");
   const [content, setContent] = useState("");
   const [isSending, setIsSending] = useState(false);
+  const [testEmail, setTestEmail] = useState("");
   const [pendingEmail, setPendingEmail] = useState<string | null>(null);
 
   const fetchSubscribers = async () => {
@@ -2512,19 +2782,22 @@ function AdminNewsletter() {
       .map((s) => ({ ...s, kind: "비회원" })),
   ];
 
-  const handleSend = async () => {
+  const handleSend = async (test = false) => {
     if (!subject || !content) return toast.error("제목과 내용을 모두 입력해주세요.");
+    if (test && !testEmail.includes("@")) return toast.error("테스트 이메일을 입력해주세요.");
     setIsSending(true);
     try {
       const res = await apiFetch("/api/admin/newsletter/send", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ subject, content }),
+        body: JSON.stringify({ subject, content, test_email: test ? testEmail.trim() : "" }),
       });
       if (res.ok) {
-        toast.success("뉴스레터가 발송되었습니다.");
-        setSubject("");
-        setContent("");
+        toast.success(test ? "테스트 메일을 보냈습니다." : "뉴스레터가 발송되었습니다.");
+        if (!test) {
+          setSubject("");
+          setContent("");
+        }
       }
     } finally {
       setIsSending(false);
@@ -2561,8 +2834,21 @@ function AdminNewsletter() {
           placeholder="본문 (HTML 지원)"
           className="w-full border rounded-xl px-4 py-3 text-sm font-mono"
         />
+        <input
+          value={testEmail}
+          onChange={(e) => setTestEmail(e.target.value)}
+          placeholder="테스트 받을 이메일"
+          className="w-full border rounded-xl px-4 py-3 text-sm"
+        />
         <button
-          onClick={handleSend}
+          onClick={() => handleSend(true)}
+          disabled={isSending}
+          className="w-full border border-venuea-dark text-venuea-dark py-3 rounded-xl font-bold disabled:opacity-40"
+        >
+          테스트 메일 발송
+        </button>
+        <button
+          onClick={() => handleSend(false)}
           disabled={isSending}
           className="w-full bg-venuea-dark text-white py-3.5 rounded-xl font-bold hover:bg-venuea-gold"
         >

@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { apiFetch } from "../lib/api";
 import { formatPrice, FREE_SHIPPING_MIN, SHIPPING_FEE } from "../lib/utils";
 import ProductCard, { type CardProduct } from "../components/ProductCard";
+import { cartKey, readLocalCart, rememberProduct, saveCart } from "../lib/cart";
 
 export default function ProductDetail() {
   const { id } = useParams();
@@ -18,6 +19,13 @@ export default function ProductDetail() {
   const [cartGoods, setCartGoods] = useState(0);
   const [reserveDone, setReserveDone] = useState(false);
   const [reservedBuyer, setReservedBuyer] = useState(false);
+  const [optionId, setOptionId] = useState(0);
+  const [guestEmail, setGuestEmail] = useState("");
+  const [questions, setQuestions] = useState<any[]>([]);
+  const [questionText, setQuestionText] = useState("");
+  const [secretQuestion, setSecretQuestion] = useState(false);
+  const [activeImage, setActiveImage] = useState("");
+  const [photo, setPhoto] = useState("");
   const addingRef = useRef(false);
   useEffect(() => {
     const readCart = () => {
@@ -56,6 +64,10 @@ export default function ProductDetail() {
       .then((r) => (r.ok ? r.json() : []))
       .then((d) => setReviews(Array.isArray(d) ? d : []))
       .catch(() => {});
+    apiFetch(`/api/products/${id}/questions`)
+      .then((r) => (r.ok ? r.json() : []))
+      .then((d) => setQuestions(Array.isArray(d) ? d : []))
+      .catch(() => {});
   }, [id]);
 
   useEffect(() => {
@@ -77,7 +89,11 @@ export default function ProductDetail() {
   }, [id, product?.sale_mode]);
 
   useEffect(() => {
-    if (product?.name) document.title = `${product.name} | 베뉴아`;
+    if (!product?.name) return;
+    document.title = `${product.name} | 베뉴아`;
+    rememberProduct(product);
+    setActiveImage(product.image_url || "");
+    setOptionId(0);
   }, [product]);
 
   useEffect(() => {
@@ -129,20 +145,31 @@ export default function ProductDetail() {
     );
   }
 
-  const stock = Math.max(0, Number(product.stock) || 0);
+  const options = Array.isArray(product.options) ? product.options : [];
+  const selectedOption = options.find((row: any) => Number(row.id) === Number(optionId));
+  const stock = selectedOption
+    ? Math.max(0, Number(selectedOption.stock) || 0)
+    : Math.max(0, Number(product.stock) || 0);
   const isPreorder = product.sale_mode === "preorder";
   const isReservedSale = product.sale_mode === "reserved";
   const finalPrice =
-    product.discount_rate && product.discount_rate > 0
+    (product.discount_rate && product.discount_rate > 0
       ? Math.round(product.price * (1 - product.discount_rate / 100))
-      : product.price;
+      : product.price) + (Number(selectedOption?.extra_price) || 0);
+  const gallery = [
+    product.image_url,
+    ...(Array.isArray(product.images) ? product.images.map((row: any) => row.image_url || row) : []),
+  ].filter(Boolean);
 
   const handleAddToCart = (buyNow = false) => {
     if (addingRef.current) return;
-    const saved = JSON.parse(localStorage.getItem("benua_cart") || "[]");
-    const list = Array.isArray(saved) ? saved : [];
-    const existingIdx = list.findIndex((i: any) => String(i.id) === String(product.id));
+    const list = readLocalCart();
+    const existingIdx = list.findIndex((i) => cartKey(i) === cartKey({ id: product.id, option_id: optionId }));
     const already = existingIdx >= 0 ? Number(list[existingIdx].quantity) || 0 : 0;
+    if (options.length > 0 && !selectedOption) {
+      toast.error("옵션을 선택해주세요.");
+      return;
+    }
     if (isReservedSale && !reservedBuyer) {
       toast.error("사전 예약자만 구매할 수 있는 상품입니다");
       return;
@@ -157,7 +184,7 @@ export default function ProductDetail() {
     }, 500);
 
     const nextQty = already + quantity;
-
+    const name = selectedOption ? `${product.name} (${selectedOption.name})` : product.name;
     if (existingIdx >= 0) {
       list[existingIdx].quantity = nextQty;
       list[existingIdx].stock = stock;
@@ -165,38 +192,34 @@ export default function ProductDetail() {
     } else {
       list.push({
         id: product.id,
-        name: product.name,
+        name,
         price: finalPrice,
-        originalPrice: product.price,
         quantity: nextQty,
         stock,
         image: product.image_url,
+        option_id: optionId || 0,
+        option_name: selectedOption?.name || "",
         category: product.category,
       });
     }
-
-    localStorage.setItem("benua_cart", JSON.stringify(list));
-    window.dispatchEvent(new Event("cart-updated"));
-
-    if (buyNow) {
-      navigate("/checkout");
-    } else {
-      toast.success("쇼핑백에 담았습니다.");
-    }
+    saveCart(list);
+    if (buyNow) navigate("/checkout");
+    else toast.success("쇼핑백에 담았습니다.");
   };
 
   const handlePreorder = async () => {
-    const res = await apiFetch(`/api/products/${product.id}/preorder`, { method: "POST" });
-    if (res.status === 401) {
-      navigate(`/login?redirect=/product/${product.id}`);
-      return;
-    }
+    const res = await apiFetch(`/api/products/${product.id}/preorder`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: guestEmail }),
+    });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
-      toast.error(data.error || "사전예약에 실패했습니다.");
+      toast.error(data.error || "알림 신청에 실패했습니다.");
       return;
     }
     setReserveDone(true);
+    toast.success("입고되면 메일로 알려드릴게요.");
   };
 
   const handleToggleWishlist = async () => {
@@ -215,12 +238,23 @@ export default function ProductDetail() {
   return (
     <div className="pt-[110px] pb-36 md:pb-24 px-6 md:px-[60px] max-w-6xl mx-auto space-y-16">
       <div className="grid grid-cols-1 md:grid-cols-2 gap-12">
-        <div className="aspect-square bg-gray-100 rounded-2xl overflow-hidden">
-          <img
-            src={product.image_url || "https://picsum.photos/seed/objet/800/800"}
-            alt={product.name}
-            className="w-full h-full object-cover"
-          />
+        <div className="space-y-3">
+          <div className="aspect-square bg-gray-100 rounded-2xl overflow-hidden">
+            <img
+              src={activeImage || product.image_url || "https://picsum.photos/seed/objet/800/800"}
+              alt={product.name}
+              className="w-full h-full object-cover"
+            />
+          </div>
+          {gallery.length > 1 && (
+            <div className="flex gap-2 overflow-x-auto">
+              {gallery.map((src: string) => (
+                <button key={src} type="button" onClick={() => setActiveImage(src)} className="w-16 h-16 rounded-xl overflow-hidden shrink-0 border border-black/10">
+                  <img src={src} alt="" className="w-full h-full object-cover" />
+                </button>
+              ))}
+            </div>
+          )}
         </div>
 
         <div className="space-y-6 flex flex-col justify-center">
@@ -250,6 +284,24 @@ export default function ProductDetail() {
           <p className="text-sm text-venuea-brown">
             배송비 {formatPrice(SHIPPING_FEE)} · {formatPrice(FREE_SHIPPING_MIN)} 이상 무료
           </p>
+          {options.length > 0 && (
+            <div className="flex flex-wrap gap-2">
+              {options.map((row: any) => (
+                <button
+                  key={row.id}
+                  type="button"
+                  onClick={() => setOptionId(row.id)}
+                  className={`px-3 py-2 rounded-full text-xs font-bold border ${
+                    optionId === row.id ? "bg-[#385c37] text-white border-[#385c37]" : "bg-white text-[#463221]"
+                  }`}
+                >
+                  {row.name}
+                  {Number(row.extra_price) > 0 ? ` +${formatPrice(row.extra_price)}` : ""}
+                  {Number(row.stock) < 1 ? " 품절" : ""}
+                </button>
+              ))}
+            </div>
+          )}
           {stock > 0 && (
             <div className="space-y-2">
               <div className="h-1.5 rounded-full bg-black/10 overflow-hidden">
@@ -299,19 +351,48 @@ export default function ProductDetail() {
 
           {isPreorder ? (
             reserveDone ? (
-              <p className="text-sm text-venuea-brown">예약되었습니다.</p>
+              <p className="text-sm text-venuea-brown">알림 신청이 완료되었습니다.</p>
             ) : (
-              <button
-                type="button"
-                onClick={handlePreorder}
-                className="w-full py-4 bg-venuea-green text-white rounded-xl text-sm font-bold"
-              >
-                사전예약
-              </button>
+              <div className="space-y-2">
+                <input
+                  type="email"
+                  value={guestEmail}
+                  onChange={(e) => setGuestEmail(e.target.value)}
+                  placeholder="알림 받을 이메일"
+                  className="w-full border border-black/10 rounded-xl px-4 py-3 text-sm"
+                />
+                <button
+                  type="button"
+                  onClick={handlePreorder}
+                  className="w-full py-4 bg-venuea-green text-white rounded-xl text-sm font-bold"
+                >
+                  사전예약
+                </button>
+              </div>
             )
           ) : (
             <>
-          {!isReservedSale && stock < 1 && <p className="text-sm text-venuea-muted">품절</p>}
+          {!isReservedSale && stock < 1 && (
+            <div className="space-y-2">
+              <p className="text-sm text-venuea-brown">지금은 품절이에요. 입고되면 알려드릴게요.</p>
+              {reserveDone ? (
+                <p className="text-sm text-venuea-muted">알림 신청이 완료되었습니다.</p>
+              ) : (
+                <>
+                  <input
+                    type="email"
+                    value={guestEmail}
+                    onChange={(e) => setGuestEmail(e.target.value)}
+                    placeholder="알림 받을 이메일"
+                    className="w-full border border-black/10 rounded-xl px-4 py-3 text-sm"
+                  />
+                  <button type="button" onClick={handlePreorder} className="w-full py-4 bg-venuea-green text-white rounded-xl text-sm font-bold">
+                    재입고 알림 신청
+                  </button>
+                </>
+              )}
+            </div>
+          )}
           {isReservedSale && !reservedBuyer && (
             <p className="text-sm text-venuea-brown">사전 예약자만 구매할 수 있는 상품입니다</p>
           )}
@@ -456,23 +537,95 @@ export default function ProductDetail() {
                   </div>
                 </div>
                 <p className="text-sm text-gray-700">{rev.content}</p>
+                {rev.image_url && (
+                  <button type="button" onClick={() => setPhoto(rev.image_url)}>
+                    <img src={rev.image_url} alt="" className="w-24 h-24 object-cover rounded-xl" />
+                  </button>
+                )}
               </div>
             ))}
           </div>
         )}
       </section>
 
+      {Array.isArray(product.related) && product.related.length > 0 && (
+        <section className="space-y-4">
+          <h2 className="text-xl font-serif font-bold">함께 두면 좋은 소품</h2>
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+            {product.related.map((item: CardProduct) => (
+              <ProductCard key={item.id} product={item} />
+            ))}
+          </div>
+        </section>
+      )}
+
+      <section className="border-t border-black/10 pt-8 space-y-4">
+        <h2 className="text-xl font-serif font-bold">상품 Q&A</h2>
+        <form
+          className="space-y-2"
+          onSubmit={async (e) => {
+            e.preventDefault();
+            const res = await apiFetch(`/api/products/${product.id}/questions`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ question: questionText, secret: secretQuestion }),
+            });
+            if (res.status === 401) {
+              navigate(`/login?redirect=/product/${product.id}`);
+              return;
+            }
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) return toast.error(data.error || "질문을 남기지 못했습니다.");
+            setQuestionText("");
+            const next = await apiFetch(`/api/products/${product.id}/questions`);
+            setQuestions(next.ok ? await next.json() : []);
+          }}
+        >
+          <textarea
+            value={questionText}
+            onChange={(e) => setQuestionText(e.target.value)}
+            placeholder="상품에 대해 궁금한 점을 남겨주세요."
+            className="w-full border border-black/10 rounded-xl px-4 py-3 text-sm"
+            rows={3}
+          />
+          <label className="flex items-center gap-2 text-xs text-venuea-brown">
+            <input type="checkbox" checked={secretQuestion} onChange={(e) => setSecretQuestion(e.target.checked)} />
+            비밀글
+          </label>
+          <button type="submit" className="px-4 py-2 rounded-full bg-venuea-green text-white text-sm font-bold">
+            질문 남기기
+          </button>
+        </form>
+        {questions.length === 0 ? (
+          <p className="text-sm text-venuea-muted">아직 질문이 없습니다.</p>
+        ) : (
+          questions.map((row) => (
+            <div key={row.id} className="rounded-xl border border-black/10 p-4 text-sm space-y-1">
+              <p className="font-bold">{row.author}</p>
+              <p>{row.question}</p>
+              {row.answer && <p className="text-venuea-brown">답변 {row.answer}</p>}
+            </div>
+          ))
+        )}
+      </section>
+
+      {photo && (
+        <button type="button" className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-6" onClick={() => setPhoto("")}>
+          <img src={photo} alt="" className="max-h-[80vh] max-w-full rounded-2xl" />
+        </button>
+      )}
+
       <div className="md:hidden fixed inset-x-0 bottom-0 z-40 bg-venuea-beige border-t border-black/10 px-4 pt-3 pb-[max(12px,env(safe-area-inset-bottom))] flex items-center gap-2">
-        {isPreorder ? (
+        {isPreorder || (!isReservedSale && stock < 1) ? (
           reserveDone ? (
-            <p className="flex-1 text-sm text-venuea-brown">예약되었습니다.</p>
+            <p className="flex-1 text-sm text-venuea-brown">알림 신청이 완료되었습니다.</p>
           ) : (
             <button
               type="button"
               onClick={handlePreorder}
               className="flex-1 h-12 rounded-xl bg-venuea-green text-white text-sm font-bold"
             >
-              사전예약
+              {isPreorder ? "사전예약" : "재입고 알림"}
             </button>
           )
         ) : (

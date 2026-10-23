@@ -24,6 +24,7 @@ export function formatOrderStatus(status: string): string {
   const map: Record<string, string> = {
     pending: "결제대기",
     paid: "결제완료",
+    preparing: "상품준비중",
     shipping: "배송중",
     delivered: "배송완료",
     completed: "구매확정",

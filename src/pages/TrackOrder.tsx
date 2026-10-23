@@ -1,6 +1,8 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { Search, Package, Truck } from "lucide-react";
 import { apiFetch } from "../lib/api";
+import TrackingTimeline from "../components/TrackingTimeline";
 import {
   formatPrice,
   formatOrderStatus,
@@ -9,7 +11,8 @@ import {
 } from "../lib/utils";
 
 export default function TrackOrder() {
-  const [orderNumber, setOrderNumber] = useState("");
+  const [params] = useSearchParams();
+  const [orderNumber, setOrderNumber] = useState(params.get("orderNumber") || "");
   const [phone, setPhone] = useState("");
   const [order, setOrder] = useState<any>(null);
   const [formError, setFormError] = useState("");
@@ -32,6 +35,11 @@ export default function TrackOrder() {
       setFormError(data.error || "일치하는 주문을 찾을 수 없습니다.");
     }
   };
+
+  useEffect(() => {
+    const preset = params.get("orderNumber");
+    if (preset) setOrderNumber(preset);
+  }, [params]);
 
   return (
     <div className="pt-[120px] pb-24 px-6 max-w-xl mx-auto space-y-8">
@@ -120,11 +128,11 @@ export default function TrackOrder() {
                   </span>
                 </div>
               </div>
-              <iframe
-                title="배송조회"
-                src={`/api/orders/track/${encodeURIComponent(order.order_number)}/tracking-sky?phone=${encodeURIComponent(phone)}`}
-                className="w-full h-[760px] rounded-2xl border border-gray-200 bg-white"
-              />
+              <div className="rounded-2xl border border-black/10 bg-[#faf2e7] p-4">
+                <TrackingTimeline
+                  src={`/api/orders/track/${encodeURIComponent(order.order_number)}/tracking?phone=${encodeURIComponent(phone)}`}
+                />
+              </div>
             </div>
           )}
 
