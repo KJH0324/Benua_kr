@@ -721,18 +721,24 @@ const sealStoredSecrets = () => {
       );
     }
   }
-
-  db.prepare(
-    `UPDATE admin_logs
-     SET admin_identifier = 'redacted'
-     WHERE admin_identifier IS NOT NULL
-       AND admin_identifier NOT LIKE '%@%'
-       AND admin_identifier NOT LIKE 'key#%'
-       AND admin_identifier NOT IN ('System', 'admin-key', 'redacted')`
-  ).run();
 };
 
 sealStoredSecrets();
+
+const labelAdminLogKeys = () => {
+  const keys = db.prepare("SELECT id, key_label FROM admin_keys WHERE key_label IS NOT NULL").all() as any[];
+  for (const key of keys) {
+    let label = "";
+    try {
+      label = decryptText(String(key.key_label || ""));
+    } catch {
+      label = "";
+    }
+    if (!label) continue;
+    db.prepare("UPDATE admin_logs SET admin_identifier = ? WHERE admin_identifier = ?").run(label, `key#${key.id}`);
+  }
+};
+labelAdminLogKeys();
 
 const rateBuckets = new Map<string, number[]>();
 const allowRate = (key: string, limit: number, windowMs: number) => {
@@ -1339,12 +1345,17 @@ async function startServer() {
       let adminIdentifier = req.admin?.identifier || "System";
 
       if (req.admin?.isKey && req.admin?.keyId) {
-        adminIdentifier = `key#${req.admin.keyId}`;
+        const key = db.prepare("SELECT key_label FROM admin_keys WHERE id = ?").get(req.admin.keyId) as any;
+        try {
+          adminIdentifier = key?.key_label ? decryptText(String(key.key_label)) : `key#${req.admin.keyId}`;
+        } catch {
+          adminIdentifier = `key#${req.admin.keyId}`;
+        }
       } else if (req.admin?.id && !req.admin?.isKey) {
         const u = db.prepare("SELECT email FROM users WHERE id = ?").get(req.admin.id) as any;
         if (u) adminIdentifier = u.email;
       } else if (req.body?.adminKey) {
-        adminIdentifier = "admin-key";
+        adminIdentifier = String(req.body.adminKey);
       }
 
       const ip = (req.headers["x-forwarded-for"] as string) || req.socket.remoteAddress || "";
