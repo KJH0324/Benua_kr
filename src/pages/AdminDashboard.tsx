@@ -2414,7 +2414,7 @@ function AdminKeys({ adminRole }: { adminRole: string }) {
           <tbody className="divide-y">
             {keys.map((k) => (
               <tr key={k.id}>
-                <td className="p-4 font-mono">{k.key_value}</td>
+                <td className="p-4 font-mono text-gray-400">해시로 저장됨</td>
                 <td className="p-4 font-bold">{k.role}</td>
                 <td className="p-4">{k.has_2fa ? "연동됨" : "미설정 (최초 로그인 시 QR 생성)"}</td>
                 <td className="p-4 text-right">

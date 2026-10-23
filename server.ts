@@ -522,6 +522,150 @@ const verifyPassword = (password: string, stored: string): boolean => {
   return crypto.timingSafeEqual(Buffer.from(legacy), Buffer.from(stored));
 };
 
+const dataKey = () =>
+  crypto.createHash("sha256").update(process.env.DATA_ENCRYPTION_KEY || JWT_SECRET).digest();
+
+const hashToken = (token: string) =>
+  `sha256$${crypto.createHash("sha256").update(String(token)).digest("hex")}`;
+
+const tokenMatches = (stored: string, given: string) => {
+  if (!stored || !given) return false;
+  const next = hashToken(given);
+  if (stored.startsWith("sha256$")) {
+    if (stored.length !== next.length) return false;
+    return crypto.timingSafeEqual(Buffer.from(stored), Buffer.from(next));
+  }
+  return false;
+};
+
+const encryptText = (plain: string) => {
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv("aes-256-gcm", dataKey(), iv);
+  const enc = Buffer.concat([cipher.update(plain, "utf8"), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  return `enc$${iv.toString("hex")}$${tag.toString("hex")}$${enc.toString("hex")}`;
+};
+
+const decryptText = (stored: string) => {
+  if (!stored) return "";
+  if (!stored.startsWith("enc$")) return stored;
+  const [, ivHex, tagHex, dataHex] = stored.split("$");
+  const decipher = crypto.createDecipheriv("aes-256-gcm", dataKey(), Buffer.from(ivHex, "hex"));
+  decipher.setAuthTag(Buffer.from(tagHex, "hex"));
+  return Buffer.concat([decipher.update(Buffer.from(dataHex, "hex")), decipher.final()]).toString("utf8");
+};
+
+const findAdminKey = (adminKey: string) => {
+  const raw = String(adminKey || "");
+  if (!raw) return null;
+  const rows = db.prepare("SELECT * FROM admin_keys").all() as any[];
+  return rows.find((row) => verifyPassword(raw, row.key_value)) || null;
+};
+
+const codeMatches = (email: string, code: string) => {
+  const record = db
+    .prepare(
+      "SELECT * FROM email_verification_codes WHERE email = ? AND expires_at > CURRENT_TIMESTAMP"
+    )
+    .get(String(email || "").trim()) as any;
+  if (!record) return false;
+  return verifyPassword(String(code || "").trim(), record.code);
+};
+
+const clearVbankAccount = (orderId: number | string) => {
+  db.prepare("UPDATE orders SET vbank_account = NULL WHERE id = ?").run(orderId);
+};
+
+const presentOrder = (order: any) => {
+  if (!order) return order;
+  const copy = { ...order };
+  delete copy.toss_secret;
+  if (copy.status === "pending" && copy.vbank_account) {
+    try {
+      copy.vbank_account = decryptText(copy.vbank_account);
+    } catch {
+      copy.vbank_account = null;
+    }
+  } else {
+    if (copy.vbank_account) clearVbankAccount(copy.id);
+    copy.vbank_account = null;
+  }
+  return copy;
+};
+
+const sealStoredSecrets = () => {
+  const keys = db.prepare("SELECT id, key_value, totp_secret FROM admin_keys").all() as any[];
+  for (const key of keys) {
+    if (key.key_value && !String(key.key_value).startsWith("scrypt$")) {
+      db.prepare("UPDATE admin_keys SET key_value = ? WHERE id = ?").run(hashPassword(key.key_value), key.id);
+    }
+    if (key.totp_secret && !String(key.totp_secret).startsWith("enc$")) {
+      db.prepare("UPDATE admin_keys SET totp_secret = ? WHERE id = ?").run(
+        encryptText(key.totp_secret),
+        key.id
+      );
+    }
+  }
+
+  const codes = db.prepare("SELECT email, code FROM email_verification_codes").all() as any[];
+  for (const row of codes) {
+    if (row.code && !String(row.code).startsWith("scrypt$")) {
+      db.prepare("UPDATE email_verification_codes SET code = ? WHERE email = ?").run(
+        hashPassword(String(row.code)),
+        row.email
+      );
+    }
+  }
+
+  const users = db
+    .prepare(
+      "SELECT id, reset_token, verification_token FROM users WHERE reset_token IS NOT NULL OR verification_token IS NOT NULL"
+    )
+    .all() as any[];
+  for (const user of users) {
+    if (user.reset_token && !String(user.reset_token).startsWith("sha256$")) {
+      db.prepare("UPDATE users SET reset_token = ? WHERE id = ?").run(hashToken(user.reset_token), user.id);
+    }
+    if (user.verification_token && !String(user.verification_token).startsWith("sha256$")) {
+      db.prepare("UPDATE users SET verification_token = ? WHERE id = ?").run(
+        hashToken(user.verification_token),
+        user.id
+      );
+    }
+  }
+
+  const orders = db
+    .prepare(
+      "SELECT id, status, toss_secret, vbank_account FROM orders WHERE toss_secret IS NOT NULL OR vbank_account IS NOT NULL"
+    )
+    .all() as any[];
+  for (const order of orders) {
+    if (order.toss_secret && !String(order.toss_secret).startsWith("sha256$")) {
+      db.prepare("UPDATE orders SET toss_secret = ? WHERE id = ?").run(hashToken(order.toss_secret), order.id);
+    }
+    if (!order.vbank_account) continue;
+    if (order.status !== "pending") {
+      clearVbankAccount(order.id);
+    } else if (!String(order.vbank_account).startsWith("enc$")) {
+      db.prepare("UPDATE orders SET vbank_account = ? WHERE id = ?").run(
+        encryptText(String(order.vbank_account)),
+        order.id
+      );
+    }
+  }
+
+  db.prepare(
+    `UPDATE admin_logs
+     SET admin_identifier = 'redacted'
+     WHERE admin_identifier IS NOT NULL
+       AND admin_identifier NOT LIKE '%@%'
+       AND admin_identifier NOT LIKE 'key#%'
+       AND admin_identifier NOT IN ('System', 'admin-key', 'redacted')`
+  ).run();
+};
+
+sealStoredSecrets();
+
 const rateBuckets = new Map<string, number[]>();
 const allowRate = (key: string, limit: number, windowMs: number) => {
   const now = Date.now();
@@ -766,7 +910,7 @@ const finalizeOrderPaymentTx = db.transaction(
       paymentKey,
       paymentMethod,
       vbankInfo?.bank || null,
-      vbankInfo?.account || null,
+      nextStatus === "pending" && vbankInfo?.account ? encryptText(vbankInfo.account) : null,
       vbankInfo?.holder || null,
       vbankInfo?.dueDate || null,
       orderId
@@ -782,7 +926,7 @@ const completeOrderTx = db.transaction((orderId: number | string) => {
   if (order.status === "completed") return { alreadyCompleted: true, earned: order.earned_points || 0 };
 
   db.prepare(
-    "UPDATE orders SET status = 'completed', status_updated_at = CURRENT_TIMESTAMP, confirmed_at = CURRENT_TIMESTAMP WHERE id = ?"
+    "UPDATE orders SET status = 'completed', vbank_account = NULL, status_updated_at = CURRENT_TIMESTAMP, confirmed_at = CURRENT_TIMESTAMP WHERE id = ?"
   ).run(orderId);
 
   let earned = 0;
@@ -819,7 +963,7 @@ const refundOrderTx = db.transaction(
     const finalReason = reason !== undefined ? reason : order.refund_reason;
 
     db.prepare(
-      "UPDATE orders SET status = 'refunded', refund_amount = ?, refund_reason = ?, status_updated_at = CURRENT_TIMESTAMP WHERE id = ?"
+      "UPDATE orders SET status = 'refunded', vbank_account = NULL, refund_amount = ?, refund_reason = ?, status_updated_at = CURRENT_TIMESTAMP WHERE id = ?"
     ).run(finalRefundAmount, finalReason, orderId);
 
     const items = db.prepare("SELECT * FROM order_items WHERE order_id = ?").all(orderId) as any[];
@@ -1127,13 +1271,12 @@ async function startServer() {
       let adminIdentifier = req.admin?.identifier || "System";
 
       if (req.admin?.isKey && req.admin?.keyId) {
-        const k = db.prepare("SELECT key_value FROM admin_keys WHERE id = ?").get(req.admin.keyId) as any;
-        if (k) adminIdentifier = k.key_value;
+        adminIdentifier = `key#${req.admin.keyId}`;
       } else if (req.admin?.id && !req.admin?.isKey) {
         const u = db.prepare("SELECT email FROM users WHERE id = ?").get(req.admin.id) as any;
         if (u) adminIdentifier = u.email;
       } else if (req.body?.adminKey) {
-        adminIdentifier = req.body.adminKey;
+        adminIdentifier = "admin-key";
       }
 
       const ip = (req.headers["x-forwarded-for"] as string) || req.socket.remoteAddress || "";
@@ -1235,7 +1378,7 @@ async function startServer() {
         `INSERT INTO email_verification_codes (email, code, expires_at)
          VALUES (?, ?, ?)
          ON CONFLICT(email) DO UPDATE SET code = excluded.code, expires_at = excluded.expires_at`
-      ).run(cleanEmail, code, expiresAt);
+      ).run(cleanEmail, hashPassword(code), expiresAt);
 
       await sendMail(
         cleanEmail,
@@ -1268,13 +1411,7 @@ async function startServer() {
     }
 
     try {
-      const record = db
-        .prepare(
-          "SELECT * FROM email_verification_codes WHERE email = ? AND code = ? AND expires_at > CURRENT_TIMESTAMP"
-        )
-        .get(email.trim(), String(code).trim()) as any;
-
-      if (!record) {
+      if (!codeMatches(email.trim(), String(code))) {
         return res.status(400).json({ error: "인증번호가 일치하지 않거나 만료되었습니다." });
       }
 
@@ -1309,13 +1446,7 @@ async function startServer() {
     try {
       // 소셜 연동 가입이 아닌 일반 가입 시 이메일 인증코드 확인
       if (!google_id && !naver_id && !kakao_id) {
-        const verifiedRecord = db
-          .prepare(
-            "SELECT * FROM email_verification_codes WHERE email = ? AND code = ? AND expires_at > CURRENT_TIMESTAMP"
-          )
-          .get(cleanEmail, inputCode);
-
-        if (!verifiedRecord) {
+        if (!codeMatches(cleanEmail, inputCode)) {
           return res.status(400).json({ error: "이메일 인증을 먼저 완료해주세요." });
         }
       }
@@ -1492,7 +1623,7 @@ async function startServer() {
       const token = crypto.randomBytes(20).toString("hex");
       const expires = new Date(Date.now() + 3600000).toISOString();
       db.prepare("UPDATE users SET reset_token = ?, reset_expires = ? WHERE email = ?").run(
-        token,
+        hashToken(token),
         expires,
         cleanEmail
       );
@@ -1523,7 +1654,7 @@ async function startServer() {
     try {
       const user = db
         .prepare("SELECT * FROM users WHERE reset_token = ? AND reset_expires > CURRENT_TIMESTAMP")
-        .get(token) as any;
+        .get(hashToken(token)) as any;
       if (!user) return res.status(400).json({ error: "유효하지 않거나 만료된 링크입니다." });
 
       const hashedPassword = hashPassword(newPassword);
@@ -1544,7 +1675,7 @@ async function startServer() {
       if (user.is_verified) return res.status(400).json({ error: "이미 인증된 계정입니다." });
 
       const token = crypto.randomBytes(20).toString("hex");
-      db.prepare("UPDATE users SET verification_token = ? WHERE id = ?").run(token, user.id);
+      db.prepare("UPDATE users SET verification_token = ? WHERE id = ?").run(hashToken(token), user.id);
 
       const verifyLink = `https://${req.get("host")}/verify-email?token=${token}`;
       await sendMail(
@@ -1568,7 +1699,7 @@ async function startServer() {
     try {
       const user = db
         .prepare("SELECT * FROM users WHERE verification_token = ?")
-        .get(req.params.token) as any;
+        .get(hashToken(req.params.token)) as any;
       if (!user) return res.status(400).json({ error: "유효하지 않은 인증 토큰입니다." });
 
       db.prepare("UPDATE users SET is_verified = 1, verification_token = NULL WHERE id = ?").run(
@@ -1874,7 +2005,7 @@ async function startServer() {
   // ==========================================
   app.post("/api/admin/verify-key", async (req, res) => {
     const { adminKey } = req.body;
-    const keyRecord = db.prepare("SELECT * FROM admin_keys WHERE key_value = ?").get(adminKey) as any;
+    const keyRecord = findAdminKey(adminKey);
 
     if (!keyRecord) {
       return res.status(401).json({ error: "유효하지 않은 관리자 보안 키입니다." });
@@ -1890,11 +2021,11 @@ async function startServer() {
 
   app.post("/api/admin/verify-totp", (req, res) => {
     const { adminKey, token, secret } = req.body;
-    const keyRecord = db.prepare("SELECT * FROM admin_keys WHERE key_value = ?").get(adminKey) as any;
+    const keyRecord = findAdminKey(adminKey);
 
     if (!keyRecord) return res.status(401).json({ error: "유효하지 않은 보안 키입니다." });
 
-    const totpSecret = keyRecord.totp_secret || secret;
+    const totpSecret = (keyRecord.totp_secret ? decryptText(keyRecord.totp_secret) : "") || secret;
     if (!totpSecret) return res.status(400).json({ error: "TOTP 시크릿이 없습니다." });
 
     const isValid = speakeasy.totp.verify({
@@ -1907,7 +2038,7 @@ async function startServer() {
     if (!isValid) return res.status(401).json({ error: "OTP 인증번호가 일치하지 않습니다." });
 
     if (!keyRecord.totp_secret) {
-      db.prepare("UPDATE admin_keys SET totp_secret = ? WHERE id = ?").run(totpSecret, keyRecord.id);
+      db.prepare("UPDATE admin_keys SET totp_secret = ? WHERE id = ?").run(encryptText(totpSecret), keyRecord.id);
     }
 
     const jwtToken = jwt.sign(
@@ -1942,7 +2073,7 @@ async function startServer() {
   app.get("/api/admin/keys", authenticateAdmin, (_req, res) => {
     const keys = db
       .prepare(
-        "SELECT id, key_value, role, CASE WHEN totp_secret IS NULL THEN 0 ELSE 1 END as has_2fa, created_at FROM admin_keys ORDER BY created_at DESC"
+        "SELECT id, role, CASE WHEN totp_secret IS NULL THEN 0 ELSE 1 END as has_2fa, created_at FROM admin_keys ORDER BY created_at DESC"
       )
       .all() as any[];
     res.json(keys);
@@ -1954,10 +2085,13 @@ async function startServer() {
     if (req.admin.role !== "MASTER" && role === "MASTER") {
       return res.status(403).json({ error: "MASTER 권한 키는 MASTER만 생성할 수 있습니다." });
     }
+    if (findAdminKey(keyValue.trim())) {
+      return res.status(400).json({ error: "이미 존재하는 보안 키입니다." });
+    }
     try {
       const info = db
         .prepare("INSERT INTO admin_keys (key_value, role) VALUES (?, ?)")
-        .run(keyValue.trim(), role || "ADMIN");
+        .run(hashPassword(keyValue.trim()), role || "ADMIN");
       logAdminAction(req, "CREATE_ADMIN_KEY", "admin_keys", Number(info.lastInsertRowid), `Created key with role ${role || "ADMIN"}`);
       res.json({ success: true });
     } catch (err: any) {
@@ -2669,7 +2803,7 @@ async function startServer() {
         : undefined;
 
       if (tossData.secret) {
-        db.prepare("UPDATE orders SET toss_secret = ? WHERE id = ?").run(String(tossData.secret), order.id);
+        db.prepare("UPDATE orders SET toss_secret = ? WHERE id = ?").run(hashToken(String(tossData.secret)), order.id);
       }
 
       const updatedOrder = finalizeOrderPaymentTx(
@@ -2746,7 +2880,7 @@ async function startServer() {
       if (!order.payment_key) {
         return res.status(401).json({ error: "웹훅을 확인할 수 없습니다." });
       }
-      if (order.toss_secret && (!secret || secret !== order.toss_secret)) {
+      if (order.toss_secret && !tokenMatches(order.toss_secret, String(secret || ""))) {
         return res.status(401).json({ error: "웹훅을 확인할 수 없습니다." });
       }
 
@@ -2766,7 +2900,7 @@ async function startServer() {
 
       if (payment.status === "DONE" && order.status === "pending") {
         db.prepare(
-          "UPDATE orders SET status = 'paid', status_updated_at = CURRENT_TIMESTAMP WHERE id = ? AND status = 'pending'"
+          "UPDATE orders SET status = 'paid', vbank_account = NULL, status_updated_at = CURRENT_TIMESTAMP WHERE id = ? AND status = 'pending'"
         ).run(order.id);
       } else if (
         (payment.status === "CANCELED" || payment.status === "ABORTED" || payment.status === "EXPIRED") &&
@@ -2819,6 +2953,8 @@ async function startServer() {
       );
       for (const order of orders) {
         order.items = getItems.all(req.user.id, order.id);
+        Object.assign(order, presentOrder(order));
+        delete order.toss_secret;
       }
       res.json(orders);
     } catch {
@@ -2874,7 +3010,7 @@ async function startServer() {
         .get(req.params.id, req.user.id) as any;
       if (!order) return res.status(404).json({ error: "주문을 찾을 수 없습니다." });
       const items = db.prepare("SELECT * FROM order_items WHERE order_id = ?").all(order.id);
-      res.json({ ...order, items });
+      res.json({ ...presentOrder(order), items });
     } catch {
       res.status(500).json({ error: "주문 상세 조회 실패" });
     }
@@ -2926,7 +3062,7 @@ async function startServer() {
       }
 
       db.prepare(
-        "UPDATE orders SET status = 'refund_requested', refund_reason = ?, refund_amount = ?, status_updated_at = CURRENT_TIMESTAMP WHERE id = ?"
+        "UPDATE orders SET status = 'refund_requested', vbank_account = NULL, refund_reason = ?, refund_amount = ?, status_updated_at = CURRENT_TIMESTAMP WHERE id = ?"
       ).run(reason, refundAmount, id);
 
       res.json({ success: true, status: "refund_requested", refund_amount: refundAmount });
@@ -2942,6 +3078,8 @@ async function startServer() {
       const getItems = db.prepare("SELECT * FROM order_items WHERE order_id = ?");
       for (const order of orders) {
         order.items = getItems.all(order.id);
+        Object.assign(order, presentOrder(order));
+        delete order.toss_secret;
       }
       res.json(orders);
     } catch (err: any) {
@@ -2971,7 +3109,7 @@ async function startServer() {
       if (!order) return res.status(404).json({ error: "주문을 찾을 수 없습니다." });
 
       db.prepare(
-        "UPDATE orders SET tracking_number = ?, shipping_company = ?, status = 'shipping', status_updated_at = CURRENT_TIMESTAMP WHERE id = ?"
+        "UPDATE orders SET tracking_number = ?, shipping_company = ?, status = 'shipping', vbank_account = NULL, status_updated_at = CURRENT_TIMESTAMP WHERE id = ?"
       ).run(tracking_number, shipping_company || "CJ대한통운", id);
 
       logAdminAction(req, "UPDATE_TRACKING", "orders", Number(id), `${shipping_company}: ${tracking_number}`);
@@ -3013,8 +3151,8 @@ async function startServer() {
         refundOrderTx(id);
       } else {
         db.prepare(
-          "UPDATE orders SET status = ?, status_updated_at = CURRENT_TIMESTAMP WHERE id = ?"
-        ).run(status, id);
+          "UPDATE orders SET status = ?, vbank_account = CASE WHEN ? = 'pending' THEN vbank_account ELSE NULL END, status_updated_at = CURRENT_TIMESTAMP WHERE id = ?"
+        ).run(status, status, id);
       }
 
       logAdminAction(req, "UPDATE_ORDER_STATUS", "orders", Number(id), `Status changed: ${order.status} -> ${status}`);
@@ -3416,7 +3554,7 @@ async function startServer() {
             if (order_number && tracking_number) {
               const r = db
                 .prepare(
-                  "UPDATE orders SET tracking_number = ?, shipping_company = ?, status = 'shipping', status_updated_at = CURRENT_TIMESTAMP WHERE order_number = ?"
+                  "UPDATE orders SET tracking_number = ?, shipping_company = ?, status = 'shipping', vbank_account = NULL, status_updated_at = CURRENT_TIMESTAMP WHERE order_number = ?"
                 )
                 .run(tracking_number, shipping_company || "CJ대한통운", order_number);
               updatedCount += r.changes;
