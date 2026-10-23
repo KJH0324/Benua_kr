@@ -110,9 +110,8 @@ export default function ProductDetail() {
         <div className="pt-32 pb-24 px-6 max-w-3xl mx-auto text-center space-y-8">
           <div className="space-y-3">
             <h1 className="text-2xl font-serif font-bold text-venuea-dark">
-              판매가 종료되었거나 없는 상품입니다
+              없는 상품입니다
             </h1>
-            <p className="text-sm text-venuea-muted">주소가 바뀌었거나 상품이 내려갔을 수 있어요.</p>
             <Link
               to="/shop"
               className="inline-flex bg-venuea-green text-white px-6 py-3 rounded-full text-sm font-bold"
@@ -122,7 +121,7 @@ export default function ProductDetail() {
           </div>
           {others.length > 0 && (
             <div className="text-left space-y-4">
-              <p className="text-sm font-bold text-venuea-dark">다른 상품은 어때요</p>
+              <p className="text-sm font-bold text-venuea-dark">다른 상품</p>
               <div className="grid grid-cols-2 gap-4">
                 {others.map((item) => (
                   <ProductCard key={item.id} product={item} />
@@ -396,7 +395,7 @@ export default function ProductDetail() {
             <>
           {!isReservedSale && stock < 1 && (
             <div className="space-y-2">
-              <p className="text-sm text-venuea-brown">지금은 품절이에요. 입고되면 알려드릴게요.</p>
+              <p className="text-sm text-venuea-brown">품절</p>
               {reserveDone ? (
                 <p className="text-sm text-venuea-muted">알림 신청이 완료되었습니다.</p>
               ) : (
@@ -536,7 +535,7 @@ export default function ProductDetail() {
 
       <section className="border-t border-black/10 pt-8">
         {reviews.length === 0 ? (
-          <p className="text-sm text-venuea-muted">첫 리뷰를 남겨주세요.</p>
+          <p className="text-sm text-venuea-muted">리뷰가 없습니다.</p>
         ) : (
           <div className="space-y-4">
             <h2 className="text-xl font-serif font-bold">리뷰 {reviews.length}</h2>

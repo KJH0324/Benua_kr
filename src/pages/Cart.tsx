@@ -184,7 +184,7 @@ export default function Cart() {
             </div>
             {picks.length > 0 && (
               <div className="space-y-2">
-                <p className="text-xs font-bold text-venuea-dark">이 금액이면 무료배송이에요</p>
+                <p className="text-xs font-bold text-venuea-dark">무료배송</p>
                 {picks.map((item) => (
                   <button
                     key={item.id}

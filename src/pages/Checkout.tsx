@@ -403,9 +403,6 @@ export default function Checkout() {
         >
           주문번호 복사
         </button>
-        <p className="text-xs text-venuea-muted leading-relaxed">
-          비회원 조회는 주문번호와 수령인 연락처가 모두 필요합니다.
-        </p>
 
         {vbankResult && (
           <div className="p-5 bg-amber-50 border border-amber-200 rounded-xl text-left text-xs space-y-1.5">
@@ -608,13 +605,7 @@ export default function Checkout() {
                   placeholder="0"
                   className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm"
                 />
-                <p className="mt-1.5 text-[11px] text-gray-400">
-                  {pointBalance < 1000
-                    ? "1,000P부터 사용할 수 있습니다."
-                    : payableBeforePoints < 1000
-                    ? `이 주문은 ${maxUsablePoints.toLocaleString()}P까지 사용할 수 있습니다.`
-                    : `최대 ${maxUsablePoints.toLocaleString()}P, 1,000P 이상부터 사용`}
-                </p>
+                <p className="mt-1.5 text-[11px] text-gray-400">최대 {maxUsablePoints.toLocaleString()}P</p>
               </div>
             </section>
           )}

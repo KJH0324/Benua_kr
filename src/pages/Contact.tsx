@@ -75,7 +75,7 @@ export default function Contact() {
       });
       const data = await res.json().catch(() => ({}));
       if (res.ok) {
-        toast.success("문의가 접수되었습니다. 입력하신 이메일로 답변을 보내드립니다.");
+        toast.success("문의가 접수되었습니다.");
         setForm({
           category: "오브제 문의",
           name: user?.name || "",
@@ -112,10 +112,7 @@ export default function Contact() {
 
         {needsOrder && authChecked && !user && (
           <div className="rounded-xl border border-venuea-gold/40 bg-[#fbf7f1] px-4 py-4 text-sm text-venuea-dark space-y-2">
-            <p className="font-bold">로그인이 필요한 문의입니다</p>
-            <p className="text-xs leading-relaxed text-gray-600">
-              배송 문의와 교환/환불 문의는 본인 주문번호를 선택해야 접수됩니다.
-            </p>
+            <p className="font-bold">로그인이 필요합니다</p>
             <Link
               to="/login?redirect=/contact"
               className="inline-block text-xs font-bold uppercase tracking-widest text-venuea-gold"
@@ -132,7 +129,7 @@ export default function Contact() {
             </label>
             {orders.length === 0 ? (
               <p className="text-xs text-gray-500 rounded-xl border border-gray-200 px-4 py-3">
-                연결할 주문 내역이 없습니다. 주문 후 다시 문의해 주세요.
+                주문 내역이 없습니다.
               </p>
             ) : (
               <select

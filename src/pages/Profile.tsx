@@ -977,9 +977,6 @@ export default function Profile() {
                     </label>
                   ))}
               </div>
-              {(refundModalOrder.items || []).some((item: any) => item.item_status === "refunded") && (
-                <p className="text-xs text-red-600">이미 환불된 상품은 다시 선택할 수 없습니다.</p>
-              )}
             </div>
 
             <div className="space-y-3">
@@ -1016,23 +1013,14 @@ export default function Profile() {
                 rows={3}
                 value={refundDetailText}
                 onChange={(e) => setRefundDetailText(e.target.value)}
-                placeholder="추가 전달 사항이 있으시면 적어주세요."
+                placeholder="상세 사유"
                 className="w-full border border-gray-200 rounded-xl p-3 text-xs focus:outline-none focus:border-venuea-gold"
               />
             </div>
 
             {refundError && (
-              <div className="rounded-xl border border-venuea-gold/40 bg-[#fbf7f1] px-4 py-3 text-xs text-venuea-dark">
-                <p className="font-bold tracking-wide">안내</p>
-                <p className="mt-1 leading-relaxed">{refundError}</p>
-              </div>
+              <p className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-xs text-red-700">{refundError}</p>
             )}
-
-            {!["pending", "paid", "preparing"].includes(refundModalOrder.status) && (
-                <p className="text-[11px] text-amber-700 bg-amber-50 p-3 rounded-xl border border-amber-200">
-                  배송이 시작된 주문입니다. 일부만 환불하면 반품비를 빼고, 남은 상품을 모두 환불하면 배송비와 반품비를 뺍니다. 블랙·더 블랙은 반품비가 없습니다.
-                </p>
-              )}
 
             <div className="flex gap-2 pt-2">
               <button

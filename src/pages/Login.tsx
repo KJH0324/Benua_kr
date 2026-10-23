@@ -46,7 +46,7 @@ export default function Login() {
       if (prefillEmail) setEmail(prefillEmail);
       if (sId) setSocialId(sId);
       if (provider) setSocialProvider(provider);
-      toast.info("가입된 계정 정보가 없습니다. 간편 회원가입을 완료해주세요.");
+      toast.info("가입된 계정이 없습니다.");
     }
   }, [searchParams]);
 

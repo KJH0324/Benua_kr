@@ -47,9 +47,6 @@ export default function TrackOrder() {
         <h1 className="text-3xl font-serif font-bold text-venuea-dark">
           주문/배송 조회
         </h1>
-        <p className="text-xs text-venuea-muted">
-          15자리 주문번호를 입력하여 현재 배송 상태를 확인하세요.
-        </p>
       </div>
 
       <form onSubmit={handleTrack} noValidate className="space-y-2">

@@ -140,9 +140,7 @@ export default function AdminLogin() {
                     <QrCode size={16} className="text-venuea-gold" />
                     <span>최초 2FA OTP 등록이 필요합니다</span>
                   </div>
-                  <p className="text-xs text-gray-500 leading-relaxed">
-                    Google Authenticator 앱으로 아래 QR 코드를 스캔한 뒤 표시되는 6자리 번호를 입력해주세요.
-                  </p>
+                  <p className="text-xs text-gray-500">QR을 스캔하고 6자리를 입력하세요.</p>
                   <img
                     src={qrCodeUrl}
                     alt="TOTP QR Code"

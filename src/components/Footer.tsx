@@ -80,9 +80,6 @@ export default function Footer() {
 
         <div className="space-y-3 min-w-0">
           <h3 className="text-sm font-bold">소식 받기</h3>
-          <p className="text-sm text-[#faf2e7]/85">
-            새 상품과 배송 혜택을 메일로 보내드립니다.
-          </p>
           <form onSubmit={handleSubscribe} className="flex gap-2 min-w-0">
             <input
               type="email"

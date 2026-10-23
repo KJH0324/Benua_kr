@@ -1271,8 +1271,8 @@ function AdminOrders() {
     if (
       !confirm(
         action === "approve"
-          ? "환불을 승인하시겠습니까? (토스 결제 취소 및 재고/포인트 복구가 자동 실행됩니다)"
-          : "환불 요청만 반려합니다. 이미 환불된 상품은 그대로 둡니다."
+          ? "환불을 승인할까요?"
+          : "환불 요청을 반려할까요?"
       )
     )
       return;
@@ -1398,9 +1398,6 @@ function AdminOrders() {
       <header className="flex flex-wrap justify-between items-center gap-4">
         <div>
           <h1 className="text-2xl font-serif font-bold text-gray-900">주문 및 클레임 관리</h1>
-          <p className="text-xs text-gray-500 mt-1">
-            운송장 입력, 주문 상태 변경, 토스페이먼츠 연동 자동 환불을 관리합니다.
-          </p>
         </div>
         <button
           onClick={handleExportCsv}
@@ -1691,8 +1688,7 @@ function AdminOrders() {
           <div className="bg-white rounded-2xl w-full max-w-md p-6 space-y-4 shadow-2xl">
             <h3 className="text-lg font-bold">주문을 삭제할까요?</h3>
             <p className="text-sm text-gray-600 leading-relaxed">
-              {deleteTarget.order_number} 주문은 복구할 수 없습니다. 결제된 주문이면 결제 취소와 재고·포인트
-              복구 후 지웁니다. 아래에 삭제 라고 입력해주세요.
+              {deleteTarget.order_number}은 복구할 수 없습니다. 삭제 라고 입력해주세요.
             </p>
             {deleteError && (
               <p className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-xs text-red-700">
@@ -1920,7 +1916,7 @@ function AdminFulfillment() {
     <div className="bg-white p-8 rounded-2xl shadow-sm border border-gray-100 animate-in fade-in space-y-4">
       <h2 className="text-xl font-bold font-serif">운송장 CSV 일괄 등록</h2>
       <p className="text-xs text-gray-500">
-        첫 줄 헤더 이후 <code>주문번호,운송장번호,택배사</code> 형식의 CSV 파일을 업로드하면 자동으로 배송중 처리됩니다.
+        주문번호,운송장번호,택배사
       </p>
       <div className="flex items-center gap-4">
         <button
@@ -2726,7 +2722,6 @@ function AdminInbox() {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h2 className="text-xl font-bold font-serif">받은 메일</h2>
-          <p className="text-xs text-gray-400 mt-1">support@benua.shop 으로 온 메일만 표시됩니다.</p>
         </div>
         <button
           onClick={syncMails}
@@ -2769,9 +2764,7 @@ function AdminInbox() {
         </div>
 
         <div className="lg:col-span-3 bg-white rounded-2xl border border-gray-100 p-6 min-h-[320px]">
-          {!selected ? (
-            <p className="text-sm text-gray-400">메일을 선택하면 내용이 표시됩니다.</p>
-          ) : (
+          {!selected ? null : (
             <div className="space-y-4">
               <div>
                 <h3 className="text-lg font-bold">{selected.subject}</h3>
