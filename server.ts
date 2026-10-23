@@ -3336,6 +3336,55 @@ async function startServer() {
     }
   });
 
+  const carrierCode = (company: string) => {
+    const codes: Record<string, string> = {
+      우체국택배: "01",
+      CJ대한통운: "04",
+      한진택배: "05",
+      로젠택배: "06",
+      롯데택배: "08",
+    };
+    return codes[company] || "04";
+  };
+
+  const trackingMessage = (message: string) =>
+    `<!doctype html><meta charset="utf-8"><body style="margin:0;background:#faf2e7;color:#463221;font-family:sans-serif"><p style="padding:24px">${escapeHtml(message)}</p></body>`;
+
+  const trackingSkyHtml = async (company: string, invoice: string) => {
+    const key = String(process.env.SWEETTRACKER_API_KEY || "").trim();
+    if (!key) return { status: 503, html: trackingMessage("배송조회 키가 설정되지 않았습니다.") };
+    const number = String(invoice || "").replace(/[^\d]/g, "");
+    if (!number) return { status: 400, html: trackingMessage("운송장 번호가 없습니다.") };
+    const response = await fetch("https://info.sweettracker.co.kr/tracking/5", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        t_key: key,
+        t_code: carrierCode(company || "CJ대한통운"),
+        t_invoice: number,
+      }),
+    });
+    let html = await response.text();
+    if (key) html = html.split(key).join("");
+    if (!/<base\s/i.test(html)) {
+      html = html.replace(/<head([^>]*)>/i, '<head$1><base href="https://info.sweettracker.co.kr/">');
+    }
+    return { status: response.ok ? 200 : response.status, html };
+  };
+
+  const sendTrackingSky = async (res: any, order: any) => {
+    if (!order?.tracking_number) {
+      res.status(404).type("html").send(trackingMessage("운송장이 없습니다."));
+      return;
+    }
+    try {
+      const page = await trackingSkyHtml(order.shipping_company || "CJ대한통운", order.tracking_number);
+      res.status(page.status).type("html").send(page.html);
+    } catch {
+      res.status(502).type("html").send(trackingMessage("배송조회를 열지 못했습니다."));
+    }
+  };
+
   app.get("/api/orders/track/:orderNumber", (req, res) => {
     if (!allowRate(`track:${clientIp(req)}`, 20, 10 * 60 * 1000)) {
       return res.status(429).json({ error: "조회 요청이 너무 많습니다. 잠시 후 다시 시도해주세요." });
@@ -3375,6 +3424,32 @@ async function startServer() {
     } catch {
       res.status(500).json({ error: "주문 조회에 실패했습니다." });
     }
+  });
+
+  app.get("/api/orders/track/:orderNumber/tracking-sky", async (req, res) => {
+    if (!allowRate(`track-sky:${clientIp(req)}`, 20, 10 * 60 * 1000)) {
+      return res.status(429).type("html").send(trackingMessage("조회 요청이 너무 많습니다."));
+    }
+    const normalizePhone = (value: unknown) => {
+      let digits = String(value || "").replace(/\D/g, "");
+      if (digits.startsWith("82")) digits = `0${digits.slice(2)}`;
+      return digits;
+    };
+    const phone = normalizePhone(req.query.phone);
+    if (phone.length < 8) return res.status(400).type("html").send(trackingMessage("연락처를 확인해주세요."));
+    const order = db.prepare("SELECT * FROM orders WHERE order_number = ?").get(req.params.orderNumber) as any;
+    if (!order || normalizePhone(order.customer_phone) !== phone) {
+      return res.status(404).type("html").send(trackingMessage("주문을 찾을 수 없습니다."));
+    }
+    await sendTrackingSky(res, order);
+  });
+
+  app.get("/api/orders/:id/tracking-sky", authenticateUser, async (req: any, res) => {
+    const order = db
+      .prepare("SELECT * FROM orders WHERE id = ? AND user_id = ?")
+      .get(req.params.id, req.user.id) as any;
+    if (!order) return res.status(404).type("html").send(trackingMessage("주문을 찾을 수 없습니다."));
+    await sendTrackingSky(res, order);
   });
 
   app.get("/api/orders/:id/detail", authenticateUser, (req: any, res) => {

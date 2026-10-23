@@ -993,10 +993,12 @@ export default function Profile() {
               </div>
             )}
 
-            {(detailOrder.tracking_number || detailOrder.shipping_company) && (
-              <p className="text-sm">
-                {detailOrder.shipping_company || "택배"} {detailOrder.tracking_number || ""}
-              </p>
+            {detailOrder.tracking_number && (
+              <iframe
+                title="배송조회"
+                src={`/api/orders/${detailOrder.id}/tracking-sky`}
+                className="w-full h-[760px] rounded-2xl border border-gray-200 bg-white"
+              />
             )}
 
             <div className="border-t border-black/10 pt-4 space-y-3 text-sm">

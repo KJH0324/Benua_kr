@@ -110,14 +110,21 @@ export default function TrackOrder() {
           </div>
 
           {order.tracking_number && (
-            <div className="p-4 rounded-xl bg-gray-50 border border-gray-100 flex items-center gap-3">
-              <Truck size={18} className="text-venuea-gold shrink-0" />
-              <div className="text-xs">
-                <span className="text-gray-400 block">운송장 정보</span>
-                <span className="font-bold text-venuea-dark">
-                  {order.shipping_company || "CJ대한통운"} · {order.tracking_number}
-                </span>
+            <div className="space-y-3">
+              <div className="p-4 rounded-xl bg-gray-50 border border-gray-100 flex items-center gap-3">
+                <Truck size={18} className="text-venuea-gold shrink-0" />
+                <div className="text-xs">
+                  <span className="text-gray-400 block">운송장 정보</span>
+                  <span className="font-bold text-venuea-dark">
+                    {order.shipping_company || "CJ대한통운"} · {order.tracking_number}
+                  </span>
+                </div>
               </div>
+              <iframe
+                title="배송조회"
+                src={`/api/orders/track/${encodeURIComponent(order.order_number)}/tracking-sky?phone=${encodeURIComponent(phone)}`}
+                className="w-full h-[760px] rounded-2xl border border-gray-200 bg-white"
+              />
             </div>
           )}
 
