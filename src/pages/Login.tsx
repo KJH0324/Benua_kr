@@ -17,6 +17,7 @@ export default function Login() {
   const [mode, setMode] = useState<"LOGIN" | "REGISTER" | "FORGOT">("LOGIN");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [passwordConfirm, setPasswordConfirm] = useState("");
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
   const [newsletter, setNewsletter] = useState(false);
@@ -111,8 +112,8 @@ export default function Login() {
       setFormError(mode === "FORGOT" ? "이메일을 입력해주세요." : "이메일과 비밀번호를 입력해주세요.");
       return;
     }
-    if (mode === "REGISTER" && !name.trim()) {
-      setFormError("성함을 입력해주세요.");
+    if (mode === "REGISTER" && password !== passwordConfirm) {
+      setFormError("비밀번호가 서로 다릅니다.");
       return;
     }
     setFormError("");
@@ -132,7 +133,10 @@ export default function Login() {
         toast.error(data.error || "로그인에 실패했습니다.");
       }
     } else if (mode === "REGISTER") {
-      if (!socialProvider && !isEmailVerified) {
+      const params = new URLSearchParams(window.location.search);
+      const providerNow = socialProvider || params.get("provider");
+      const socialNow = socialId || params.get("socialId");
+      if (!providerNow && !isEmailVerified) {
         setFormError("이메일 인증을 먼저 완료해주세요.");
         return;
       }
@@ -145,9 +149,9 @@ export default function Login() {
         verification_code: verificationCode,
         newsletter_subscribed: newsletter,
       };
-      if (socialProvider === "google") payload.google_id = socialId;
-      if (socialProvider === "naver") payload.naver_id = socialId;
-      if (socialProvider === "kakao") payload.kakao_id = socialId;
+      if (providerNow === "google") payload.google_id = socialNow;
+      if (providerNow === "naver") payload.naver_id = socialNow;
+      if (providerNow === "kakao") payload.kakao_id = socialNow;
 
       const res = await apiFetch("/api/auth/register", {
         method: "POST",
@@ -270,6 +274,16 @@ export default function Login() {
             placeholder="비밀번호"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
+            className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm"
+          />
+        )}
+        {mode === "REGISTER" && (
+          <input
+            type="password"
+            required
+            placeholder="비밀번호 확인"
+            value={passwordConfirm}
+            onChange={(e) => setPasswordConfirm(e.target.value)}
             className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm"
           />
         )}

@@ -183,27 +183,32 @@ export default function Contact() {
           onChange={(e) => setForm({ ...form, message: e.target.value })}
           className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm"
         />
-        <label className="block text-xs font-bold text-gray-500">
-          사진 첨부
-          <input
-            type="file"
-            accept="image/*"
-            className="mt-2 block w-full text-sm"
-            onChange={async (e) => {
-              const file = e.target.files?.[0];
-              if (!file) return;
-              const body = new FormData();
-              body.append("image", file);
-              const res = await apiFetch("/api/uploads/image", { method: "POST", body });
-              const data = await res.json().catch(() => ({}));
-              if (!res.ok) {
-                toast.error(data.error || "사진을 올리지 못했습니다. 로그인 후 다시 시도해주세요.");
-                return;
-              }
-              setImageUrl(data.image_url || "");
-            }}
-          />
-        </label>
+        <input
+          id="contact-photo"
+          type="file"
+          accept="image/*"
+          className="hidden"
+          onChange={async (e) => {
+            const file = e.target.files?.[0];
+            if (!file) return;
+            const body = new FormData();
+            body.append("image", file);
+            const res = await apiFetch("/api/uploads/image", { method: "POST", body });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) {
+              toast.error(data.error || "사진을 올리지 못했습니다.");
+              return;
+            }
+            setImageUrl(data.image_url || "");
+          }}
+        />
+        <button
+          type="button"
+          onClick={() => document.getElementById("contact-photo")?.click()}
+          className="px-4 py-3 rounded-xl border border-venuea-green bg-white text-venuea-green text-sm font-bold"
+        >
+          {imageUrl ? "사진 변경" : "사진 첨부"}
+        </button>
         {imageUrl && <img src={imageUrl} alt="" className="w-24 h-24 object-cover rounded-xl" />}
         <button
           type="submit"

@@ -146,10 +146,11 @@ export default function Profile() {
   const [refundError, setRefundError] = useState("");
   const [isSubmittingRefund, setIsSubmittingRefund] = useState(false);
   const [detailOrder, setDetailOrder] = useState<any | null>(null);
-  const [partialIds, setPartialIds] = useState<number[]>([]);
+  const [refundItemIds, setRefundItemIds] = useState<number[]>([]);
   const [inquiries, setInquiries] = useState<any[]>([]);
   const [couponCode, setCouponCode] = useState("");
-  const [passwordForm, setPasswordForm] = useState({ current: "", next: "" });
+  const [passwordForm, setPasswordForm] = useState({ current: "", next: "", confirm: "" });
+  const [passwordOpen, setPasswordOpen] = useState(false);
   const [recent, setRecent] = useState<any[]>([]);
   const [editingAddress, setEditingAddress] = useState(false);
   const [orderAddressForm, setOrderAddressForm] = useState({
@@ -248,6 +249,11 @@ export default function Profile() {
       setRefundError("환불 요청 사유를 입력해주세요.");
       return;
     }
+    const picked = (refundModalOrder.items || []).filter((item: any) => refundItemIds.includes(item.id));
+    if (picked.length === 0) {
+      setRefundError("환불할 상품을 선택해주세요.");
+      return;
+    }
     setRefundError("");
     const finalReason = refundDetailText.trim()
       ? `${refundReasonType} (${refundDetailText.trim()})`
@@ -258,7 +264,10 @@ export default function Profile() {
       const res = await apiFetch(`/api/orders/${refundModalOrder.id}/refund-request`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ reason: finalReason }),
+        body: JSON.stringify({
+          reason: finalReason,
+          items: picked.map((item: any) => ({ id: item.id, quantity: item.quantity })),
+        }),
       });
       const data = await res.json();
       if (res.ok) {
@@ -269,6 +278,8 @@ export default function Profile() {
         );
         setRefundModalOrder(null);
         setRefundDetailText("");
+        setRefundItemIds([]);
+        setDetailOrder(null);
         loadProfileData();
       } else {
         toast.error(data.error || "환불 요청 실패");
@@ -376,10 +387,8 @@ export default function Profile() {
       toast.error("품절입니다.");
       return;
     }
-    const price =
-      product.discount_rate > 0
-        ? Math.round(product.price * (1 - product.discount_rate / 100))
-        : product.price;
+    const rate = Math.min(100, Math.max(0, Number(product.discount_rate) || 0));
+    const price = rate > 0 ? Math.round(product.price * (1 - rate / 100)) : product.price;
     const saved = JSON.parse(localStorage.getItem("benua_cart") || "[]");
     const list = Array.isArray(saved) ? saved : [];
     const idx = list.findIndex((item: any) => String(item.id) === String(product.id));
@@ -603,56 +612,93 @@ export default function Profile() {
             <button
               key={String(provider)}
               type="button"
-              disabled={!linked}
               onClick={async () => {
-                const res = await apiFetch("/api/auth/unlink", {
-                  method: "POST",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({ provider }),
-                });
-                if (!res.ok) return toast.error("연결을 해제하지 못했습니다.");
-                toast.success(`${label} 연결을 해제했습니다.`);
-                loadProfileData();
+                if (linked) {
+                  const res = await apiFetch("/api/auth/unlink", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ provider }),
+                  });
+                  if (!res.ok) return toast.error("연결을 해제하지 못했습니다.");
+                  toast.success(`${label} 연결을 해제했습니다.`);
+                  loadProfileData();
+                  return;
+                }
+                const res = await apiFetch(`/api/auth/${provider}/url`);
+                const data = await res.json().catch(() => ({}));
+                if (data.url) window.location.href = data.url;
+                else toast.error(data.error || "연결 주소를 가져오지 못했습니다.");
               }}
-              className="px-3 py-2 rounded-full border text-xs font-bold disabled:opacity-40"
+              className="px-3 py-2 rounded-full border text-xs font-bold"
             >
-              {label} {linked ? "연결됨 · 해제" : "미연결"}
+              {label} {linked ? "연결됨 · 해제" : "연결하기"}
             </button>
           ))}
         </div>
-        <form
-          className="grid sm:grid-cols-3 gap-2"
-          onSubmit={async (e) => {
-            e.preventDefault();
-            const res = await apiFetch("/api/auth/password", {
-              method: "PUT",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify(passwordForm),
-            });
-            const data = await res.json().catch(() => ({}));
-            if (!res.ok) return toast.error(data.error || "비밀번호를 바꾸지 못했습니다.");
-            setPasswordForm({ current: "", next: "" });
-            toast.success("비밀번호를 변경했습니다.");
-          }}
-        >
-          <input
-            type="password"
-            value={passwordForm.current}
-            onChange={(e) => setPasswordForm({ ...passwordForm, current: e.target.value })}
-            placeholder="현재 비밀번호"
-            className="border rounded-xl px-3 py-2 text-sm"
-          />
-          <input
-            type="password"
-            value={passwordForm.next}
-            onChange={(e) => setPasswordForm({ ...passwordForm, next: e.target.value })}
-            placeholder="새 비밀번호"
-            className="border rounded-xl px-3 py-2 text-sm"
-          />
-          <button type="submit" className="rounded-xl bg-venuea-dark text-white text-sm font-bold">
+        {!passwordOpen ? (
+          <button
+            type="button"
+            onClick={() => setPasswordOpen(true)}
+            className="px-4 py-2 rounded-xl border border-gray-300 text-sm font-bold"
+          >
             비밀번호 변경
           </button>
-        </form>
+        ) : (
+          <form
+            className="grid sm:grid-cols-2 gap-2"
+            onSubmit={async (e) => {
+              e.preventDefault();
+              if (passwordForm.next !== passwordForm.confirm) {
+                toast.error("새 비밀번호가 서로 다릅니다.");
+                return;
+              }
+              const res = await apiFetch("/api/auth/password", {
+                method: "PUT",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ current: passwordForm.current, next: passwordForm.next }),
+              });
+              const data = await res.json().catch(() => ({}));
+              if (!res.ok) return toast.error(data.error || "비밀번호를 바꾸지 못했습니다.");
+              setPasswordForm({ current: "", next: "", confirm: "" });
+              setPasswordOpen(false);
+              toast.success("비밀번호를 변경했습니다.");
+            }}
+          >
+            <input
+              type="password"
+              value={passwordForm.current}
+              onChange={(e) => setPasswordForm({ ...passwordForm, current: e.target.value })}
+              placeholder="현재 비밀번호"
+              className="border rounded-xl px-3 py-2 text-sm"
+            />
+            <input
+              type="password"
+              value={passwordForm.next}
+              onChange={(e) => setPasswordForm({ ...passwordForm, next: e.target.value })}
+              placeholder="새 비밀번호"
+              className="border rounded-xl px-3 py-2 text-sm"
+            />
+            <input
+              type="password"
+              value={passwordForm.confirm}
+              onChange={(e) => setPasswordForm({ ...passwordForm, confirm: e.target.value })}
+              placeholder="새 비밀번호 확인"
+              className="border rounded-xl px-3 py-2 text-sm"
+            />
+            <div className="flex gap-2">
+              <button type="submit" className="flex-1 rounded-xl bg-venuea-dark text-white text-sm font-bold">
+                변경
+              </button>
+              <button
+                type="button"
+                onClick={() => setPasswordOpen(false)}
+                className="px-4 rounded-xl border text-sm"
+              >
+                닫기
+              </button>
+            </div>
+          </form>
+        )}
       </section>
 
       <section className="space-y-3">
@@ -764,22 +810,22 @@ export default function Profile() {
           <div className="space-y-4">
             {orders.map((order) => (
               <div key={order.id} className="p-6 rounded-2xl border border-gray-200 space-y-4">
-                <div className="flex flex-wrap justify-between items-center border-b pb-3 gap-2">
+                <div className="border-b pb-3 space-y-3">
                   <div>
                     <span className="font-mono font-bold text-sm">{order.order_number}</span>
                     <span className="text-xs text-gray-400 ml-3">
                       {new Date(order.created_at).toLocaleDateString("ko-KR")}
                     </span>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <span
-                      className={cn(
-                        "text-xs font-bold px-3 py-1 rounded-full border",
-                        getOrderStatusBadgeClass(order.status)
-                      )}
-                    >
-                      {formatOrderStatus(order.status)}
-                    </span>
+                  <span
+                    className={cn(
+                      "inline-flex text-2xl font-bold px-4 py-2 rounded-2xl border",
+                      getOrderStatusBadgeClass(order.status)
+                    )}
+                  >
+                    {formatOrderStatus(order.status)}
+                  </span>
+                  <div className="flex flex-wrap items-center gap-2">
                     <button
                       type="button"
                       onClick={() => openOrderDetail(order)}
@@ -795,9 +841,16 @@ export default function Profile() {
                         구매확정
                       </button>
                     )}
-                    {["pending", "paid", "shipping", "delivered"].includes(order.status) && (
+                    {["pending", "paid", "preparing", "shipping", "delivered", "refund_requested"].includes(order.status) &&
+                      (order.items || []).some(
+                        (item: any) => !["refunded", "refund_requested"].includes(item.item_status || "normal")
+                      ) && (
                       <button
                         onClick={() => {
+                          const openIds = (order.items || [])
+                            .filter((item: any) => !["refunded", "refund_requested"].includes(item.item_status || "normal"))
+                            .map((item: any) => item.id);
+                          setRefundItemIds(openIds);
                           setRefundModalOrder(order);
                           setRefundReasonType(REFUND_REASONS[0]);
                           setRefundDetailText("");
@@ -812,33 +865,41 @@ export default function Profile() {
                 </div>
 
                 <div className="space-y-2">
-                  {order.items?.map((item, idx) => (
-                    <div key={idx} className="flex justify-between items-center text-sm">
-                      <span>
-                        {item.name} × {item.quantity}
-                      </span>
-                      <div className="flex items-center gap-3">
-                        <span className="font-bold">{formatPrice(item.price * item.quantity)}</span>
-                        {order.status === "completed" &&
-                          (item.reviewed ? (
-                            <span className="text-xs text-gray-400">작성 완료</span>
-                          ) : (
-                            <button
-                              onClick={() =>
-                                setReviewModal({
-                                  orderId: order.id,
-                                  productId: item.product_id,
-                                  productName: item.name,
-                                })
-                              }
-                              className="text-xs font-bold text-venuea-gold underline"
-                            >
-                              리뷰 작성
-                            </button>
-                          ))}
+                  {order.items?.map((item: any, idx) => {
+                    const refunded = item.item_status === "refunded";
+                    const requested = item.item_status === "refund_requested";
+                    return (
+                      <div key={item.id || idx} className="flex justify-between items-center text-sm">
+                        <span className={refunded ? "line-through text-red-600" : ""}>
+                          {item.name} × {item.quantity}
+                          {refunded ? " 환불 완료" : ""}
+                          {requested ? " 환불 요청" : ""}
+                        </span>
+                        <div className="flex items-center gap-3">
+                          <span className={cn("font-bold", refunded && "line-through text-red-600")}>
+                            {formatPrice(item.price * item.quantity)}
+                          </span>
+                          {order.status === "completed" && !refunded && !requested &&
+                            (item.reviewed ? (
+                              <span className="text-xs text-gray-400">작성 완료</span>
+                            ) : (
+                              <button
+                                onClick={() =>
+                                  setReviewModal({
+                                    orderId: order.id,
+                                    productId: item.product_id,
+                                    productName: item.name,
+                                  })
+                                }
+                                className="text-xs font-bold text-venuea-gold underline"
+                              >
+                                리뷰 작성
+                              </button>
+                            ))}
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
             ))}
@@ -858,7 +919,7 @@ export default function Profile() {
       {/* 자체 인앱 환불/취소 모달 (6번 항목 반영) */}
       {refundModalOrder && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-xs z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl max-w-md w-full p-6 space-y-5 shadow-2xl border border-gray-100 animate-in fade-in zoom-in-95">
+          <div className="bg-white rounded-2xl max-w-md w-full max-h-[90vh] overflow-y-auto p-6 space-y-5 shadow-2xl border border-gray-100">
             <div className="flex justify-between items-start">
               <div className="flex items-center gap-2.5">
                 <div className="w-9 h-9 rounded-xl bg-venuea-gold/15 text-venuea-gold flex items-center justify-center">
@@ -879,6 +940,35 @@ export default function Profile() {
               >
                 <X size={20} />
               </button>
+            </div>
+
+            <div className="space-y-3">
+              <label className="block text-xs font-bold uppercase tracking-wider text-gray-500">
+                환불할 상품
+              </label>
+              <div className="space-y-2">
+                {(refundModalOrder.items || [])
+                  .filter((item: any) => !["refunded", "refund_requested"].includes(item.item_status || "normal"))
+                  .map((item: any) => (
+                    <label key={item.id} className="flex items-center gap-2 text-sm">
+                      <input
+                        type="checkbox"
+                        checked={refundItemIds.includes(item.id)}
+                        onChange={(e) =>
+                          setRefundItemIds((prev) =>
+                            e.target.checked ? [...prev, item.id] : prev.filter((id) => id !== item.id)
+                          )
+                        }
+                      />
+                      <span>
+                        {item.name} × {item.quantity}
+                      </span>
+                    </label>
+                  ))}
+              </div>
+              {(refundModalOrder.items || []).some((item: any) => item.item_status === "refunded") && (
+                <p className="text-xs text-red-600">이미 환불된 상품은 다시 선택할 수 없습니다.</p>
+              )}
             </div>
 
             <div className="space-y-3">
@@ -927,10 +1017,9 @@ export default function Profile() {
               </div>
             )}
 
-            {!["pending", "paid"].includes(refundModalOrder.status) &&
-              (refundReasonType === "단순 변심" || refundReasonType === "옵션 오선택") && (
+            {!["pending", "paid", "preparing"].includes(refundModalOrder.status) && (
                 <p className="text-[11px] text-amber-700 bg-amber-50 p-3 rounded-xl border border-amber-200">
-                  * 발송 이후 단순 변심/옵션 오선택에 의한 반품 시 왕복 배송비(5,000원)가 차감된 후 환불됩니다.
+                  배송이 시작된 주문입니다. 일부만 환불하면 반품비를 빼고, 남은 상품을 모두 환불하면 배송비와 반품비를 뺍니다. 블랙·더 블랙은 반품비가 없습니다.
                 </p>
               )}
 
@@ -1053,61 +1142,31 @@ export default function Profile() {
             </div>
 
             <div className="space-y-2 text-sm">
-              {(detailOrder.items || []).map((item: any, idx: number) => (
-                <label key={item.id || idx} className="flex justify-between gap-3 items-center">
-                  <span className="flex items-center gap-2">
-                    {["paid", "preparing", "shipping", "delivered", "completed"].includes(detailOrder.status) &&
-                      item.item_status !== "refunded" &&
-                      item.item_status !== "refund_requested" && (
-                        <input
-                          type="checkbox"
-                          checked={partialIds.includes(item.id)}
-                          onChange={(e) =>
-                            setPartialIds((prev) =>
-                              e.target.checked ? [...prev, item.id] : prev.filter((id) => id !== item.id)
-                            )
-                          }
-                        />
-                      )}
-                    {item.name} × {item.quantity}
-                    {item.item_status === "refund_requested" ? " · 반품요청" : ""}
-                    {item.item_status === "refunded" ? " · 환불됨" : ""}
-                  </span>
-                  <span className="font-bold">{formatPrice(item.price * item.quantity)}</span>
-                </label>
-              ))}
+              {(detailOrder.items || []).map((item: any, idx: number) => {
+                const refunded = item.item_status === "refunded";
+                return (
+                  <div key={item.id || idx} className="flex justify-between gap-3 items-center">
+                    <span className={refunded ? "line-through text-red-600" : ""}>
+                      {item.name} × {item.quantity}
+                      {item.item_status === "refund_requested" ? " 환불 요청" : ""}
+                      {refunded ? " 환불 완료" : ""}
+                    </span>
+                    <span className={cn("font-bold", refunded && "line-through text-red-600")}>
+                      {formatPrice(item.price * item.quantity)}
+                    </span>
+                  </div>
+                );
+              })}
             </div>
-            {partialIds.length > 0 && (
-              <button
-                type="button"
-                onClick={async () => {
-                  const res = await apiFetch(`/api/orders/${detailOrder.id}/partial-refund`, {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({
-                      reason: "부분 반품",
-                      items: (detailOrder.items || [])
-                        .filter((item: any) => partialIds.includes(item.id))
-                        .map((item: any) => ({ id: item.id, quantity: item.quantity })),
-                    }),
-                  });
-                  const data = await res.json().catch(() => ({}));
-                  if (!res.ok) return toast.error(data.error || "부분 반품을 접수하지 못했습니다.");
-                  toast.success("선택한 상품의 반품을 접수했습니다.");
-                  setPartialIds([]);
-                  setDetailOrder(null);
-                  loadProfileData();
-                }}
-                className="text-sm font-bold text-venuea-green"
-              >
-                선택한 상품 반품 요청
-              </button>
-            )}
 
             <div className="border-t border-black/10 pt-4 space-y-1.5 text-sm">
               <div className="flex justify-between">
                 <span className="text-gray-500">결제수단</span>
                 <span>{PAYMENT_LABELS[detailOrder.payment_method] || detailOrder.payment_method || "-"}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-gray-500">승인번호</span>
+                <span>{detailOrder.approve_no || "-"}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-gray-500">상품 금액</span>
@@ -1126,8 +1185,23 @@ export default function Profile() {
               </div>
               {Number(detailOrder.used_points || 0) > 0 && (
                 <div className="flex justify-between">
-                  <span className="text-gray-500">포인트</span>
+                  <span className="text-gray-500">할인 수단 · 포인트</span>
                   <span>-{Number(detailOrder.used_points).toLocaleString()}P</span>
+                </div>
+              )}
+              {detailOrder.coupon_name && (
+                <div className="flex justify-between gap-3">
+                  <span className="text-gray-500">할인 수단 · 쿠폰</span>
+                  <span className="text-right">
+                    {detailOrder.coupon_name}
+                    {detailOrder.coupon_type === "PERCENT"
+                      ? ` ${detailOrder.coupon_value}%`
+                      : detailOrder.coupon_type === "FIXED"
+                        ? ` ${Number(detailOrder.coupon_value || 0).toLocaleString()}원`
+                        : detailOrder.coupon_type === "SHIPPING"
+                          ? " 무료배송"
+                          : ""}
+                  </span>
                 </div>
               )}
               {(() => {

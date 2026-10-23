@@ -152,10 +152,10 @@ export default function ProductDetail() {
     : Math.max(0, Number(product.stock) || 0);
   const isPreorder = product.sale_mode === "preorder";
   const isReservedSale = product.sale_mode === "reserved";
+  const discountRate = Math.min(100, Math.max(0, Number(product.discount_rate) || 0));
   const finalPrice =
-    (product.discount_rate && product.discount_rate > 0
-      ? Math.round(product.price * (1 - product.discount_rate / 100))
-      : product.price) + (Number(selectedOption?.extra_price) || 0);
+    (discountRate > 0 ? Math.round(product.price * (1 - discountRate / 100)) : product.price) +
+    (Number(selectedOption?.extra_price) || 0);
   const gallery = [
     product.image_url,
     ...(Array.isArray(product.images) ? product.images.map((row: any) => row.image_url || row) : []),
@@ -271,11 +271,11 @@ export default function ProductDetail() {
           </div>
 
           <div className="flex items-baseline gap-3">
-            {product.discount_rate > 0 && (
-              <span className="text-lg font-bold text-[#C0392B]">{product.discount_rate}%</span>
+            {discountRate > 0 && (
+              <span className="text-lg font-bold text-[#C0392B]">{discountRate}%</span>
             )}
             <span className="text-2xl font-bold text-venuea-dark">{formatPrice(finalPrice)}</span>
-            {product.discount_rate > 0 && (
+            {discountRate > 0 && (
               <span className="text-sm text-venuea-muted line-through">
                 {formatPrice(product.price)}
               </span>

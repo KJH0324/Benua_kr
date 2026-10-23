@@ -15,14 +15,13 @@ export type CardProduct = {
 };
 
 export function salePrice(product: { price: number; discount_rate?: number }) {
-  const rate = Number(product.discount_rate) || 0;
+  const rate = Math.min(100, Math.max(0, Number(product.discount_rate) || 0));
   const base = Number(product.price) || 0;
-  if (rate > 0 && rate < 100) return Math.round(base * (1 - rate / 100));
-  return base;
+  return rate > 0 ? Math.round(base * (1 - rate / 100)) : base;
 }
 
 export default function ProductCard({ product }: { product: CardProduct }) {
-  const rate = Number(product.discount_rate) || 0;
+  const rate = Math.min(100, Math.max(0, Number(product.discount_rate) || 0));
   const finalPrice = salePrice(product);
 
   return (

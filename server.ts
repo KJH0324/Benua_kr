@@ -621,6 +621,9 @@ const runMigrations = () => {
   ensureColumn("order_items", "item_status", "TEXT DEFAULT 'normal'");
   ensureColumn("order_items", "refund_quantity", "INTEGER DEFAULT 0");
   ensureColumn("order_items", "option_id", "INTEGER");
+  ensureColumn("orders", "approve_no", "TEXT");
+  ensureColumn("orders", "refunded_total", "INTEGER DEFAULT 0");
+  ensureColumn("orders", "points_clawed", "INTEGER DEFAULT 0");
   ensureColumn("coupons", "valid_days", "INTEGER");
   ensureColumn("inbound_emails", "replied_at", "TEXT");
   ensureColumn("inbound_emails", "reply_body", "TEXT");
@@ -980,6 +983,29 @@ const clearAuthCookie = (res: express.Response, name: string) => {
   res.clearCookie(name, getCookieOptions());
 };
 
+const rememberOauthPending = (
+  res: express.Response,
+  provider: string,
+  socialId: string,
+  email: string
+) => {
+  if (!socialId || !email) return;
+  const token = jwt.sign({ provider, socialId, email }, JWT_SECRET, { expiresIn: "30m" });
+  res.cookie("oauth_pending", token, { ...getCookieOptions(), maxAge: 30 * 60 * 1000 });
+};
+
+const readOauthPending = (req: express.Request) => {
+  try {
+    return jwt.verify(String(req.cookies?.oauth_pending || ""), JWT_SECRET) as {
+      provider?: string;
+      socialId?: string;
+      email?: string;
+    };
+  } catch {
+    return null;
+  }
+};
+
 // Dual Token Reader (Bearer Header for Mobile App + Cookie for Web)
 const extractToken = (req: express.Request, cookieName: "user_token" | "admin_token"): string | null => {
   const authHeader = req.headers.authorization;
@@ -1212,27 +1238,128 @@ const completeOrderTx = db.transaction((orderId: number | string) => {
   return { alreadyCompleted: false, earned };
 });
 
+const orderPhase = (order: any) => {
+  const status =
+    order.status === "refund_requested" && order.resume_status ? order.resume_status : order.status;
+  return ["pending", "paid", "preparing"].includes(status) ? "before" : "after";
+};
+
+const buyerTier = (order: any) => {
+  if (!order?.user_id) return "";
+  const user = db.prepare("SELECT tier FROM users WHERE id = ?").get(order.user_id) as any;
+  return String(user?.tier || "").toUpperCase();
+};
+
+const quoteCustomerRefund = (order: any, items: any[], selected: any[], waive = false) => {
+  const goods = items.reduce((sum, item) => sum + Number(item.price) * Number(item.quantity), 0);
+  const refundGoods = selected.reduce((sum, item) => {
+    const qty = Math.min(
+      Number(item.quantity) || 0,
+      Number(item.refund_quantity) > 0 ? Number(item.refund_quantity) : Number(item.quantity) || 0
+    );
+    return sum + Number(item.price) * qty;
+  }, 0);
+  const couponDiscount = Math.max(
+    0,
+    goods + Number(order.shipping_fee || 0) - Number(order.used_points || 0) - Number(order.total_amount || 0)
+  );
+  const ratio = goods > 0 ? refundGoods / goods : 0;
+  const net = Math.max(0, Math.round(refundGoods - couponDiscount * ratio - Number(order.used_points || 0) * ratio));
+  const openItems = items.filter((item) => item.item_status !== "refunded");
+  const allRemaining =
+    openItems.length > 0 &&
+    openItems.every((item) =>
+      selected.some(
+        (pick) =>
+          Number(pick.id) === Number(item.id) &&
+          (Number(pick.refund_quantity) > 0 ? Number(pick.refund_quantity) : Number(pick.quantity)) >=
+            Number(item.quantity)
+      )
+    );
+  const already = Number(order.refunded_total) || 0;
+  const cap = Math.max(0, Number(order.total_amount) - already);
+  const tier = buyerTier(order);
+  const returnFee = tier === "BLACK" || tier === "THE_BLACK" ? 0 : shopSetting("return_fee", 5000);
+  const phase = orderPhase(order);
+  let amount = net;
+  if (waive) {
+    amount = allRemaining ? cap : Math.min(cap, net + Number(order.shipping_fee || 0));
+  } else if (phase === "before") {
+    amount = allRemaining ? cap : net;
+  } else if (allRemaining) {
+    amount = Math.max(0, Number(order.total_amount) - Number(order.shipping_fee || 0) - returnFee - already);
+  } else {
+    amount = Math.max(0, net - returnFee);
+  }
+  return {
+    amount: Math.min(cap, Math.max(0, Math.round(amount))),
+    allRemaining,
+    phase,
+    refundGoods,
+    goods,
+  };
+};
+
+const returnApprovedHtml = (order: any, names: string[]) => {
+  const list = names.map((name) => `<li style="margin:0 0 6px;">${escapeHtml(name)}</li>`).join("");
+  return `<!DOCTYPE html>
+<html lang="ko"><body style="margin:0;padding:0;background:#faf2e7;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#faf2e7;padding:36px 12px;">
+<tr><td align="center">
+<table role="presentation" width="560" cellpadding="0" cellspacing="0" style="width:100%;max-width:560px;background:#fffdf9;border-radius:24px;">
+<tr><td style="padding:36px 28px 8px;text-align:center;font-family:Georgia,serif;font-size:22px;letter-spacing:0.42em;color:#463221;">BENUA</td></tr>
+<tr><td style="padding:12px 36px 0;text-align:center;font-family:'Noto Sans KR',Arial,sans-serif;">
+<p style="margin:0;font-size:12px;letter-spacing:0.18em;color:#385c37;">RETURN</p>
+<h1 style="margin:14px 0 0;font-size:24px;line-height:1.4;color:#463221;">반품 요청이 승인되었습니다</h1>
+<p style="margin:16px 0 0;font-size:14px;line-height:1.7;color:#5c4636;">${escapeHtml(order.customer_name || "")}님, 주문 ${escapeHtml(order.order_number)}의 반품을 확인했습니다. 아래 상품을 보내 주세요.</p>
+</td></tr>
+<tr><td style="padding:22px 36px 0;font-family:'Noto Sans KR',Arial,sans-serif;font-size:14px;color:#463221;">
+<ul style="margin:0;padding-left:18px;">${list}</ul>
+</td></tr>
+<tr><td style="padding:22px 36px 36px;font-family:'Noto Sans KR',Arial,sans-serif;">
+<div style="background:#faf2e7;border-radius:16px;padding:18px 20px;color:#463221;font-size:14px;line-height:1.7;">
+<p style="margin:0 0 8px;font-weight:700;">반품 보내실 곳</p>
+<p style="margin:0;">인천광역시 연수구 새말로 154, 307동 602호 (베뉴아)</p>
+<p style="margin:8px 0 0;">받는 사람: 베뉴아</p>
+<p style="margin:8px 0 0;">문의: support@benua.shop</p>
+<p style="margin:12px 0 0;font-size:13px;color:#5c4636;">택배는 착불이 아닙니다. 선불로 보내 주세요. 상품이 도착하면 환불 금액을 결제수단으로 돌려드립니다.</p>
+</div>
+</td></tr>
+</table>
+</td></tr></table>
+</body></html>`;
+};
+
+const sendReturnGuide = (order: any, names: string[]) => {
+  if (!order?.customer_email || names.length === 0) return;
+  sendMail(
+    order.customer_email,
+    "반품 요청이 승인되었습니다",
+    returnApprovedHtml(order, names),
+    "SUPPORT",
+    true,
+    "raw"
+  ).catch(() => {});
+};
+
 const refundOrderTx = db.transaction(
-  (orderId: number | string, refundAmount?: number, reason?: string) => {
+  (orderId: number | string, refundAmount?: number, reason?: string, onlyIds?: number[]) => {
     const order = db.prepare("SELECT * FROM orders WHERE id = ?").get(orderId) as any;
     if (!order) throw new Error("주문을 찾을 수 없습니다.");
     if (order.status === "refunded") return order;
 
     let finalRefundAmount = refundAmount !== undefined ? refundAmount : order.total_amount;
     const finalReason = reason !== undefined ? reason : order.refund_reason;
-
     const items = db.prepare("SELECT * FROM order_items WHERE order_id = ?").all(orderId) as any[];
     const requested = items.filter((item) => item.item_status === "refund_requested");
-    const coversAll =
-      items.length > 0 &&
-      items.every(
-        (item) =>
-          item.item_status === "refund_requested" &&
-          Number(item.refund_quantity || item.quantity) >= Number(item.quantity)
-      );
-    const isPartial = requested.length > 0 && !coversAll;
+    const only = Array.isArray(onlyIds) ? onlyIds.map((id) => Number(id)) : [];
+    const scope = only.length
+      ? items.filter((item) => only.includes(Number(item.id)) && item.item_status !== "refunded")
+      : requested.length
+        ? requested
+        : items.filter((item) => item.item_status !== "refunded");
     const restoreItem = (item: any, qty: number) => {
-      if (!qty) return;
+      if (!qty || item.item_status === "refunded") return;
       if (item.product_id) {
         db.prepare("UPDATE products SET stock = stock + ? WHERE id = ?").run(qty, item.product_id);
       }
@@ -1241,97 +1368,78 @@ const refundOrderTx = db.transaction(
       }
     };
 
-    if (isPartial) {
-      let goods = 0;
-      let refundGoods = 0;
-      for (const item of items) goods += Number(item.price) * Number(item.quantity);
-      for (const item of requested) {
-        const qty = Math.min(Number(item.quantity) || 0, Number(item.refund_quantity) || Number(item.quantity) || 0);
-        refundGoods += Number(item.price) * qty;
-        restoreItem(item, qty);
-        db.prepare("UPDATE order_items SET item_status = 'refunded', refund_quantity = ? WHERE id = ?").run(
-          qty,
-          item.id
+    let goods = 0;
+    let refundGoods = 0;
+    for (const item of items) goods += Number(item.price) * Number(item.quantity);
+    for (const item of scope) {
+      const qty = Math.min(
+        Number(item.quantity) || 0,
+        Number(item.refund_quantity) > 0 ? Number(item.refund_quantity) : Number(item.quantity) || 0
+      );
+      refundGoods += Number(item.price) * qty;
+      restoreItem(item, qty);
+      db.prepare("UPDATE order_items SET item_status = 'refunded', refund_quantity = ? WHERE id = ?").run(qty, item.id);
+      item.item_status = "refunded";
+    }
+    const allRefunded = items.length > 0 && items.every((item) => item.item_status === "refunded");
+    const stillRequested = items.some((item) => item.item_status === "refund_requested");
+
+    if (order.user_id && Number(order.earned_points) > 0 && goods > 0 && refundGoods > 0) {
+      const alreadyClawed = Number(order.points_clawed) || 0;
+      const slice = Math.round(Number(order.earned_points) * (refundGoods / goods));
+      const clawTarget = Math.max(0, Math.min(Number(order.earned_points) - alreadyClawed, slice));
+      const holder = db.prepare("SELECT points FROM users WHERE id = ?").get(order.user_id) as any;
+      const have = Number(holder?.points) || 0;
+      const claw = Math.min(have, clawTarget);
+      const shortfall = clawTarget - claw;
+      if (claw > 0) {
+        db.prepare("UPDATE users SET points = points - ? WHERE id = ?").run(claw, order.user_id);
+        db.prepare("INSERT INTO point_history (user_id, amount, reason, type) VALUES (?, ?, ?, 'USED')").run(
+          order.user_id,
+          -claw,
+          `주문(${order.order_number}) 환불 적립금 회수`
+        );
+        db.prepare("UPDATE orders SET points_clawed = COALESCE(points_clawed, 0) + ? WHERE id = ?").run(claw, orderId);
+      }
+      if (shortfall > 0) finalRefundAmount = Math.max(0, Number(finalRefundAmount) - shortfall);
+    }
+
+    if (allRefunded && order.user_id) {
+      if (order.used_points > 0) {
+        db.prepare("UPDATE users SET points = points + ? WHERE id = ?").run(order.used_points, order.user_id);
+        db.prepare("INSERT INTO point_history (user_id, amount, reason, type) VALUES (?, ?, ?, 'EARNED')").run(
+          order.user_id,
+          order.used_points,
+          `주문(${order.order_number}) 환불 포인트 반환`
         );
       }
-      if (order.user_id && order.earned_points > 0 && goods > 0) {
-        const clawTarget = Math.round(Number(order.earned_points) * (refundGoods / goods));
-        const holder = db.prepare("SELECT points FROM users WHERE id = ?").get(order.user_id) as any;
-        const have = Number(holder?.points) || 0;
-        const claw = Math.min(have, clawTarget);
-        const shortfall = clawTarget - claw;
-        if (claw > 0) {
-          db.prepare("UPDATE users SET points = points - ? WHERE id = ?").run(claw, order.user_id);
-          db.prepare("INSERT INTO point_history (user_id, amount, reason, type) VALUES (?, ?, ?, 'USED')").run(
-            order.user_id,
-            -claw,
-            `주문(${order.order_number}) 부분환불 적립금 회수`
-          );
-        }
-        if (shortfall > 0) finalRefundAmount = Math.max(0, Number(finalRefundAmount) - shortfall);
-      }
-      const nextStatus =
-        order.resume_status && !["refund_requested", "refunded"].includes(order.resume_status)
-          ? order.resume_status
-          : "paid";
-      db.prepare(
-        "UPDATE orders SET status = ?, refund_amount = ?, refund_reason = ?, status_updated_at = CURRENT_TIMESTAMP WHERE id = ?"
-      ).run(nextStatus, finalRefundAmount, finalReason, orderId);
-      if (order.user_id) updateUserTierStatus(order.user_id);
-      return order;
-    }
-
-    db.prepare(
-      "UPDATE orders SET status = 'refunded', vbank_account = NULL, refund_amount = ?, refund_reason = ?, status_updated_at = CURRENT_TIMESTAMP WHERE id = ?"
-    ).run(finalRefundAmount, finalReason, orderId);
-
-    for (const item of items) {
-      const qty =
-        item.item_status === "refund_requested" && Number(item.refund_quantity) > 0
-          ? Number(item.refund_quantity)
-          : Number(item.quantity);
-      restoreItem(item, qty);
-      db.prepare("UPDATE order_items SET item_status = 'refunded' WHERE id = ?").run(item.id);
-    }
-
-    if (order.user_id) {
-      if (order.used_points > 0) {
-        db.prepare("UPDATE users SET points = points + ? WHERE id = ?").run(
-          order.used_points,
+      if (order.used_coupon_id) {
+        db.prepare("UPDATE user_coupons SET is_used = 0, used_at = NULL WHERE id = ? AND user_id = ?").run(
+          order.used_coupon_id,
           order.user_id
         );
-        db.prepare(
-          "INSERT INTO point_history (user_id, amount, reason, type) VALUES (?, ?, ?, 'EARNED')"
-        ).run(order.user_id, order.used_points, `주문(${order.order_number}) 환불 포인트 반환`);
       }
-
-      if (order.earned_points > 0) {
-        const holder = db.prepare("SELECT points FROM users WHERE id = ?").get(order.user_id) as any;
-        const have = Number(holder?.points) || 0;
-        const claw = Math.min(have, order.earned_points);
-        const shortfall = order.earned_points - claw;
-        if (claw > 0) {
-          db.prepare("UPDATE users SET points = points - ? WHERE id = ?").run(claw, order.user_id);
-          db.prepare(
-            "INSERT INTO point_history (user_id, amount, reason, type) VALUES (?, ?, ?, 'USED')"
-          ).run(order.user_id, -claw, `주문(${order.order_number}) 환불 적립금 회수`);
-        }
-        if (shortfall > 0) {
-          finalRefundAmount = Math.max(0, finalRefundAmount - shortfall);
-          db.prepare("UPDATE orders SET refund_amount = ? WHERE id = ?").run(finalRefundAmount, orderId);
-        }
-      }
-
-      if (order.used_coupon_id) {
-        db.prepare(
-          "UPDATE user_coupons SET is_used = 0, used_at = NULL WHERE id = ? AND user_id = ?"
-        ).run(order.used_coupon_id, order.user_id);
-      }
-
-      updateUserTierStatus(order.user_id);
     }
 
-    return order;
+    const nextStatus = allRefunded
+      ? "refunded"
+      : stillRequested
+        ? "refund_requested"
+        : order.resume_status && !["refund_requested", "refunded"].includes(order.resume_status)
+          ? order.resume_status
+          : order.status === "refund_requested"
+            ? "paid"
+            : order.status;
+    db.prepare(
+      `UPDATE orders
+       SET status = ?, refund_amount = ?, refund_reason = ?,
+           refunded_total = COALESCE(refunded_total, 0) + ?,
+           vbank_account = CASE WHEN ? = 'refunded' THEN NULL ELSE vbank_account END,
+           status_updated_at = CURRENT_TIMESTAMP
+       WHERE id = ?`
+    ).run(nextStatus, finalRefundAmount, finalReason, Math.max(0, Number(finalRefundAmount) || 0), nextStatus, orderId);
+    if (order.user_id) updateUserTierStatus(order.user_id);
+    return { ...order, status: nextStatus, refund_amount: finalRefundAmount };
   }
 );
 
@@ -1992,12 +2100,18 @@ async function startServer() {
       return res.status(400).json({ error: "필수 입력 항목을 모두 입력해주세요." });
     }
 
-    const cleanEmail = email.trim();
+    const cleanEmail = String(email || "").trim();
     const inputCode = String(verification_code || VerificationCode || "").trim();
+    const pending = readOauthPending(req);
+    const pendingMatches =
+      pending?.email && pending.email.toLowerCase() === cleanEmail.toLowerCase() ? pending : null;
+    const linkedGoogle = google_id || (pendingMatches?.provider === "google" ? pendingMatches.socialId : null);
+    const linkedNaver = naver_id || (pendingMatches?.provider === "naver" ? pendingMatches.socialId : null);
+    const linkedKakao = kakao_id || (pendingMatches?.provider === "kakao" ? pendingMatches.socialId : null);
 
     try {
       // 소셜 연동 가입이 아닌 일반 가입 시 이메일 인증코드 확인
-      if (!google_id && !naver_id && !kakao_id) {
+      if (!linkedGoogle && !linkedNaver && !linkedKakao) {
         if (!codeMatches(cleanEmail, inputCode)) {
           return res.status(400).json({ error: "이메일 인증을 먼저 완료해주세요." });
         }
@@ -2017,9 +2131,9 @@ async function startServer() {
           hashedPassword,
           name.trim(),
           phone || "",
-          google_id || null,
-          naver_id || null,
-          kakao_id || null,
+          linkedGoogle || null,
+          linkedNaver || null,
+          linkedKakao || null,
           isSubscribed
         );
 
@@ -2027,6 +2141,7 @@ async function startServer() {
       db.prepare("DELETE FROM email_verification_codes WHERE email = ?").run(cleanEmail);
 
       const userId = Number(info.lastInsertRowid);
+      clearAuthCookie(res, "oauth_pending");
       const expiresAt = new Date();
       expiresAt.setDate(expiresAt.getDate() + 30);
       db.prepare("INSERT INTO user_coupons (user_id, coupon_id, expires_at) VALUES (?, ?, ?)").run(
@@ -2315,29 +2430,29 @@ async function startServer() {
       if (existingToken) {
         try {
           const decoded = jwt.verify(existingToken, JWT_SECRET) as any;
-          db.prepare("UPDATE users SET google_id = ? WHERE id = ?").run(userData.id, decoded.id);
-          return res.send(
-            `<html><body><script>if(window.opener){window.opener.postMessage({type:'OAUTH_LINK_SUCCESS',provider:'google'}, '${oauthMessageOrigin(req)}');window.close();}</script></body></html>`
-          );
+          db.prepare("UPDATE users SET google_id = ? WHERE id = ?").run(userData.id || userData.sub, decoded.id);
+          return res.redirect("/profile");
         } catch {}
       }
 
-      let user = db.prepare("SELECT * FROM users WHERE google_id = ?").get(userData.id) as any;
+      let user = db.prepare("SELECT * FROM users WHERE google_id = ?").get(userData.id || userData.sub) as any;
       if (!user && userData.email) {
         user = db.prepare("SELECT * FROM users WHERE email = ?").get(userData.email) as any;
         if (user) {
-          db.prepare("UPDATE users SET google_id = ? WHERE id = ?").run(userData.id, user.id);
+          db.prepare("UPDATE users SET google_id = ? WHERE id = ?").run(userData.id || userData.sub, user.id);
         }
       }
 
       if (!user) {
+        const googleId = String(userData.id || userData.sub || "");
+        rememberOauthPending(res, "google", googleId, String(userData.email || ""));
         return res.send(`
           <html><body><script>
             if (window.opener) {
-              window.opener.postMessage({ type: 'OAUTH_ERROR', error: 'not_registered', email: '${userData.email}', socialId: '${userData.id}', provider: 'google' }, '${oauthMessageOrigin(req)}');
+              window.opener.postMessage({ type: 'OAUTH_ERROR', error: 'not_registered', email: '${String(userData.email || "").replace(/'/g, "")}', socialId: '${googleId.replace(/'/g, "")}', provider: 'google' }, '${oauthMessageOrigin(req)}');
               window.close();
             } else {
-              window.location.href = '/login?error=not_registered&email=${encodeURIComponent(userData.email)}&socialId=${encodeURIComponent(userData.id)}&provider=google';
+              window.location.href = '/login?error=not_registered&email=${encodeURIComponent(String(userData.email || ""))}&socialId=${encodeURIComponent(googleId)}&provider=google';
             }
           </script></body></html>
         `);
@@ -2406,7 +2521,7 @@ async function startServer() {
           const decoded = jwt.verify(existingToken, JWT_SECRET) as any;
           db.prepare("UPDATE users SET naver_id = ? WHERE id = ?").run(socialId, decoded.id);
           return res.send(
-            `<html><body><script>if(window.opener){window.opener.postMessage({type:'OAUTH_LINK_SUCCESS',provider:'naver'}, '${oauthMessageOrigin(req)}');window.close();}</script></body></html>`
+            `<html><body><script>if(window.opener){window.opener.postMessage({type:'OAUTH_LINK_SUCCESS',provider:'naver'}, '${oauthMessageOrigin(req)}');window.close();}else{window.location.href='/profile';}</script></body></html>`
           );
         } catch {}
       }
@@ -2420,13 +2535,16 @@ async function startServer() {
       }
 
       if (!user) {
+        rememberOauthPending(res, "naver", String(socialId || ""), String(email || ""));
+        const safeId = String(socialId || "").replace(/'/g, "");
+        const safeEmail = String(email || "").replace(/'/g, "");
         return res.send(`
           <html><body><script>
             if (window.opener) {
-              window.opener.postMessage({ type: 'OAUTH_ERROR', error: 'not_registered', email: '${email}', socialId: '${socialId}', provider: 'naver' }, '${oauthMessageOrigin(req)}');
+              window.opener.postMessage({ type: 'OAUTH_ERROR', error: 'not_registered', email: '${safeEmail}', socialId: '${safeId}', provider: 'naver' }, '${oauthMessageOrigin(req)}');
               window.close();
             } else {
-              window.location.href = '/login?error=not_registered&email=${encodeURIComponent(email)}&socialId=${encodeURIComponent(socialId)}&provider=naver';
+              window.location.href = '/login?error=not_registered&email=${encodeURIComponent(String(email || ""))}&socialId=${encodeURIComponent(String(socialId || ""))}&provider=naver';
             }
           </script></body></html>
         `);
@@ -2505,7 +2623,7 @@ async function startServer() {
           const decoded = jwt.verify(existingToken, JWT_SECRET) as any;
           db.prepare("UPDATE users SET kakao_id = ? WHERE id = ?").run(socialId, decoded.id);
           return res.send(
-            `<html><body><script>if(window.opener){window.opener.postMessage({type:'OAUTH_LINK_SUCCESS',provider:'kakao'}, '${oauthMessageOrigin(req)}');window.close();}</script></body></html>`
+            `<html><body><script>if(window.opener){window.opener.postMessage({type:'OAUTH_LINK_SUCCESS',provider:'kakao'}, '${oauthMessageOrigin(req)}');window.close();}else{window.location.href='/profile';}</script></body></html>`
           );
         } catch {}
       }
@@ -2519,13 +2637,16 @@ async function startServer() {
       }
 
       if (!user) {
+        rememberOauthPending(res, "kakao", String(socialId || ""), String(email || ""));
+        const safeId = String(socialId || "").replace(/'/g, "");
+        const safeEmail = String(email || "").replace(/'/g, "");
         return res.send(`
           <html><body><script>
             if (window.opener) {
-              window.opener.postMessage({ type: 'OAUTH_ERROR', error: 'not_registered', email: '${email}', socialId: '${socialId}', provider: 'kakao' }, '${oauthMessageOrigin(req)}');
+              window.opener.postMessage({ type: 'OAUTH_ERROR', error: 'not_registered', email: '${safeEmail}', socialId: '${safeId}', provider: 'kakao' }, '${oauthMessageOrigin(req)}');
               window.close();
             } else {
-              window.location.href = '/login?error=not_registered&email=${encodeURIComponent(email)}&socialId=${encodeURIComponent(socialId)}&provider=kakao';
+              window.location.href = '/login?error=not_registered&email=${encodeURIComponent(String(email || ""))}&socialId=${encodeURIComponent(String(socialId || ""))}&provider=kakao';
             }
           </script></body></html>
         `);
@@ -2845,7 +2966,7 @@ async function startServer() {
             dimensions || "",
             origin || "",
             manufacturer || "",
-            parseInt(discount_rate, 10) || 0,
+            Math.min(100, Math.max(0, parseInt(discount_rate, 10) || 0)),
             show_on_main === "true" || show_on_main === "1" || show_on_main === 1 ? 1 : 0,
             normalizeSaleMode(sale_mode)
           );
@@ -2913,7 +3034,7 @@ async function startServer() {
           dimensions || "",
           origin || "",
           manufacturer || "",
-          parseInt(discount_rate, 10) || 0,
+          Math.min(100, Math.max(0, parseInt(discount_rate, 10) || 0)),
           show_on_main === "true" || show_on_main === "1" || show_on_main === 1 ? 1 : 0,
           normalizeSaleMode(sale_mode),
           id
@@ -3110,7 +3231,7 @@ async function startServer() {
             item.dimensions || "",
             item.origin || "",
             item.manufacturer || "",
-            Number(item.discount_rate) || 0,
+            Math.min(100, Math.max(0, Number(item.discount_rate) || 0)),
             item.show_on_main ? 1 : 0
           );
         }
@@ -3138,6 +3259,9 @@ async function startServer() {
   app.post("/api/admin/coupons", authenticateAdmin, (req: any, res) => {
     const { name, code, type, value, min_order_amount, max_discount_amount, valid_days } = req.body;
     try {
+      const couponType = type || "PERCENT";
+      let nextValue = Number(value) || 0;
+      if (couponType === "PERCENT") nextValue = Math.min(100, Math.max(0, nextValue));
       const info = db
         .prepare(
           "INSERT INTO coupons (name, code, type, value, min_order_amount, max_discount_amount, valid_days) VALUES (?, ?, ?, ?, ?, ?, ?)"
@@ -3145,8 +3269,8 @@ async function startServer() {
         .run(
           name,
           code,
-          type || "PERCENT",
-          Number(value) || 0,
+          couponType,
+          nextValue,
           Number(min_order_amount) || 0,
           Number(max_discount_amount) || 0,
           Number(valid_days) || 0
@@ -3356,10 +3480,9 @@ async function startServer() {
   };
 
   const unitPrice = (product: any) => {
-    const rate = Number(product.discount_rate) || 0;
+    const rate = Math.min(100, Math.max(0, Number(product.discount_rate) || 0));
     const base = Number(product.price) || 0;
-    if (rate > 0 && rate < 100) return Math.round(base * (1 - rate / 100));
-    return base;
+    return rate > 0 ? Math.round(base * (1 - rate / 100)) : base;
   };
 
   const quoteOrder = (
@@ -3646,6 +3769,10 @@ async function startServer() {
       if (tossData.secret) {
         db.prepare("UPDATE orders SET toss_secret = ? WHERE id = ?").run(hashToken(String(tossData.secret)), order.id);
       }
+      const approveNo = String(tossData.card?.approveNo || tossData.easyPay?.approveNo || "");
+      if (approveNo) {
+        db.prepare("UPDATE orders SET approve_no = ? WHERE id = ?").run(approveNo, order.id);
+      }
 
       const updatedOrder = finalizeOrderPaymentTx(
         order.id,
@@ -3796,6 +3923,18 @@ async function startServer() {
       );
       for (const order of orders) {
         order.items = getItems.all(req.user.id, order.id);
+        const coupon = order.used_coupon_id
+          ? (db
+              .prepare(
+                `SELECT c.name, c.type, c.value, c.max_discount_amount
+                 FROM user_coupons uc JOIN coupons c ON c.id = uc.coupon_id WHERE uc.id = ?`
+              )
+              .get(order.used_coupon_id) as any)
+          : null;
+        order.coupon_name = coupon?.name || "";
+        order.coupon_type = coupon?.type || "";
+        order.coupon_value = coupon?.value || 0;
+        order.coupon_max_discount = coupon?.max_discount_amount || 0;
         Object.assign(order, presentOrder(order));
         delete order.toss_secret;
       }
@@ -3990,45 +4129,50 @@ async function startServer() {
 
   app.post("/api/orders/:id/refund-request", authenticateUser, async (req: any, res) => {
     const { id } = req.params;
-    const { reason } = req.body;
+    const reason = String(req.body?.reason || "").trim();
+    if (!reason) return res.status(400).json({ error: "환불 사유를 입력해주세요." });
     try {
       const order = db
         .prepare("SELECT * FROM orders WHERE id = ? AND user_id = ?")
         .get(id, req.user.id) as any;
       if (!order) return res.status(404).json({ error: "주문을 찾을 수 없습니다." });
-      if (["refund_requested", "refunded"].includes(order.status)) {
-        return res.status(400).json({ error: "이미 환불 요청 또는 처리된 주문입니다." });
+      if (["refunded", "cancelled"].includes(order.status)) {
+        return res.status(400).json({ error: "이미 환불된 주문입니다." });
       }
-
-      const beforeShipping = ["pending", "paid"].includes(order.status);
-      if (beforeShipping) {
-        await cancelTossPaymentIfNeeded(order, reason || "발송 전 고객 주문 취소");
-        refundOrderTx(order.id, order.total_amount, reason || "발송 전 주문 취소");
-        return res.json({
-          success: true,
-          status: "refunded",
-          refund_amount: order.total_amount,
-        });
+      const items = db.prepare("SELECT * FROM order_items WHERE order_id = ?").all(order.id) as any[];
+      const openItems = items.filter((item) => !["refunded", "refund_requested"].includes(item.item_status || "normal"));
+      const picks = Array.isArray(req.body?.items) ? req.body.items : [];
+      const selected = (picks.length ? openItems.filter((item) => picks.some((pick: any) => Number(pick.id) === Number(item.id))) : openItems).map(
+        (item) => {
+          const pick = picks.find((row: any) => Number(row.id) === Number(item.id));
+          return {
+            ...item,
+            refund_quantity: Math.min(Number(item.quantity) || 0, Number(pick?.quantity) || Number(item.quantity) || 0),
+          };
+        }
+      );
+      if (selected.length === 0) return res.status(400).json({ error: "환불할 상품을 선택해주세요." });
+      const quote = quoteCustomerRefund(order, items, selected, false);
+      if (quote.amount <= 0 && Number(order.total_amount) > 0) {
+        return res.status(400).json({ error: "환불할 금액이 없습니다." });
       }
-
-      let refundAmount = order.total_amount;
-      const simple = reason === "단순 변심" || reason === "옵션 오선택";
-      if (simple) {
-        const user = order.user_id
-          ? (db.prepare("SELECT tier FROM users WHERE id = ?").get(order.user_id) as any)
-          : null;
-        const tier = String(user?.tier || "").toUpperCase();
-        const fee = shopSetting("shipping_fee", 3000);
-        const deduction =
-          tier === "BLACK" || tier === "THE_BLACK" ? 0 : Number(order.shipping_fee) > 0 ? fee : fee * 2;
-        refundAmount = Math.max(0, order.total_amount - deduction);
+      const mark = db.prepare(
+        "UPDATE order_items SET item_status = 'refund_requested', refund_quantity = ? WHERE id = ?"
+      );
+      for (const item of selected) mark.run(item.refund_quantity || item.quantity, item.id);
+      if (order.status !== "refund_requested") {
+        db.prepare("UPDATE orders SET resume_status = ? WHERE id = ?").run(order.status, order.id);
       }
-
+      const fresh = db.prepare("SELECT * FROM orders WHERE id = ?").get(order.id) as any;
+      if (quote.phase === "before") {
+        await cancelTossPaymentIfNeeded(fresh, reason, quote.amount);
+        const done = refundOrderTx(order.id, quote.amount, reason);
+        return res.json({ success: true, status: done.status, refund_amount: quote.amount });
+      }
       db.prepare(
-        "UPDATE orders SET status = 'refund_requested', vbank_account = NULL, refund_reason = ?, refund_amount = ?, status_updated_at = CURRENT_TIMESTAMP WHERE id = ?"
-      ).run(reason, refundAmount, id);
-
-      res.json({ success: true, status: "refund_requested", refund_amount: refundAmount });
+        "UPDATE orders SET status = 'refund_requested', refund_reason = ?, refund_amount = ?, status_updated_at = CURRENT_TIMESTAMP WHERE id = ?"
+      ).run(reason, quote.amount, order.id);
+      res.json({ success: true, status: "refund_requested", refund_amount: quote.amount });
     } catch (err: any) {
       res.status(500).json({ error: err.message || "환불 요청 처리에 실패했습니다." });
     }
@@ -4041,6 +4185,17 @@ async function startServer() {
       const getItems = db.prepare("SELECT * FROM order_items WHERE order_id = ?");
       for (const order of orders) {
         order.items = getItems.all(order.id);
+        const coupon = order.used_coupon_id
+          ? (db
+              .prepare(
+                `SELECT c.name, c.type, c.value
+                 FROM user_coupons uc JOIN coupons c ON c.id = uc.coupon_id WHERE uc.id = ?`
+              )
+              .get(order.used_coupon_id) as any)
+          : null;
+        order.coupon_name = coupon?.name || "";
+        order.coupon_type = coupon?.type || "";
+        order.coupon_value = coupon?.value || 0;
         Object.assign(order, presentOrder(order));
         delete order.toss_secret;
       }
@@ -4128,22 +4283,96 @@ async function startServer() {
   });
 
   app.post("/api/admin/orders/:id/claim", authenticateOperator, async (req: any, res) => {
-    const { action } = req.body;
+    const { action, waive_fees, pickup } = req.body || {};
     const { id } = req.params;
     try {
       const order = db.prepare("SELECT * FROM orders WHERE id = ?").get(id) as any;
       if (!order) return res.status(404).json({ error: "주문을 찾을 수 없습니다." });
+      const items = db.prepare("SELECT * FROM order_items WHERE order_id = ?").all(order.id) as any[];
+      const requested = items.filter((item) => item.item_status === "refund_requested");
 
       if (action === "approve") {
-        await cancelTossPaymentIfNeeded(order, order.refund_reason || "클레임 환불 승인", order.refund_amount || undefined);
-        refundOrderTx(id);
+        if (requested.length === 0) {
+          return res.status(400).json({ error: "환불 요청된 상품이 없습니다." });
+        }
+        const selected = requested.map((item) => ({
+          ...item,
+          refund_quantity: Number(item.refund_quantity) || Number(item.quantity),
+        }));
+        const quote = quoteCustomerRefund(order, items, selected, Boolean(waive_fees));
+        const amount = selected.length ? quote.amount : Number(order.refund_amount) || Number(order.total_amount);
+        await cancelTossPaymentIfNeeded(order, order.refund_reason || "클레임 환불 승인", amount);
+        refundOrderTx(id, amount, order.refund_reason || "클레임 환불 승인");
+        if (pickup && orderPhase(order) === "after") {
+          sendReturnGuide(
+            order,
+            selected.map((item) => `${item.name} × ${item.refund_quantity || item.quantity}`)
+          );
+        }
       } else {
-        completeOrderTx(id);
+        db.prepare(
+          "UPDATE order_items SET item_status = 'normal', refund_quantity = 0 WHERE order_id = ? AND item_status = 'refund_requested'"
+        ).run(id);
+        const resume =
+          order.resume_status && !["refund_requested", "refunded"].includes(order.resume_status)
+            ? order.resume_status
+            : "paid";
+        db.prepare(
+          "UPDATE orders SET status = ?, refund_amount = 0, refund_reason = NULL, status_updated_at = CURRENT_TIMESTAMP WHERE id = ?"
+        ).run(resume, id);
       }
       logAdminAction(req, "PROCESS_CLAIM", "orders", Number(id), `Claim ${action}`);
       res.json({ success: true });
     } catch (err: any) {
       res.status(500).json({ error: err.message || "클레임 처리에 실패했습니다." });
+    }
+  });
+
+  app.post("/api/admin/orders/:id/partial-refund", authenticateOperator, async (req: any, res) => {
+    const picks = Array.isArray(req.body?.items) ? req.body.items : [];
+    const reason = String(req.body?.reason || "관리자 부분 취소").trim();
+    try {
+      const order = db.prepare("SELECT * FROM orders WHERE id = ?").get(req.params.id) as any;
+      if (!order) return res.status(404).json({ error: "주문을 찾을 수 없습니다." });
+      if (["refunded", "cancelled", "pending"].includes(order.status)) {
+        return res.status(400).json({ error: "이 주문은 부분 취소할 수 없습니다." });
+      }
+      const items = db.prepare("SELECT * FROM order_items WHERE order_id = ?").all(order.id) as any[];
+      const selected = items
+        .filter((item) => item.item_status !== "refunded" && picks.some((pick: any) => Number(pick.id) === Number(item.id)))
+        .map((item) => {
+          const pick = picks.find((row: any) => Number(row.id) === Number(item.id));
+          return {
+            ...item,
+            refund_quantity: Math.min(Number(item.quantity) || 0, Number(pick?.quantity) || Number(item.quantity) || 0),
+          };
+        });
+      if (selected.length === 0) return res.status(400).json({ error: "취소할 상품을 선택해주세요." });
+      const quote = quoteCustomerRefund(order, items, selected, Boolean(req.body?.waive_fees));
+      const mark = db.prepare(
+        "UPDATE order_items SET item_status = 'refund_requested', refund_quantity = ? WHERE id = ?"
+      );
+      for (const item of selected) mark.run(item.refund_quantity || item.quantity, item.id);
+      if (order.status !== "refund_requested") {
+        db.prepare("UPDATE orders SET resume_status = ? WHERE id = ?").run(order.status, order.id);
+      }
+      await cancelTossPaymentIfNeeded(order, reason, quote.amount);
+      refundOrderTx(
+        order.id,
+        quote.amount,
+        reason,
+        selected.map((item) => Number(item.id))
+      );
+      if (req.body?.pickup && orderPhase(order) === "after") {
+        sendReturnGuide(
+          order,
+          selected.map((item) => `${item.name} × ${item.refund_quantity || item.quantity}`)
+        );
+      }
+      logAdminAction(req, "ADMIN_PARTIAL_REFUND", "orders", Number(order.id), reason);
+      res.json({ success: true, refund_amount: quote.amount });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || "부분 취소에 실패했습니다." });
     }
   });
 
@@ -4230,6 +4459,14 @@ async function startServer() {
       if (!order) return res.status(404).json({ error: "주문 내역을 찾을 수 없습니다." });
       if (order.status !== "completed") {
         return res.status(400).json({ error: "구매확정된 주문만 리뷰를 작성할 수 있습니다." });
+      }
+      const refundedItem = db
+        .prepare(
+          "SELECT id, item_status FROM order_items WHERE order_id = ? AND product_id = ? ORDER BY CASE item_status WHEN 'refunded' THEN 1 ELSE 0 END"
+        )
+        .get(order_id, product_id) as any;
+      if (!refundedItem || refundedItem.item_status === "refunded" || refundedItem.item_status === "refund_requested") {
+        return res.status(400).json({ error: "환불된 상품은 리뷰를 작성할 수 없습니다." });
       }
 
       const baseDateStr = order.confirmed_at || order.status_updated_at;

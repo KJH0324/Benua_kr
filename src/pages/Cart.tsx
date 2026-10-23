@@ -29,10 +29,10 @@ export default function Cart() {
         const option = (product.options || []).find((row: any) => Number(row.id) === Number(item.option_id));
         const stock = option ? Math.max(0, Number(option.stock) || 0) : Math.max(0, Number(product.stock) || 0);
         if (stock < 1) continue;
+        const rate = Math.min(100, Math.max(0, Number(product.discount_rate) || 0));
         const price =
-          (product.discount_rate > 0
-            ? Math.round(product.price * (1 - product.discount_rate / 100))
-            : product.price) + (Number(option?.extra_price) || 0);
+          (rate > 0 ? Math.round(product.price * (1 - rate / 100)) : product.price) +
+          (Number(option?.extra_price) || 0);
         next.push({
           ...item,
           name: option ? `${product.name} (${option.name})` : product.name,
