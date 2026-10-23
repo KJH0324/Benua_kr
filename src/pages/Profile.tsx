@@ -288,10 +288,18 @@ export default function Profile() {
     loadProfileData();
   };
 
-  const addWishToCart = (product: any) => {
+  const addWishToCart = async (product: any) => {
     if (product.sale_mode === "preorder") {
       toast.error("사전예약 상품입니다.");
       return;
+    }
+    if (product.sale_mode === "reserved") {
+      const me = await apiFetch(`/api/products/${product.id}/preorder/me`);
+      const data = me.ok ? await me.json().catch(() => null) : null;
+      if (!data?.reserved) {
+        toast.error("사전 예약자만 구매할 수 있는 상품입니다");
+        return;
+      }
     }
     const stock = Math.max(0, Number(product.stock) || 0);
     if (stock < 1) {

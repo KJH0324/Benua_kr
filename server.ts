@@ -2702,7 +2702,7 @@ async function startServer() {
         throw new Error(`'${product.name}'은 사전예약 중입니다.`);
       }
       if (saleMode === "reserved" && !canBuyReserved(product.id, [buyerEmail, user?.email || ""])) {
-        throw new Error(`'${product.name}'은 사전예약하신 이메일로만 구매할 수 있습니다.`);
+        throw new Error("사전 예약자만 구매할 수 있는 상품입니다");
       }
       if (Number(product.stock) < qty) {
         throw new Error(`'${product.name}' 재고가 부족합니다.`);

@@ -17,6 +17,7 @@ export default function ProductDetail() {
   const [isWished, setIsWished] = useState(false);
   const [cartGoods, setCartGoods] = useState(0);
   const [reserveDone, setReserveDone] = useState(false);
+  const [reservedBuyer, setReservedBuyer] = useState(false);
   const addingRef = useRef(false);
   useEffect(() => {
     const readCart = () => {
@@ -40,6 +41,7 @@ export default function ProductDetail() {
     setProduct(null);
     setMissing(false);
     setReserveDone(false);
+    setReservedBuyer(false);
     apiFetch(`/api/products/${id}`)
       .then(async (r) => {
         if (!r.ok) {
@@ -64,6 +66,14 @@ export default function ProductDetail() {
         if (data?.reserved) setReserveDone(true);
       })
       .catch(() => {});
+  }, [id, product?.sale_mode]);
+
+  useEffect(() => {
+    if (!id || product?.sale_mode !== "reserved") return;
+    apiFetch(`/api/products/${id}/preorder/me`)
+      .then((r) => (r.ok ? r.json() : { reserved: false }))
+      .then((data) => setReservedBuyer(Boolean(data?.reserved)))
+      .catch(() => setReservedBuyer(false));
   }, [id, product?.sale_mode]);
 
   useEffect(() => {
@@ -133,6 +143,10 @@ export default function ProductDetail() {
     const list = Array.isArray(saved) ? saved : [];
     const existingIdx = list.findIndex((i: any) => String(i.id) === String(product.id));
     const already = existingIdx >= 0 ? Number(list[existingIdx].quantity) || 0 : 0;
+    if (isReservedSale && !reservedBuyer) {
+      toast.error("사전 예약자만 구매할 수 있는 상품입니다");
+      return;
+    }
     if (stock < 1 || already + quantity > stock) {
       toast.error("재고가 부족합니다.");
       return;
@@ -298,8 +312,8 @@ export default function ProductDetail() {
           ) : (
             <>
           {!isReservedSale && stock < 1 && <p className="text-sm text-venuea-muted">품절</p>}
-          {isReservedSale && (
-            <p className="text-sm text-venuea-brown">사전예약하신 이메일로만 주문할 수 있습니다.</p>
+          {isReservedSale && !reservedBuyer && (
+            <p className="text-sm text-venuea-brown">사전 예약자만 구매할 수 있는 상품입니다</p>
           )}
           <div className="flex items-center gap-4">
             <div className="flex items-center border border-black/10 rounded-xl bg-white">
@@ -327,7 +341,7 @@ export default function ProductDetail() {
             <button
               type="button"
               onClick={() => handleAddToCart(false)}
-              disabled={stock < 1}
+              disabled={( !isReservedSale || reservedBuyer) && stock < 1}
               className="hidden md:flex flex-1 h-12 border border-venuea-green bg-white text-venuea-green rounded-xl text-sm font-bold items-center justify-center gap-2 disabled:opacity-40"
             >
               <ShoppingBag size={16} />
@@ -347,7 +361,7 @@ export default function ProductDetail() {
           <button
             type="button"
             onClick={() => handleAddToCart(true)}
-            disabled={stock < 1}
+            disabled={(!isReservedSale || reservedBuyer) && stock < 1}
             className="hidden md:block w-full py-4 bg-venuea-green text-white rounded-xl text-sm font-bold disabled:opacity-40"
           >
             바로 구매하기
@@ -431,7 +445,7 @@ export default function ProductDetail() {
         <button
           type="button"
           onClick={() => handleAddToCart(false)}
-          disabled={stock < 1}
+          disabled={(!isReservedSale || reservedBuyer) && stock < 1}
           className="h-12 px-4 rounded-xl border border-venuea-green bg-white text-venuea-green text-sm font-bold disabled:opacity-40"
         >
           쇼핑백
@@ -439,7 +453,7 @@ export default function ProductDetail() {
         <button
           type="button"
           onClick={() => handleAddToCart(true)}
-          disabled={stock < 1}
+          disabled={(!isReservedSale || reservedBuyer) && stock < 1}
           className="flex-1 h-12 rounded-xl bg-venuea-green text-white text-sm font-bold disabled:opacity-40"
         >
           바로 구매 {formatPrice(finalPrice)}
