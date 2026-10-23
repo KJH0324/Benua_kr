@@ -447,19 +447,36 @@ function AdminProducts() {
       skipEmptyLines: true,
       complete: async (results) => {
         try {
-          const products = (results.data as any[]).map((row) => ({
-            name: row.name || row.상품명 || "",
-            price: row.price ?? row.가격 ?? 0,
-            description: row.description || row.설명 || "",
-            category: row.category || row.카테고리 || "오브제",
-            stock: row.stock ?? row.재고 ?? 0,
-            material: row.material || row.소재 || "",
-            dimensions: row.dimensions || row.규격 || "",
-            origin: row.origin || row.원산지 || "",
-            manufacturer: row.manufacturer || row.제조사 || "",
-            discount_rate: row.discount_rate ?? row.할인율 ?? 0,
-            show_on_main: row.show_on_main ?? row.메인노출 ?? 0,
-          }));
+          const products = (results.data as any[])
+            .map((row) => ({
+              name: String(row.name || row.상품명 || "").trim(),
+              price: row.price ?? row.가격 ?? 0,
+              description: String(row.description || row.설명 || "").trim(),
+              category: String(row.category || row.카테고리 || "오브제").trim(),
+              stock: row.stock ?? row.재고 ?? 0,
+              material: String(row.material || row.소재 || "").trim(),
+              dimensions: String(row.dimensions || row.규격 || "").trim(),
+              origin: String(row.origin || row.원산지 || "").trim(),
+              manufacturer: String(row.manufacturer || row.제조사 || "").trim(),
+              discount_rate: row.discount_rate ?? row.할인율 ?? 0,
+              show_on_main: row.show_on_main ?? row.메인노출 ?? 0,
+            }))
+            .filter(
+              (item) =>
+                !(
+                  item.name === "예시 상품" &&
+                  Number(item.price) === 28000 &&
+                  item.description === "상품 설명" &&
+                  item.category === "오브제" &&
+                  Number(item.stock) === 10 &&
+                  item.material === "도자기" &&
+                  item.dimensions === "지름 10cm" &&
+                  item.origin === "대한민국" &&
+                  item.manufacturer === "베뉴아" &&
+                  Number(item.discount_rate) === 0 &&
+                  Number(item.show_on_main) === 0
+                )
+            );
           const response = await apiFetch("/api/admin/products/bulk", {
             method: "POST",
             headers: { "Content-Type": "application/json" },

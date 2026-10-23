@@ -3784,7 +3784,15 @@ async function startServer() {
             const [order_number, tracking_number, shipping_company] = row
               .split(",")
               .map((s) => s.trim().replace(/^\uFEFF/, "").replace(/^"|"$/g, ""));
-            if (!order_number || order_number === "주문번호" || !tracking_number || tracking_number === "운송장번호") {
+            if (
+              !order_number ||
+              order_number === "주문번호" ||
+              !tracking_number ||
+              tracking_number === "운송장번호" ||
+              (order_number === "예시주문번호" &&
+                tracking_number === "123456789012" &&
+                (shipping_company || "CJ대한통운") === "CJ대한통운")
+            ) {
               continue;
             }
             const r = db
