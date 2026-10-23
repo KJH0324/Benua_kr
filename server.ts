@@ -511,6 +511,7 @@ const runMigrations = () => {
   ensureColumn("user_coupons", "notified", "INTEGER DEFAULT 0");
   ensureColumn("admin_keys", "role", "TEXT DEFAULT 'MASTER'");
   ensureColumn("admin_keys", "notify_email", "TEXT");
+  ensureColumn("admin_keys", "key_label", "TEXT");
   ensureColumn("admin_logs", "admin_identifier", "TEXT");
   ensureColumn("admin_logs", "ip_address", "TEXT");
   ensureColumn("admin_logs", "user_agent", "TEXT");
@@ -647,9 +648,12 @@ const presentOrder = (order: any) => {
 };
 
 const sealStoredSecrets = () => {
-  const keys = db.prepare("SELECT id, key_value, totp_secret FROM admin_keys").all() as any[];
+  const keys = db.prepare("SELECT id, key_value, key_label, totp_secret FROM admin_keys").all() as any[];
   for (const key of keys) {
     if (key.key_value && !String(key.key_value).startsWith("scrypt$")) {
+      if (!key.key_label) {
+        db.prepare("UPDATE admin_keys SET key_label = ? WHERE id = ?").run(encryptText(String(key.key_value)), key.id);
+      }
       db.prepare("UPDATE admin_keys SET key_value = ? WHERE id = ?").run(hashPassword(key.key_value), key.id);
     }
     if (key.totp_secret && !String(key.totp_secret).startsWith("enc$")) {
@@ -657,6 +661,17 @@ const sealStoredSecrets = () => {
         encryptText(key.totp_secret),
         key.id
       );
+    }
+  }
+
+  if (ADMIN_PASSWORD) {
+    const unlabeled = db
+      .prepare("SELECT id, key_value FROM admin_keys WHERE key_label IS NULL OR TRIM(key_label) = ''")
+      .all() as any[];
+    for (const key of unlabeled) {
+      if (verifyPassword(ADMIN_PASSWORD, key.key_value)) {
+        db.prepare("UPDATE admin_keys SET key_label = ? WHERE id = ?").run(encryptText(ADMIN_PASSWORD), key.id);
+      }
     }
   }
 
@@ -2145,10 +2160,21 @@ async function startServer() {
   app.get("/api/admin/keys", authenticateAdmin, (_req, res) => {
     const keys = db
       .prepare(
-        "SELECT id, role, notify_email, CASE WHEN totp_secret IS NULL THEN 0 ELSE 1 END as has_2fa, created_at FROM admin_keys ORDER BY created_at DESC"
+        "SELECT id, role, notify_email, key_label, CASE WHEN totp_secret IS NULL THEN 0 ELSE 1 END as has_2fa, created_at FROM admin_keys ORDER BY created_at DESC"
       )
       .all() as any[];
-    res.json(keys);
+    res.json(
+      keys.map((key) => ({
+        ...key,
+        key_label: (() => {
+          try {
+            return key.key_label ? decryptText(key.key_label) : "";
+          } catch {
+            return "";
+          }
+        })(),
+      }))
+    );
   });
 
   app.post("/api/admin/keys", authenticateAdmin, (req: any, res) => {
@@ -2162,8 +2188,8 @@ async function startServer() {
     }
     try {
       const info = db
-        .prepare("INSERT INTO admin_keys (key_value, role) VALUES (?, ?)")
-        .run(hashPassword(keyValue.trim()), role || "ADMIN");
+        .prepare("INSERT INTO admin_keys (key_value, role, key_label) VALUES (?, ?, ?)")
+        .run(hashPassword(keyValue.trim()), role || "ADMIN", encryptText(keyValue.trim()));
       logAdminAction(req, "CREATE_ADMIN_KEY", "admin_keys", Number(info.lastInsertRowid), `Created key with role ${role || "ADMIN"}`);
       res.json({ success: true });
     } catch (err: any) {

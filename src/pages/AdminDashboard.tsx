@@ -2580,7 +2580,7 @@ function AdminKeys({ adminRole }: { adminRole: string }) {
           <tbody className="divide-y">
             {keys.map((k) => (
               <tr key={k.id}>
-                <td className="p-4 font-mono text-gray-400">해시로 저장됨</td>
+                <td className="p-4 font-mono text-sm text-gray-900">{k.key_label || "원문 없음"}</td>
                 <td className="p-4 font-bold">{k.role}</td>
                 <td className="p-4">
                   <form
