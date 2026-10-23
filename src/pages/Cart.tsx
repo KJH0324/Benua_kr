@@ -3,7 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { ArrowRight } from "lucide-react";
 import { formatPrice, shippingFee, FREE_SHIPPING_MIN } from "../lib/utils";
 import { apiFetch } from "../lib/api";
-import { cartKey, mergeServerCart, saveCart } from "../lib/cart";
+import { cartKey, clearDirectCheckout, mergeServerCart, saveCart } from "../lib/cart";
 import { salePrice, type CardProduct } from "../components/ProductCard";
 import type { CartItem } from "../types";
 
@@ -223,7 +223,10 @@ export default function Cart() {
               <span>{formatPrice(subtotal + shipping)}</span>
             </div>
             <button
-              onClick={() => navigate("/checkout")}
+              onClick={() => {
+                clearDirectCheckout();
+                navigate("/checkout");
+              }}
               className="w-full bg-venuea-green text-white py-4 rounded-xl text-sm font-bold hover:bg-[#2d4a2c] flex items-center justify-center gap-2"
             >
               <span>주문하기</span>

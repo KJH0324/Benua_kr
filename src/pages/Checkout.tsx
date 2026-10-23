@@ -6,7 +6,7 @@ import { ShieldCheck, CreditCard, Loader2, CheckCircle2, MapPin, X } from "lucid
 import { toast } from "sonner";
 import { apiFetch } from "../lib/api";
 import { formatPrice, cn } from "../lib/utils";
-import { saveCart } from "../lib/cart";
+import { readDirectCheckout, clearDirectCheckout, readLocalCart, saveCart } from "../lib/cart";
 import type { CartItem, UserProfile } from "../types";
 
 const TOSS_CLIENT_KEY =
@@ -91,7 +91,8 @@ export default function Checkout() {
             return;
           }
 
-          saveCart([], "replace");
+          if (readDirectCheckout()) clearDirectCheckout();
+          else saveCart([], "replace");
           setCompletedOrderNumber(data.order_number);
           if (data.vbank) setVbankResult(data.vbank);
           toast.success("주문이 성공적으로 완료되었습니다.");
@@ -112,17 +113,15 @@ export default function Checkout() {
     }
     let cancelled = false;
     const checkStock = async () => {
-      let saved: any[] = [];
-      try {
-        const parsed = JSON.parse(localStorage.getItem("benua_cart") || "[]");
-        saved = Array.isArray(parsed) ? parsed : [];
-      } catch {
-        saved = [];
-      }
+      let saved: any[] = readDirectCheckout() || readLocalCart();
       for (const item of saved) {
         const res = await apiFetch(`/api/products/${item.id}`);
         const product = res.ok ? await res.json().catch(() => null) : null;
-        const stock = Math.max(0, Number(product?.stock) || 0);
+        const optionId = Number(item.option_id) || 0;
+        const option = optionId
+          ? (product?.options || []).find((row: any) => Number(row.id) === optionId)
+          : null;
+        const stock = Math.max(0, Number(option ? option.stock : product?.stock) || 0);
         const qty = Math.max(1, Number(item.quantity) || 1);
         if (!product || product.sale_mode === "preorder" || stock < qty) {
           if (!cancelled) {
@@ -154,8 +153,8 @@ export default function Checkout() {
   // 2. Load Cart, User Profile, and Coupons
   useEffect(() => {
     try {
-      const savedCart = JSON.parse(localStorage.getItem("benua_cart") || "[]");
-      setCart(Array.isArray(savedCart) ? savedCart : []);
+      const savedCart = readDirectCheckout() || readLocalCart();
+      setCart(savedCart);
     } catch {
       setCart([]);
     }
@@ -315,7 +314,8 @@ export default function Checkout() {
       if (prepData.order_number) prepOrderNumber = prepData.order_number;
 
       if (prepData.zeroAmountPaid) {
-        saveCart([], "replace");
+        if (readDirectCheckout()) clearDirectCheckout();
+        else saveCart([], "replace");
         setCompletedOrderNumber(prepData.order_number);
         setIsProcessing(false);
         return;

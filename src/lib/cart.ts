@@ -13,6 +13,7 @@ export type LocalCartItem = {
 };
 
 const KEY = "benua_cart";
+const DIRECT_KEY = "benua_direct_items";
 
 export function cartKey(item: { id?: number | string; option_id?: number }) {
   return `${item.id}:${item.option_id || 0}`;
@@ -71,6 +72,25 @@ export function readRecent() {
     return Array.isArray(parsed) ? parsed : [];
   } catch {
     return [];
+  }
+}
+
+export function beginDirectCheckout(item: LocalCartItem) {
+  sessionStorage.setItem(DIRECT_KEY, JSON.stringify([item]));
+}
+
+export function clearDirectCheckout() {
+  sessionStorage.removeItem(DIRECT_KEY);
+}
+
+export function readDirectCheckout(): LocalCartItem[] | null {
+  try {
+    const raw = sessionStorage.getItem(DIRECT_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) && parsed.length > 0 ? parsed : null;
+  } catch {
+    return null;
   }
 }
 

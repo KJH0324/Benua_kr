@@ -5,7 +5,7 @@ import { toast } from "sonner";
 import { apiFetch } from "../lib/api";
 import { formatPrice, FREE_SHIPPING_MIN, SHIPPING_FEE } from "../lib/utils";
 import ProductCard, { type CardProduct } from "../components/ProductCard";
-import { cartKey, readLocalCart, rememberProduct, saveCart } from "../lib/cart";
+import { beginDirectCheckout, cartKey, readLocalCart, rememberProduct, saveCart } from "../lib/cart";
 
 export default function ProductDetail() {
   const { id } = useParams();
@@ -174,6 +174,29 @@ export default function ProductDetail() {
       toast.error("사전 예약자만 구매할 수 있는 상품입니다");
       return;
     }
+    if (buyNow) {
+      if (stock < 1 || quantity > stock) {
+        toast.error("재고가 부족합니다.");
+        return;
+      }
+      addingRef.current = true;
+      window.setTimeout(() => {
+        addingRef.current = false;
+      }, 500);
+      beginDirectCheckout({
+        id: product.id,
+        name: selectedOption ? `${product.name} (${selectedOption.name})` : product.name,
+        price: finalPrice,
+        quantity,
+        stock,
+        image: product.image_url,
+        option_id: optionId || 0,
+        option_name: selectedOption?.name || "",
+        category: product.category,
+      });
+      navigate("/checkout");
+      return;
+    }
     if (stock < 1 || already + quantity > stock) {
       toast.error("재고가 부족합니다.");
       return;
@@ -203,8 +226,7 @@ export default function ProductDetail() {
       });
     }
     saveCart(list);
-    if (buyNow) navigate("/checkout");
-    else toast.success("쇼핑백에 담았습니다.");
+    toast.success("쇼핑백에 담았습니다.");
   };
 
   const handlePreorder = async () => {
