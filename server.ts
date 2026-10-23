@@ -126,7 +126,7 @@ const notifyAdminNewOrder = (orderId: number) => {
     .map((item) => `${escapeHtml(item.name)} × ${Number(item.quantity) || 0} · ${formatWon((item.price || 0) * (item.quantity || 0))}`)
     .join("<br/>");
   const status = order.status === "paid" ? "결제완료" : "입금대기";
-  const to = process.env.ADMIN_NOTIFY_EMAIL || process.env.SMTP_FROM_ADMIN || "admin@benua.shop";
+  const to = process.env.ADMIN_NOTIFY_EMAIL || process.env.SMTP_FROM_SUPPORT || "support@benua.shop";
   sendMail(
     to,
     `새 주문 ${order.order_number}`,
@@ -1130,7 +1130,6 @@ const runAutoCompletion = () => {
 // 5. Express Server Setup
 // ==========================================
 const SUPPORT_INBOX = (process.env.INBOUND_ADDRESS || "support@benua.shop").toLowerCase();
-const ADMIN_INBOX = (process.env.SMTP_FROM_ADMIN || "admin@benua.shop").toLowerCase();
 
 const resendApiKey = () => process.env.RESEND_API_KEY || process.env.SMTP_PASS || "";
 
@@ -1149,7 +1148,7 @@ const isSupportInboxMail = (email: any) => {
   ]
     .join(" ")
     .toLowerCase();
-  return blob.includes(SUPPORT_INBOX) || blob.includes(ADMIN_INBOX);
+  return blob.includes(SUPPORT_INBOX);
 };
 
 const verifyResendWebhook = (rawBody: string, headers: Record<string, unknown>) => {
