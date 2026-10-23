@@ -1157,7 +1157,12 @@ function AdminOrders() {
         }),
       });
       if (res.ok) {
-        toast.success("운송장이 등록되어 배송중 상태로 전환되었습니다.");
+        const data = await res.json().catch(() => ({}));
+        toast.success(
+          data.status === "delivered"
+            ? "배송완료로 반영했습니다."
+            : "운송장이 등록되어 배송중 상태로 전환되었습니다."
+        );
         setSelectedOrder(null);
         fetchOrders();
       } else {

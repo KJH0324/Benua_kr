@@ -1244,8 +1244,77 @@ const runAutoCompletion = () => {
        WHERE status = 'pending' AND payment_key IS NULL
          AND created_at < datetime('now', '-2 hours')`
     ).run();
+    void syncShippingDeliveries();
   } catch (err) {
     console.error("[AUTO] Error during auto-completion:", err);
+  }
+};
+
+const sweetTrackerCarrierCode = (company: string) => {
+  const codes: Record<string, string> = {
+    우체국택배: "01",
+    CJ대한통운: "04",
+    한진택배: "05",
+    로젠택배: "06",
+    롯데택배: "08",
+  };
+  return codes[company] || "04";
+};
+
+const trackingIsDelivered = (info: any) =>
+  Boolean(info) &&
+  info.result !== "N" &&
+  (info.complete === true || info.completeYN === "Y" || Number(info.level) === 6);
+
+const sweetTrackerDelivered = async (company: string, invoice: string) => {
+  const key = String(process.env.SWEETTRACKER_API_KEY || "").trim();
+  const number = String(invoice || "").replace(/[^\d]/g, "");
+  if (!key || !number) return false;
+  const response = await fetch("https://info.sweettracker.co.kr/api/v1/trackingInfo", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Accept: "application/json" },
+    body: JSON.stringify({
+      t_key: key,
+      t_code: sweetTrackerCarrierCode(company || "CJ대한통운"),
+      t_invoice: number,
+    }),
+  });
+  if (!response.ok) return false;
+  const info = await response.json().catch(() => null);
+  return trackingIsDelivered(info);
+};
+
+const markOrderDelivered = (orderId: number) => {
+  const updated = db
+    .prepare(
+      "UPDATE orders SET status = 'delivered', status_updated_at = CURRENT_TIMESTAMP WHERE id = ? AND status = 'shipping'"
+    )
+    .run(orderId);
+  return updated.changes > 0;
+};
+
+const syncShippingDeliveries = async (orderId?: number) => {
+  const orders = (
+    orderId
+      ? db
+          .prepare(
+            "SELECT id, shipping_company, tracking_number FROM orders WHERE id = ? AND status = 'shipping' AND tracking_number IS NOT NULL"
+          )
+          .all(orderId)
+      : db
+          .prepare(
+            "SELECT id, shipping_company, tracking_number FROM orders WHERE status = 'shipping' AND tracking_number IS NOT NULL AND TRIM(tracking_number) != ''"
+          )
+          .all()
+  ) as Array<{ id: number; shipping_company: string; tracking_number: string }>;
+  for (const order of orders) {
+    try {
+      if (await sweetTrackerDelivered(order.shipping_company, order.tracking_number)) {
+        markOrderDelivered(order.id);
+      }
+    } catch (err) {
+      console.error("[TRACK] delivery check failed", order.id, err);
+    }
   }
 };
 
@@ -3336,16 +3405,7 @@ async function startServer() {
     }
   });
 
-  const carrierCode = (company: string) => {
-    const codes: Record<string, string> = {
-      우체국택배: "01",
-      CJ대한통운: "04",
-      한진택배: "05",
-      로젠택배: "06",
-      롯데택배: "08",
-    };
-    return codes[company] || "04";
-  };
+  const carrierCode = (company: string) => sweetTrackerCarrierCode(company);
 
   const trackingMessage = (message: string) =>
     `<!doctype html><meta charset="utf-8"><body style="margin:0;background:#faf2e7;color:#463221;font-family:sans-serif"><p style="padding:24px">${escapeHtml(message)}</p></body>`;
@@ -3379,6 +3439,7 @@ async function startServer() {
     }
     try {
       const page = await trackingSkyHtml(order.shipping_company || "CJ대한통운", order.tracking_number);
+      if (order.status === "shipping") await syncShippingDeliveries(order.id);
       res.status(page.status).type("html").send(page.html);
     } catch {
       res.status(502).type("html").send(trackingMessage("배송조회를 열지 못했습니다."));
@@ -3592,6 +3653,8 @@ async function startServer() {
       db.prepare(
         "UPDATE orders SET tracking_number = ?, shipping_company = ?, status = 'shipping', vbank_account = NULL, status_updated_at = CURRENT_TIMESTAMP WHERE id = ?"
       ).run(tracking_number, shipping_company || "CJ대한통운", id);
+      await syncShippingDeliveries(Number(id));
+      const updated = db.prepare("SELECT status FROM orders WHERE id = ?").get(id) as { status?: string } | undefined;
 
       logAdminAction(req, "UPDATE_TRACKING", "orders", Number(id), `${shipping_company}: ${tracking_number}`);
 
@@ -3611,7 +3674,7 @@ async function startServer() {
         );
       }
 
-      res.json({ success: true });
+      res.json({ success: true, status: updated?.status || "shipping" });
     } catch (err: any) {
       res.status(500).json({ error: "운송장 등록 실패: " + err.message });
     }
@@ -4017,7 +4080,7 @@ async function startServer() {
     "/api/admin/fulfillment/tracking-bulk",
     authenticateOperator,
     upload.single("csv"),
-    (req: any, res) => {
+    async (req: any, res) => {
       if (!req.file) return res.status(400).json({ error: "CSV 파일을 업로드해주세요." });
       try {
         const content = fs.readFileSync(req.file.path, "utf-8");
@@ -4053,6 +4116,7 @@ async function startServer() {
         })(lines.slice(1));
 
         fs.unlinkSync(req.file.path);
+        await syncShippingDeliveries();
         res.json({ success: true, updatedCount });
       } catch {
         res.status(500).json({ error: "운송장 일괄 등록에 실패했습니다." });
