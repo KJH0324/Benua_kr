@@ -168,9 +168,7 @@ export default function AdminDashboard() {
     <div className="flex min-h-screen bg-gray-50">
       {/* Mobile Header */}
       <div className="fixed top-0 left-0 right-0 h-[60px] bg-white border-b border-gray-200 z-30 flex items-center justify-between px-6 md:hidden">
-        <h2 className="font-logo text-sm uppercase tracking-widest text-venuea-dark">
-          Benua Admin
-        </h2>
+        <img src="/benua_primary_color.svg" alt="Benua" width="1677" height="920" className="h-11 w-auto" />
         <button
           onClick={() => setIsMobileSidebarOpen(true)}
           className="p-2 text-venuea-dark hover:bg-gray-100 rounded-lg"
@@ -199,9 +197,7 @@ export default function AdminDashboard() {
             >
               <div className="flex justify-between items-center mb-8">
                 <div>
-                  <h2 className="font-logo text-2xl tracking-[4px] uppercase text-venuea-dark">
-                    Benua
-                  </h2>
+                  <img src="/benua_primary_color.svg" alt="Benua" width="1677" height="920" className="h-12 w-auto" />
                   <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-venuea-gold block">
                     {adminRole}
                   </span>
@@ -260,7 +256,7 @@ export default function AdminDashboard() {
       <aside className="w-64 bg-white border-r border-gray-200 hidden md:block shrink-0">
         <div className="p-6 sticky top-0 max-h-screen overflow-y-auto">
           <div className="mb-8 pl-4">
-            <h1 className="font-logo text-2xl tracking-[4px] uppercase text-venuea-dark">Benua</h1>
+            <img src="/benua_primary_color.svg" alt="Benua" width="1677" height="920" className="h-14 w-auto" />
             <span className="text-[10px] font-bold uppercase tracking-[0.3em] text-venuea-gold block mt-0.5">
               {adminRole} CONSOLE
             </span>

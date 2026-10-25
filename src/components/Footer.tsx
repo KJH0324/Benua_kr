@@ -33,7 +33,7 @@ export default function Footer() {
       <div className="max-w-7xl mx-auto grid grid-cols-1 md:grid-cols-4 gap-10 pb-12 border-b border-[#faf2e7]/20">
         <div className="space-y-4">
           <Link to="/" className="inline-flex">
-            <img src="/benua_horizontal_notag_beige.svg" alt="Benua" width="140" height="32" className="h-8 w-auto" />
+            <img src="/benua_primary_light.svg" alt="Benua" width="1677" height="920" className="h-16 w-auto" />
           </Link>
         </div>
 

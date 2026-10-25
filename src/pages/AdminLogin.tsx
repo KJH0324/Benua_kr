@@ -94,7 +94,7 @@ export default function AdminLogin() {
           <div className="w-12 h-12 rounded-xl bg-venuea-gold/20 border border-venuea-gold/40 flex items-center justify-center mx-auto mb-4">
             <Shield className="text-venuea-gold" size={24} />
           </div>
-          <h1 className="font-logo text-2xl tracking-[6px] uppercase">Benua</h1>
+          <img src="/benua_primary_light.svg" alt="Benua" width="1677" height="920" className="h-16 w-auto mx-auto" />
           <p className="text-[11px] uppercase tracking-[0.25em] text-gray-400 mt-1">
             Admin Security Console
           </p>
