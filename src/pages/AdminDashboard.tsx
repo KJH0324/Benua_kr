@@ -1218,6 +1218,7 @@ function AdminOrders() {
   const [params] = useSearchParams();
   const [orders, setOrders] = useState<Order[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [statusFilter, setStatusFilter] = useState<string>("ALL");
   const [query, setQuery] = useState("");
   const [methodFilter, setMethodFilter] = useState("ALL");
   const [range, setRange] = useState("all");
