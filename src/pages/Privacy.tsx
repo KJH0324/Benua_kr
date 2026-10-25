@@ -246,6 +246,7 @@ export default function Privacy() {
             <p><strong>개인정보 보호책임자:</strong> 강성달 (대표)</p>
             <p><strong>소속 / 상호:</strong> 베뉴아 (Benua)</p>
             <p><strong>문의 이메일:</strong> support@benua.shop</p>
+            <p><strong>문의 전화:</strong> 010-9261-8016 (평일 10:00–17:00)</p>
             <p><strong>주소:</strong> 인천광역시 연수구 새말로 154, 307동 602호</p>
           </div>
           <p className="pt-2 text-xs text-venuea-muted">

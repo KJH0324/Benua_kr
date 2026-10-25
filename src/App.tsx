@@ -48,7 +48,7 @@ function PageTitleHandler() {
     let title = "Benua";
 
     if (path === "/shop") title = "Benua | 스토어";
-    else if (path.startsWith("/product/")) title = "Benua | 상품상세";
+    else if (path.startsWith("/product/")) return;
     else if (path === "/cart") title = "Benua | 장바구니";
     else if (path === "/checkout") title = "Benua | 결제";
     else if (path === "/profile") title = "Benua | 마이페이지";
@@ -57,6 +57,8 @@ function PageTitleHandler() {
     else if (path === "/about") title = "Benua | 브랜드 스토리";
     else if (path === "/contact") title = "Benua | 고객센터";
     else if (path === "/track") title = "Benua | 배송조회";
+    else if (path === "/terms") title = "Benua | 이용약관";
+    else if (path === "/privacy") title = "Benua | 개인정보처리방침";
     
     if (isAdminSubdomain() || path.includes("/admin")) {
       title = "Benua | 관리자";

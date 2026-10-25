@@ -20,18 +20,19 @@ const __dirname = path.dirname(__filename);
 
 const PORT = Number(process.env.PORT) || 3000;
 const isProduction = process.env.NODE_ENV === "production";
-if (
-  isProduction &&
-  (!process.env.JWT_SECRET || !process.env.ADMIN_PASSWORD || !process.env.TOSS_SECRET_KEY)
-) {
-  console.error(
-    "[BOOT] JWT_SECRET, ADMIN_PASSWORD, TOSS_SECRET_KEY 가 없으면 운영 서버를 시작하지 않습니다."
-  );
-  process.exit(1);
+
+function requiredEnv(name: string): string {
+  const value = process.env[name];
+  if (!value) {
+    console.error(`[BOOT] ${name} 가 없으면 서버를 시작하지 않습니다.`);
+    process.exit(1);
+  }
+  return value;
 }
-const JWT_SECRET = process.env.JWT_SECRET || "benua-secret-key-2024";
-const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "benua-admin-123";
-const TOSS_SECRET_KEY = process.env.TOSS_SECRET_KEY || "test_sk_zXLkKEypNArWmo50nX3lmeaxYG5R";
+
+const JWT_SECRET = requiredEnv("JWT_SECRET");
+const ADMIN_PASSWORD = requiredEnv("ADMIN_PASSWORD");
+const TOSS_SECRET_KEY = requiredEnv("TOSS_SECRET_KEY");
 
 // ==========================================
 // 1. Email Transporter & Helper
@@ -2201,6 +2202,36 @@ async function startServer() {
   const app = express();
 
   app.set("trust proxy", 1);
+  app.disable("x-powered-by");
+  app.use((_req, res, next) => {
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.setHeader("X-Frame-Options", "SAMEORIGIN");
+    res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
+    res.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
+    if (isProduction) {
+      res.setHeader("Strict-Transport-Security", "max-age=15552000; includeSubDomains");
+    }
+    const connect = isProduction
+      ? "connect-src 'self' https://*.tosspayments.com https://log.tosspayments.com"
+      : "connect-src 'self' ws: http://localhost:* https://*.tosspayments.com https://log.tosspayments.com";
+    res.setHeader(
+      "Content-Security-Policy",
+      [
+        "default-src 'self'",
+        "base-uri 'self'",
+        "object-src 'none'",
+        "script-src 'self' https://js.tosspayments.com https://t1.daumcdn.net",
+        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://t1.daumcdn.net",
+        "font-src 'self' https://fonts.gstatic.com data:",
+        "img-src 'self' data: blob: https:",
+        connect,
+        "frame-src 'self' https://*.tosspayments.com https://postcode.map.daum.net https://postcode.map.kakao.com",
+        "frame-ancestors 'self'",
+        "form-action 'self' https://*.tosspayments.com",
+      ].join("; ")
+    );
+    next();
+  });
 
   // CORS middleware for Web Subdomains + Capacitor iOS/Android Apps
   app.use((req, res, next) => {
@@ -2231,7 +2262,7 @@ async function startServer() {
 
   app.use(
     express.json({
-      limit: "50mb",
+      limit: "1mb",
       verify: (req, _res, buf) => {
         if (req.url?.startsWith("/api/webhooks/resend")) {
           (req as any).rawBody = buf.toString("utf8");
@@ -2239,7 +2270,7 @@ async function startServer() {
       },
     })
   );
-  app.use(express.urlencoded({ limit: "50mb", extended: true }));
+  app.use(express.urlencoded({ limit: "1mb", extended: true }));
   app.use(cookieParser());
   app.use(
     "/uploads",
@@ -6073,7 +6104,7 @@ async function startServer() {
 
   app.get("/sitemap.xml", (_req, res) => {
     const products = db.prepare("SELECT id FROM products").all() as Array<{ id: number }>;
-    const urls = ["/", "/shop", "/about", "/contact", ...products.map((p) => `/product/${p.id}`)]
+    const urls = ["/", "/shop", "/about", "/contact", "/terms", "/privacy", "/track", ...products.map((p) => `/product/${p.id}`)]
       .map((url) => `<url><loc>https://benua.shop${url}</loc></url>`)
       .join("");
     res.type("xml").send(`<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">${urls}</urlset>`);
@@ -6331,13 +6362,19 @@ async function startServer() {
         const product = db.prepare("SELECT name, description, image_url FROM products WHERE id = ?").get(productMatch[1]) as any;
         if (product) {
           let html = fs.readFileSync(file, "utf8");
-          const image = String(product.image_url || "").startsWith("http")
-            ? product.image_url
-            : `https://benua.shop${product.image_url || ""}`;
+          const rawImage = String(product.image_url || "");
+          const image = rawImage.startsWith("http")
+            ? rawImage
+            : rawImage
+              ? `https://benua.shop${rawImage}`
+              : "https://benua.shop/og.png";
+          const description = String(product.description || "문을 닫으면, 나만의 쉼이 시작됩니다.").slice(0, 120);
           html = html
             .replace(/<title>.*?<\/title>/, `<title>${escapeHtml(product.name)} | Benua</title>`)
+            .replace(/name="description" content="[^"]*"/, `name="description" content="${escapeHtml(description)}"`)
             .replace(/property="og:title" content="[^"]*"/, `property="og:title" content="${escapeHtml(product.name)}"`)
-            .replace(/property="og:description" content="[^"]*"/, `property="og:description" content="${escapeHtml(String(product.description || "").slice(0, 120))}"`)
+            .replace(/property="og:description" content="[^"]*"/, `property="og:description" content="${escapeHtml(description)}"`)
+            .replace(/property="og:url" content="[^"]*"/, `property="og:url" content="https://benua.shop/product/${productMatch[1]}"`)
             .replace(/property="og:image" content="[^"]*"/, `property="og:image" content="${escapeHtml(image)}"`);
           res.status(200).type("html").send(html);
           return;

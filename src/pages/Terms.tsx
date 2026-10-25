@@ -267,7 +267,7 @@ export default function Terms() {
         <Section title="제18조 (분쟁해결 및 재판권·준거법)">
           <ol className="list-decimal pl-5 space-y-1.5">
             <li>
-              “몰”은 이용자가 제기하는 정당한 의견이나 불만을 반영하고 그 피해를 보상처리하기 위하여 1:1 문의 게시판 및 고객지원 이메일(support@benua.shop)을 운영합니다.
+              “몰”은 이용자가 제기하는 정당한 의견이나 불만을 반영하고 그 피해를 보상처리하기 위하여 1:1 문의 게시판 및 고객지원 이메일(support@benua.shop), 전화(010-9261-8016, 평일 10:00–17:00)를 운영합니다.
             </li>
             <li>
               “몰”과 이용자 간에 발생한 전자상거래 분쟁에 관한 소송은 제소 당시의 이용자의 주소에 의하고, 주소가 없는 경우에는 거소를 관할하는 지방법원의 전속관할로 합니다. 다만, 제소 당시 이용자의 주소 또는 거소가 분명하지 않거나 외국 거주자의 경우에는 민사소송법상의 관할법원에 제기합니다.
@@ -284,6 +284,7 @@ export default function Terms() {
             <p><strong>통신판매업신고번호:</strong> 제2026-인천연수구-1145호</p>
             <p><strong>사업장 소재지:</strong> 인천광역시 연수구 새말로 154, 307동 602호</p>
             <p><strong>고객센터 이메일:</strong> support@benua.shop</p>
+            <p><strong>고객센터 전화:</strong> 010-9261-8016 (평일 10:00–17:00)</p>
             <p className="pt-2 text-venuea-muted">본 약관은 2026년 10월 21일부터 시행됩니다.</p>
           </div>
         </Section>

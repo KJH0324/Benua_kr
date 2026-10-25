@@ -1,20 +1,7 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
-</div>
+# Benua
 
-# Run and deploy your AI Studio app
+베뉴아 스토어. Node.js와 환경 변수가 필요합니다.
 
-This contains everything you need to run your app locally.
-
-View your app in AI Studio: https://ai.studio/apps/b6108fd2-ef94-45bf-a4cb-3b4f9b107ad8
-
-## Run Locally
-
-**Prerequisites:**  Node.js
-
-
-1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+1. `npm install`
+2. `.env.example`을 복사해 `.env`를 만들고 값을 채웁니다. 키는 저장소에 넣지 않습니다.
+3. `npm run dev`

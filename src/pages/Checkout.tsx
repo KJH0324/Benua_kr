@@ -9,8 +9,7 @@ import { formatPrice, cn } from "../lib/utils";
 import { readDirectCheckout, clearDirectCheckout, readLocalCart, readSelectedCheckout, clearSelectedCheckout, saveCart } from "../lib/cart";
 import type { CartItem, UserProfile } from "../types";
 
-const TOSS_CLIENT_KEY =
-  import.meta.env.VITE_TOSS_CLIENT_KEY || "test_ck_D5GePWvyJnrK0W0k6q8gLzN97Eoq";
+const TOSS_CLIENT_KEY = import.meta.env.VITE_TOSS_CLIENT_KEY || "";
 
 function readCheckoutDraft(): Record<string, string> {
   if (typeof sessionStorage === "undefined") return {};
@@ -48,9 +47,7 @@ export default function Checkout() {
   const [detailAddress, setDetailAddress] = useState(draft.detailAddress || "");
   const [isPostcodeOpen, setIsPostcodeOpen] = useState(false);
 
-  const [paymentMethod, setPaymentMethod] = useState<
-    "card" | "kakao_pay" | "naver_pay" | "vbank" | "transfer"
-  >("card");
+  const [paymentMethod, setPaymentMethod] = useState<"card" | "vbank" | "transfer">("card");
   const [shippingMemo, setShippingMemo] = useState("문 앞에 놓아주세요");
   const [memoCustom, setMemoCustom] = useState("");
   const [gateCode, setGateCode] = useState("");
@@ -318,8 +315,42 @@ export default function Checkout() {
       toast.error("쇼핑백이 비어 있습니다.");
       return;
     }
-    if (!customerName || !customerEmail || !customerPhone || (!isGift && (!zipcode || !address))) {
-      setFormError(isGift ? "받는 사람 이름, 연락처, 이메일을 입력해주세요." : "수령인, 연락처, 이메일, 우편번호, 주소를 모두 입력해주세요.");
+    const focusId = (id: string) => {
+      requestAnimationFrame(() => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.focus();
+        el.scrollIntoView({ block: "center", behavior: "smooth" });
+      });
+    };
+    if (!customerName.trim()) {
+      setFormError("수령인 이름을 입력해주세요.");
+      focusId("customer-name");
+      return;
+    }
+    if (!phoneOk(customerPhone)) {
+      setFormError("연락처는 010으로 시작하는 번호로 입력해주세요.");
+      focusId("customer-phone");
+      return;
+    }
+    if (!customerEmail.trim() || !customerEmail.includes("@")) {
+      setFormError("주문 안내를 받을 이메일을 입력해주세요.");
+      focusId("customer-email");
+      return;
+    }
+    if (!isGift && !zipcode.trim()) {
+      setFormError("우편번호를 입력해주세요.");
+      focusId("customer-zip");
+      return;
+    }
+    if (!isGift && !address.trim()) {
+      setFormError("주소를 입력해주세요.");
+      focusId("customer-address");
+      return;
+    }
+    if (totalAmount > 0 && !TOSS_CLIENT_KEY) {
+      setFormError("결제 설정 오류입니다. 잠시 후 다시 시도해주세요.");
+      toast.error("결제 설정 오류");
       return;
     }
     setFormError("");
@@ -329,10 +360,6 @@ export default function Checkout() {
     }
     if (usePoints > 0 && usePoints < 1000 && payableBeforePoints >= 1000) {
       toast.error("포인트는 1,000P부터 사용할 수 있습니다.");
-      return;
-    }
-    if (!phoneOk(customerPhone)) {
-      toast.error("연락처는 010으로 시작하는 번호로 입력해주세요.");
       return;
     }
 
@@ -529,43 +556,78 @@ export default function Checkout() {
           <section className="bg-white p-6 rounded-2xl border border-gray-200 space-y-4">
             <h2 className="text-base font-bold text-venuea-dark">주문자 및 배송지 정보</h2>
             {formError && (
-              <p className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-xs text-red-700">
+              <p role="alert" className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-xs text-red-700">
                 {formError}
               </p>
             )}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label htmlFor="customer-name" className="block text-xs font-bold text-gray-500 mb-1.5">
+                  수령인
+                </label>
+                <input
+                  id="customer-name"
+                  name="name"
+                  autoComplete="name"
+                  required
+                  placeholder="이름"
+                  value={customerName}
+                  onChange={(e) => setCustomerName(e.target.value)}
+                  className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm"
+                />
+              </div>
+              <div>
+                <label htmlFor="customer-phone" className="block text-xs font-bold text-gray-500 mb-1.5">
+                  연락처
+                </label>
+                <input
+                  id="customer-phone"
+                  name="tel"
+                  type="tel"
+                  inputMode="tel"
+                  autoComplete="tel"
+                  required
+                  placeholder="010-0000-0000"
+                  value={customerPhone}
+                  onChange={(e) => setCustomerPhone(e.target.value)}
+                  className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm"
+                />
+              </div>
+            </div>
+            <div>
+              <label htmlFor="customer-email" className="block text-xs font-bold text-gray-500 mb-1.5">
+                이메일
+              </label>
               <input
+                id="customer-email"
+                name="email"
+                type="email"
+                inputMode="email"
+                autoComplete="email"
                 required
-                placeholder="수령인 성함"
-                value={customerName}
-                onChange={(e) => setCustomerName(e.target.value)}
-                className="border border-gray-200 rounded-xl px-4 py-3 text-sm"
-              />
-              <input
-                required
-                placeholder="연락처 (010-0000-0000)"
-                value={customerPhone}
-                onChange={(e) => setCustomerPhone(e.target.value)}
-                className="border border-gray-200 rounded-xl px-4 py-3 text-sm"
+                placeholder="주문 안내를 받을 주소"
+                value={customerEmail}
+                onChange={(e) => setCustomerEmail(e.target.value)}
+                className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm"
               />
             </div>
-            <input
-              type="email"
-              required
-              placeholder="이메일 (주문내역 발송용)"
-              value={customerEmail}
-              onChange={(e) => setCustomerEmail(e.target.value)}
-              className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm"
-            />
 
-            <div className="flex gap-2">
-              <input
-                inputMode="numeric"
-                placeholder="우편번호"
-                value={zipcode}
-                onChange={(e) => setZipcode(e.target.value.replace(/[^\d-]/g, "").slice(0, 7))}
-                className="w-36 border border-gray-200 rounded-xl px-4 py-3 text-sm"
-              />
+            <div className="flex gap-2 items-end">
+              <div>
+                <label htmlFor="customer-zip" className="block text-xs font-bold text-gray-500 mb-1.5">
+                  우편번호
+                </label>
+                <input
+                  id="customer-zip"
+                  name="postal-code"
+                  inputMode="numeric"
+                  autoComplete="postal-code"
+                  placeholder="우편번호"
+                  value={zipcode}
+                  onChange={(e) => setZipcode(e.target.value.replace(/[^\d-]/g, "").slice(0, 7))}
+                  className="w-36 border border-gray-200 rounded-xl px-4 py-3 text-sm"
+                />
+              </div>
               <button
                 type="button"
                 onClick={() => setIsPostcodeOpen(true)}
@@ -575,19 +637,35 @@ export default function Checkout() {
                 <span>주소 검색</span>
               </button>
             </div>
-            <input
-              required
-              placeholder="기본 주소"
-              value={address}
-              onChange={(e) => setAddress(e.target.value)}
-              className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm"
-            />
-            <input
-              placeholder="상세 주소"
-              value={detailAddress}
-              onChange={(e) => setDetailAddress(e.target.value)}
-              className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm"
-            />
+            <div>
+              <label htmlFor="customer-address" className="block text-xs font-bold text-gray-500 mb-1.5">
+                주소
+              </label>
+              <input
+                id="customer-address"
+                name="address-line1"
+                autoComplete="address-line1"
+                required
+                placeholder="기본 주소"
+                value={address}
+                onChange={(e) => setAddress(e.target.value)}
+                className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm"
+              />
+            </div>
+            <div>
+              <label htmlFor="customer-address-detail" className="block text-xs font-bold text-gray-500 mb-1.5">
+                상세 주소
+              </label>
+              <input
+                id="customer-address-detail"
+                name="address-line2"
+                autoComplete="address-line2"
+                placeholder="동, 호수"
+                value={detailAddress}
+                onChange={(e) => setDetailAddress(e.target.value)}
+                className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm"
+              />
+            </div>
             {user && (
               <div className="flex flex-wrap gap-2">
                 <button
@@ -736,12 +814,10 @@ export default function Checkout() {
           )}
 
           <section className="bg-white p-6 rounded-2xl border border-gray-200 space-y-4">
-            <h2 className="text-base font-bold text-venuea-dark">결제 수단 (Toss Payments)</h2>
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+            <h2 className="text-base font-bold text-venuea-dark">결제 수단</h2>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               {[
                 { id: "card", label: "신용/체크카드" },
-                { id: "kakao_pay", label: "카카오페이" },
-                { id: "naver_pay", label: "네이버페이" },
                 { id: "vbank", label: "가상계좌" },
                 { id: "transfer", label: "실시간 계좌이체" },
               ].map((m) => (
@@ -760,6 +836,7 @@ export default function Checkout() {
                 </button>
               ))}
             </div>
+            <p className="text-[11px] text-gray-400">카드 결제는 토스페이먼츠 결제창에서 진행됩니다.</p>
           </section>
         </div>
 
@@ -809,7 +886,7 @@ export default function Checkout() {
 
           <button
             type="submit"
-            disabled={isProcessing || cart.length === 0}
+            disabled={isProcessing || cart.length === 0 || (totalAmount > 0 && !TOSS_CLIENT_KEY)}
             className="w-full bg-venuea-dark text-white py-4 rounded-xl text-sm font-bold uppercase tracking-widest hover:bg-venuea-gold transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
           >
             {isProcessing ? <Loader2 size={18} className="animate-spin" /> : <CreditCard size={18} />}

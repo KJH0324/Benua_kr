@@ -150,7 +150,7 @@ export default function ProductDetail() {
 
   useEffect(() => {
     if (!product?.name) return;
-    document.title = `${product.name} | 베뉴아`;
+    document.title = `${product.name} | Benua`;
     rememberProduct(product);
     setActiveImage(product.image_url || "");
     setOptionId(0);
