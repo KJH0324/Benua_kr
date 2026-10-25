@@ -130,7 +130,7 @@ export default function Contact() {
           onChange={(e) =>
             setForm({ ...form, category: e.target.value, order_number: "" })
           }
-          className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm"
+          className="w-full border border-gray-200 bg-white rounded-xl px-4 py-3 text-sm"
         >
           <option value="오브제 문의">오브제 문의</option>
           <option value="배송 문의">배송 문의</option>
@@ -164,7 +164,7 @@ export default function Contact() {
                 required
                 value={form.order_number}
                 onChange={(e) => setForm({ ...form, order_number: e.target.value })}
-                className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm"
+                className="w-full border border-gray-200 bg-white rounded-xl px-4 py-3 text-sm"
               >
                 <option value="">주문번호를 선택해주세요</option>
                 {orders.map((order) => (
@@ -183,7 +183,7 @@ export default function Contact() {
           placeholder="성함"
           value={form.name}
           onChange={(e) => setForm({ ...form, name: e.target.value })}
-          className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm"
+          className="w-full border border-gray-200 bg-white rounded-xl px-4 py-3 text-sm"
         />
         <input
           type="email"
@@ -191,14 +191,14 @@ export default function Contact() {
           placeholder="답변 받을 이메일"
           value={form.email}
           onChange={(e) => setForm({ ...form, email: e.target.value })}
-          className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm"
+          className="w-full border border-gray-200 bg-white rounded-xl px-4 py-3 text-sm"
         />
         <input
           required
           placeholder="제목"
           value={form.subject}
           onChange={(e) => setForm({ ...form, subject: e.target.value })}
-          className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm"
+          className="w-full border border-gray-200 bg-white rounded-xl px-4 py-3 text-sm"
         />
         <textarea
           rows={5}
@@ -206,7 +206,7 @@ export default function Contact() {
           placeholder="문의 내용을 입력해주세요."
           value={form.message}
           onChange={(e) => setForm({ ...form, message: e.target.value })}
-          className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm"
+          className="w-full border border-gray-200 bg-white rounded-xl px-4 py-3 text-sm"
         />
         {user && (
           <>

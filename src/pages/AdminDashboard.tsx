@@ -1228,7 +1228,7 @@ function AdminOrders() {
   const [deleteError, setDeleteError] = useState("");
   const [isDeleting, setIsDeleting] = useState(false);
   const [refundPick, setRefundPick] = useState<number[]>([]);
-  const [refundReason, setRefundReason] = useState("제품 하자");
+  const [refundReason, setRefundReason] = useState("");
   const [waiveFees, setWaiveFees] = useState(false);
   const [pickupNeeded, setPickupNeeded] = useState(false);
 
@@ -1373,7 +1373,7 @@ function AdminOrders() {
   const openOrder = (order: Order) => {
     setSelectedOrder(order);
     setRefundPick([]);
-    setRefundReason("제품 하자");
+    setRefundReason("");
     setWaiveFees(false);
     setPickupNeeded(false);
     setTrackingForm({
@@ -1672,51 +1672,72 @@ function AdminOrders() {
               </div>
 
               <div className="border-t pt-4 space-y-2">
-                <h4 className="text-xs font-bold uppercase text-gray-400">주문 오브제 목록</h4>
+                <h4 className="text-xs font-bold uppercase text-gray-400">주문 상품</h4>
                 {selectedOrder.items?.map((item: any, idx) => {
                   const refunded = item.item_status === "refunded";
+                  const requested = item.item_status === "refund_requested";
                   return (
-                    <label
+                    <div
                       key={item.id || idx}
-                      className={cn(
-                        "flex justify-between text-sm py-1.5 border-b border-gray-50",
-                        refunded && "line-through text-red-600"
-                      )}
+                      className="flex justify-between text-sm py-1.5 border-b border-gray-50"
                     >
-                      <span className="flex items-center gap-2">
-                        {!refunded && (
-                          <input
-                            type="checkbox"
-                            checked={refundPick.includes(item.id)}
-                            onChange={(e) =>
-                              setRefundPick((prev) =>
-                                e.target.checked ? [...prev, item.id] : prev.filter((id) => id !== item.id)
-                              )
-                            }
-                          />
-                        )}
+                      <span className={refunded ? "text-gray-400 line-through" : ""}>
                         {item.name} × {item.quantity}
-                        {refunded ? " 환불 완료" : ""}
-                        {item.item_status === "refund_requested" ? " 환불 요청" : ""}
+                        {refunded ? <span className="ml-2 no-underline text-red-600 text-xs">환불 완료</span> : null}
+                        {requested ? <span className="ml-2 text-amber-700 text-xs">환불 요청</span> : null}
                       </span>
                       <span className="font-bold">{formatPrice(item.price * item.quantity)}</span>
-                    </label>
+                    </div>
                   );
                 })}
-                <input
-                  value={refundReason}
-                  onChange={(e) => setRefundReason(e.target.value)}
-                  placeholder="부분 취소 사유"
-                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm"
-                />
-                <label className="flex items-center gap-2 text-xs">
+              </div>
+
+              <div className="rounded-xl border border-gray-200 bg-gray-50 p-4 space-y-3">
+                <div>
+                  <h4 className="text-sm font-bold text-gray-800">부분 취소</h4>
+                  <p className="text-xs text-gray-500 mt-1">취소할 상품만 고르세요. 목록과는 별개입니다.</p>
+                </div>
+                <div className="space-y-1">
+                  {selectedOrder.items?.filter((item: any) => item.item_status !== "refunded").map((item: any) => (
+                    <label key={item.id} className="flex items-center gap-2 text-sm">
+                      <input
+                        type="checkbox"
+                        checked={refundPick.includes(item.id)}
+                        onChange={(e) =>
+                          setRefundPick((prev) =>
+                            e.target.checked ? [...prev, item.id] : prev.filter((id) => id !== item.id)
+                          )
+                        }
+                      />
+                      <span>
+                        {item.name} × {item.quantity}
+                      </span>
+                    </label>
+                  ))}
+                  {selectedOrder.items?.every((item: any) => item.item_status === "refunded") && (
+                    <p className="text-xs text-gray-500">취소할 상품이 없습니다.</p>
+                  )}
+                </div>
+                <div>
+                  <label htmlFor="refund-reason" className="block text-xs font-bold text-gray-500 mb-1">
+                    취소 사유
+                  </label>
+                  <input
+                    id="refund-reason"
+                    value={refundReason}
+                    onChange={(e) => setRefundReason(e.target.value)}
+                    placeholder="취소 사유"
+                    className="w-full border border-gray-200 bg-white rounded-lg px-3 py-2 text-sm"
+                  />
+                </div>
+                <label className="flex items-center gap-2 text-xs text-gray-700">
                   <input type="checkbox" checked={waiveFees} onChange={(e) => setWaiveFees(e.target.checked)} />
-                  배송비 포함 전액 환불
+                  배송비까지 포함해 환불
                 </label>
                 {afterShip(selectedOrder) && (
-                  <label className="flex items-center gap-2 text-xs">
+                  <label className="flex items-center gap-2 text-xs text-gray-700">
                     <input type="checkbox" checked={pickupNeeded} onChange={(e) => setPickupNeeded(e.target.checked)} />
-                    회수 필요
+                    상품을 회수한 뒤 환불
                   </label>
                 )}
                 <button
@@ -1724,7 +1745,7 @@ function AdminOrders() {
                   onClick={() => handleAdminPartial(selectedOrder)}
                   className="w-full bg-white border border-red-200 text-red-600 py-2.5 rounded-lg text-xs font-bold"
                 >
-                  선택 상품 취소
+                  고른 상품 취소
                 </button>
               </div>
 
@@ -2344,13 +2365,13 @@ function AdminCoupons() {
     name: "",
     code: "",
     type: "PERCENT",
-    value: 10,
-    min_order_amount: 30000,
-    max_discount_amount: 10000,
-    valid_days: 14,
+    value: "",
+    min_order_amount: "",
+    max_discount_amount: "",
+    valid_days: "",
   });
   const [giveMap, setGiveMap] = useState<Record<string, { email: string; days: string; skip: boolean }>>({});
-  const giveOf = (id: number | string) => giveMap[String(id)] || { email: "", days: "14", skip: true };
+  const giveOf = (id: number | string) => giveMap[String(id)] || { email: "", days: "", skip: true };
   const setGive = (id: number | string, patch: Partial<{ email: string; days: string; skip: boolean }>) => {
     const key = String(id);
     setGiveMap((prev) => ({ ...prev, [key]: { ...giveOf(id), ...prev[key], ...patch } }));
@@ -2370,7 +2391,13 @@ function AdminCoupons() {
     const res = await apiFetch("/api/admin/coupons", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(newCoupon),
+      body: JSON.stringify({
+        ...newCoupon,
+        value: Number(newCoupon.value) || 0,
+        min_order_amount: Number(newCoupon.min_order_amount) || 0,
+        max_discount_amount: Number(newCoupon.max_discount_amount) || 0,
+        valid_days: Number(newCoupon.valid_days) || 0,
+      }),
     });
     if (res.ok) {
       toast.success("쿠폰이 생성되었습니다.");
@@ -2378,10 +2405,10 @@ function AdminCoupons() {
         name: "",
         code: "",
         type: "PERCENT",
-        value: 10,
-        min_order_amount: 30000,
-        max_discount_amount: 10000,
-        valid_days: 14,
+        value: "",
+        min_order_amount: "",
+        max_discount_amount: "",
+        valid_days: "",
       });
       fetchCoupons();
     }
@@ -2443,22 +2470,14 @@ function AdminCoupons() {
           min={0}
           max={newCoupon.type === "PERCENT" ? 100 : undefined}
           value={newCoupon.value}
-          onChange={(e) =>
-            setNewCoupon({
-              ...newCoupon,
-              value:
-                newCoupon.type === "PERCENT"
-                  ? Math.min(100, Math.max(0, Number(e.target.value) || 0))
-                  : Number(e.target.value) || 0,
-            })
-          }
+          onChange={(e) => setNewCoupon({ ...newCoupon, value: e.target.value })}
           className="border rounded-lg px-3 py-2 text-sm"
         />
         <input
           type="number"
           placeholder="최소주문금액"
           value={newCoupon.min_order_amount}
-          onChange={(e) => setNewCoupon({ ...newCoupon, min_order_amount: Number(e.target.value) })}
+          onChange={(e) => setNewCoupon({ ...newCoupon, min_order_amount: e.target.value })}
           className="border rounded-lg px-3 py-2 text-sm"
         />
         {newCoupon.type === "PERCENT" && (
@@ -2467,7 +2486,7 @@ function AdminCoupons() {
             placeholder="최대할인금액"
             min={0}
             value={newCoupon.max_discount_amount}
-            onChange={(e) => setNewCoupon({ ...newCoupon, max_discount_amount: Number(e.target.value) })}
+            onChange={(e) => setNewCoupon({ ...newCoupon, max_discount_amount: e.target.value })}
             className="border rounded-lg px-3 py-2 text-sm"
           />
         )}
@@ -2475,7 +2494,7 @@ function AdminCoupons() {
           type="number"
           placeholder="유효일수"
           value={newCoupon.valid_days}
-          onChange={(e) => setNewCoupon({ ...newCoupon, valid_days: Number(e.target.value) })}
+          onChange={(e) => setNewCoupon({ ...newCoupon, valid_days: e.target.value })}
           className="border rounded-lg px-3 py-2 text-sm"
         />
         <button
@@ -2529,10 +2548,10 @@ function AdminCoupons() {
                 />
                 <input
                   type="number"
-                  placeholder="일"
+                  placeholder="유효일수"
                   value={giveOf(c.id).days}
                   onChange={(e) => setGive(c.id, { days: e.target.value })}
-                  className="w-14 border rounded px-2 py-1 text-xs"
+                  className="w-24 border rounded px-2 py-1 text-xs"
                 />
                 <label className="text-[11px] whitespace-nowrap">
                   <input
