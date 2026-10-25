@@ -9,6 +9,7 @@ export default function Shop() {
   const [keyword, setKeyword] = useState("");
   const [sort, setSort] = useState<"new" | "price-asc" | "price-desc" | "popular" | "reviews" | "discount">("new");
   const [tag, setTag] = useState("전체");
+  const [hideSoldOut, setHideSoldOut] = useState(false);
 
   useEffect(() => {
     apiFetch("/api/products")
