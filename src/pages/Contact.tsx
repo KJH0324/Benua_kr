@@ -96,6 +96,21 @@ export default function Contact() {
   return (
     <div className="pt-[120px] pb-24 px-6 max-w-xl mx-auto">
       <h1 className="text-3xl font-serif font-bold text-venuea-dark mb-8">1:1 고객 문의</h1>
+      <div className="mb-8 space-y-2">
+        {[
+          ["배송은 얼마나 걸리나요", "결제 후 영업일 기준 1~3일 안에 출고합니다. 사전예약 상품은 상품 페이지의 출고 일정을 따릅니다."],
+          ["무료배송 기준이 어떻게 되나요", "5만 원 이상, 블랙·더 블랙 등급은 무료배송입니다."],
+          ["단순 변심 반품비는 얼마인가요", "반품비는 운영 설정의 반품비를 따릅니다. 블랙·더 블랙은 반품비가 없습니다."],
+          ["발송 전에 주소를 바꿀 수 있나요", "배송 시작 전에는 마이페이지 주문 상세에서 바꿀 수 있습니다."],
+          ["환불은 언제 들어오나요", "결제 당일 전체 취소는 바로 반영됩니다. 부분 취소나 결제일 이후 취소는 영업일 기준 3~4일 걸립니다."],
+          ["사전예약 상품은 언제 오나요", "판매가 시작되면 예약하신 메일로 안내합니다."],
+        ].map(([q, a]) => (
+          <details key={q} className="bg-white rounded-xl px-4 py-3">
+            <summary className="text-sm font-bold cursor-pointer">{q}</summary>
+            <p className="pt-2 text-sm text-venuea-brown">{a}</p>
+          </details>
+        ))}
+      </div>
       <form onSubmit={handleSubmit} className="space-y-4">
         <select
           value={form.category}

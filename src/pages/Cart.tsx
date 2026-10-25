@@ -3,13 +3,14 @@ import { Link, useNavigate } from "react-router-dom";
 import { ArrowRight } from "lucide-react";
 import { formatPrice, shippingFee, FREE_SHIPPING_MIN } from "../lib/utils";
 import { apiFetch } from "../lib/api";
-import { cartKey, clearDirectCheckout, mergeServerCart, saveCart } from "../lib/cart";
+import { beginSelectedCheckout, cartKey, clearDirectCheckout, mergeServerCart, saveCart } from "../lib/cart";
 import { salePrice, type CardProduct } from "../components/ProductCard";
 import type { CartItem } from "../types";
 
 export default function Cart() {
   const navigate = useNavigate();
   const [cart, setCart] = useState<CartItem[]>([]);
+  const [pickedKeys, setPickedKeys] = useState<string[]>([]);
   const [freeShippingTier, setFreeShippingTier] = useState(false);
   const [picks, setPicks] = useState<CardProduct[]>([]);
 
@@ -41,9 +42,11 @@ export default function Cart() {
           quantity: Math.min(Math.max(1, Number(item.quantity) || 1), stock),
           image: product.image_url || item.image,
           option_id: Number(item.option_id) || 0,
+          options: product.options || [],
         });
       }
       setCart(next);
+      setPickedKeys(next.map((item) => cartKey(item as any)));
       await saveCart(next as any, "replace");
     };
     sync();
@@ -62,7 +65,8 @@ export default function Cart() {
     saveCart(next as any, "replace");
   };
 
-  const subtotal = cart.reduce((sum, i) => sum + i.price * i.quantity, 0);
+  const picked = cart.filter((item) => pickedKeys.includes(cartKey(item as any)));
+  const subtotal = picked.reduce((sum, i) => sum + i.price * i.quantity, 0);
   const shipping = shippingFee(subtotal, freeShippingTier);
   const remain = Math.max(0, FREE_SHIPPING_MIN - subtotal);
   const progress = freeShippingTier || subtotal >= FREE_SHIPPING_MIN ? 100 : Math.min(100, (subtotal / FREE_SHIPPING_MIN) * 100);
@@ -101,18 +105,83 @@ export default function Cart() {
         </div>
       ) : (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-10">
-          <div className="lg:col-span-2 divide-y border-t border-b">
+          <div className="lg:col-span-2">
+            <div className="flex items-center justify-between py-3 text-sm">
+              <label className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={pickedKeys.length === cart.length}
+                  onChange={(e) => setPickedKeys(e.target.checked ? cart.map((item) => cartKey(item as any)) : [])}
+                />
+                전체 선택
+              </label>
+              <button
+                type="button"
+                onClick={() => updateCart(cart.filter((item) => !pickedKeys.includes(cartKey(item as any))))}
+                className="text-venuea-muted"
+              >
+                선택 삭제
+              </button>
+            </div>
+            <div className="divide-y border-t border-b">
             {cart.map((item) => (
               <div key={cartKey(item as any)} className="py-5 flex items-center justify-between gap-4">
                 <div className="flex items-center gap-4">
+                  <input
+                    type="checkbox"
+                    checked={pickedKeys.includes(cartKey(item as any))}
+                    onChange={(e) => {
+                      const key = cartKey(item as any);
+                      setPickedKeys((prev) => (e.target.checked ? [...prev, key] : prev.filter((row) => row !== key)));
+                    }}
+                  />
                   <img
                     src={item.image || "https://picsum.photos/seed/objet/120/120"}
                     alt={item.name}
+                    loading="lazy"
+                    decoding="async"
                     className="w-20 h-20 rounded-xl object-cover bg-gray-100"
                   />
                   <div>
                     <h3 className="text-sm font-bold text-venuea-dark">{item.name}</h3>
                     <p className="text-xs text-gray-500 mt-1">{formatPrice(item.price)}</p>
+                    {Array.isArray((item as any).options) && (item as any).options.length > 0 && (
+                      <select
+                        value={Number(item.option_id) || 0}
+                        onChange={(e) => {
+                          const option = (item as any).options.find((row: any) => Number(row.id) === Number(e.target.value));
+                          if (!option) return;
+                          const baseName = item.name.replace(/\s\([^)]+\)$/, "");
+                          const nextItem = {
+                            ...item,
+                            option_id: Number(option.id),
+                            option_name: option.name,
+                            name: `${baseName} (${option.name})`,
+                            stock: Number(option.stock) || item.stock,
+                            price: Math.max(0, item.price - (Number((item as any).extra_price) || 0)) + (Number(option.extra_price) || 0),
+                            extra_price: Number(option.extra_price) || 0,
+                          };
+                          const without = cart.filter((row) => cartKey(row as any) !== cartKey(item as any));
+                          const same = without.find((row) => cartKey(row as any) === cartKey(nextItem as any));
+                          updateCart(
+                            same
+                              ? without.map((row) =>
+                                  cartKey(row as any) === cartKey(nextItem as any)
+                                    ? { ...row, quantity: row.quantity + item.quantity }
+                                    : row
+                                )
+                              : [...without, nextItem]
+                          );
+                        }}
+                        className="mt-2 border border-black/10 rounded-lg px-2 py-1 text-xs"
+                      >
+                        {(item as any).options.map((option: any) => (
+                          <option key={option.id} value={option.id}>
+                            {option.name}
+                          </option>
+                        ))}
+                      </select>
+                    )}
                   </div>
                 </div>
 
@@ -169,6 +238,7 @@ export default function Cart() {
                 </div>
               </div>
             ))}
+            </div>
           </div>
 
           <div className="bg-white p-6 rounded-2xl h-fit space-y-4">
@@ -224,7 +294,9 @@ export default function Cart() {
             </div>
             <button
               onClick={() => {
+                if (picked.length === 0) return;
                 clearDirectCheckout();
+                beginSelectedCheckout(picked as any);
                 navigate("/checkout");
               }}
               className="w-full bg-venuea-green text-white py-4 rounded-xl text-sm font-bold hover:bg-[#2d4a2c] flex items-center justify-center gap-2"

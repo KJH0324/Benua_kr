@@ -131,6 +131,8 @@ export default function AdminDashboard() {
     { name: "정산 관리", path: `${adminPathBase}/settlement`, icon: FileText },
     { name: "운송장 일괄등록", path: `${adminPathBase}/fulfillment`, icon: Truck },
     { name: "리뷰 관리", path: `${adminPathBase}/reviews`, icon: MessageSquare },
+    { name: "상품 Q&A", path: `${adminPathBase}/questions`, icon: MessageSquare },
+    { name: "전환 리포트", path: `${adminPathBase}/funnel`, icon: Activity },
     { name: "전시/배너 관리", path: `${adminPathBase}/display`, icon: LayoutDashboard },
     { name: "1:1 문의 관리", path: `${adminPathBase}/inquiries`, icon: MessageSquare },
     { name: "받은 메일", path: `${adminPathBase}/inbox`, icon: Mail },
@@ -310,6 +312,8 @@ export default function AdminDashboard() {
           <Route path="/settlement" element={<AdminSettlement />} />
           <Route path="/fulfillment" element={<AdminFulfillment />} />
           <Route path="/reviews" element={<AdminReviews />} />
+          <Route path="/questions" element={<AdminQuestions />} />
+          <Route path="/funnel" element={<AdminFunnel />} />
           <Route path="/display" element={<AdminDisplay />} />
           <Route path="/customers" element={<AdminUserPoints adminRole={adminRole} />} />
           <Route path="/coupons" element={<AdminCoupons />} />
@@ -373,6 +377,10 @@ function AdminOverview() {
         <div className="bg-white p-6 rounded-xl border border-gray-100 shadow-sm">
           <h3 className="text-xs font-bold text-gray-400 uppercase tracking-widest">품절 임박 오브제</h3>
           <p className="text-2xl font-bold mt-2">{stats.lowStockProducts}개</p>
+        </div>
+        <div className="bg-white p-6 rounded-xl border border-gray-100 shadow-sm">
+          <h3 className="text-xs font-bold text-gray-400 uppercase tracking-widest">배송 지연</h3>
+          <p className="text-2xl font-bold mt-2">{stats.delayedShipping || 0}건</p>
         </div>
       </div>
 
@@ -825,6 +833,37 @@ function AdminProducts() {
                         예약
                       </button>
                       <button
+                        type="button"
+                        onClick={async () => {
+                          const res = await apiFetch(`/api/admin/products/${product.id}/duplicate`, { method: "POST" });
+                          if (res.ok) {
+                            toast.success("상품을 복제했습니다.");
+                            fetchProducts();
+                          }
+                        }}
+                        className="text-xs font-bold px-2"
+                      >
+                        복제
+                      </button>
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          await apiFetch(`/api/admin/products/${product.id}/display`, {
+                            method: "PATCH",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({
+                              pinned: (product as any).pinned ? 0 : 1,
+                              sort_order: Number((product as any).sort_order) || 0,
+                              tags: (product as any).tags || "",
+                            }),
+                          });
+                          fetchProducts();
+                        }}
+                        className="text-xs font-bold px-2"
+                      >
+                        {(product as any).pinned ? "고정됨" : "상단 고정"}
+                      </button>
+                      <button
                         onClick={() => handleEditClick(product)}
                         className="text-venuea-dark hover:text-venuea-gold p-1.5"
                       >
@@ -1179,7 +1218,9 @@ function AdminOrders() {
   const [params] = useSearchParams();
   const [orders, setOrders] = useState<Order[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [statusFilter, setStatusFilter] = useState<string>("ALL");
+  const [query, setQuery] = useState("");
+  const [methodFilter, setMethodFilter] = useState("ALL");
+  const [range, setRange] = useState("all");
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
   const [trackingForm, setTrackingForm] = useState({
     company: "CJ대한통운",
@@ -1390,8 +1431,28 @@ function AdminOrders() {
     }
   };
 
-  const filteredOrders =
-    statusFilter === "ALL" ? orders : orders.filter((o) => o.status === statusFilter);
+  const filteredOrders = orders.filter((order) => {
+    if (statusFilter !== "ALL" && order.status !== statusFilter) return false;
+    if (methodFilter !== "ALL" && order.payment_method !== methodFilter) return false;
+    const q = query.trim().toLowerCase();
+    if (q) {
+      const blob = [order.order_number, order.customer_name, order.customer_phone, order.tracking_number]
+        .join(" ")
+        .toLowerCase();
+      if (!blob.includes(q)) return false;
+    }
+    if (range !== "all" && order.created_at) {
+      const days = range === "today" ? 1 : range === "week" ? 7 : 30;
+      if (Date.now() - new Date(order.created_at).getTime() > days * 86400000) return false;
+    }
+    return true;
+  });
+  const packGroups = new Map<string, number>();
+  for (const order of orders) {
+    if (order.status !== "paid") continue;
+    const key = `${order.customer_phone}|${order.shipping_address}`;
+    packGroups.set(key, (packGroups.get(key) || 0) + 1);
+  }
 
   return (
     <div className="space-y-6">
@@ -1409,6 +1470,21 @@ function AdminOrders() {
       </header>
 
       <div className="flex flex-wrap gap-2">
+        <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="주문번호, 수령인, 연락처, 운송장" className="border border-gray-200 rounded-lg px-3 py-2 text-sm" />
+        <select value={methodFilter} onChange={(e) => setMethodFilter(e.target.value)} className="border border-gray-200 rounded-lg px-3 py-2 text-sm">
+          <option value="ALL">결제수단 전체</option>
+          <option value="card">카드</option>
+          <option value="kakao_pay">카카오페이</option>
+          <option value="naver_pay">네이버페이</option>
+          <option value="vbank">가상계좌</option>
+          <option value="transfer">계좌이체</option>
+        </select>
+        <select value={range} onChange={(e) => setRange(e.target.value)} className="border border-gray-200 rounded-lg px-3 py-2 text-sm">
+          <option value="all">전체 기간</option>
+          <option value="today">오늘</option>
+          <option value="week">1주일</option>
+          <option value="month">1개월</option>
+        </select>
         {["ALL", "pending", "paid", "preparing", "shipping", "delivered", "completed", "refund_requested", "refunded"].map(
           (st) => (
             <button
@@ -1430,7 +1506,7 @@ function AdminOrders() {
       <div className="bg-white rounded-xl border border-gray-200 overflow-hidden shadow-sm">
         <div className="overflow-x-auto">
           <table className="w-full text-left">
-            <thead className="bg-gray-50 border-b border-gray-200">
+            <thead className="bg-gray-50 border-b border-gray-200 hidden md:table-header-group">
               <tr>
                 <th className="px-6 py-3.5 text-xs font-bold uppercase text-gray-500">주문번호 / 일시</th>
                 <th className="px-6 py-3.5 text-xs font-bold uppercase text-gray-500">주문자</th>
@@ -1456,7 +1532,7 @@ function AdminOrders() {
                 </tr>
               ) : (
                 filteredOrders.map((order) => (
-                  <tr key={order.id} className="hover:bg-gray-50">
+                  <tr key={order.id} className="hover:bg-gray-50 block md:table-row border-b md:border-0 p-2 md:p-0">
                     <td className="px-6 py-4">
                       <p className="font-mono font-bold text-gray-900">{order.order_number}</p>
                       <p className="text-xs text-gray-400">
@@ -1546,6 +1622,29 @@ function AdminOrders() {
                   <span className="font-bold text-gray-500 mr-2">배송지:</span>
                   {selectedOrder.shipping_address}
                 </p>
+                {(selectedOrder as any).shipping_memo && <p>요청: {(selectedOrder as any).shipping_memo}</p>}
+                {(packGroups.get(`${selectedOrder.customer_phone}|${selectedOrder.shipping_address}`) || 0) > 1 && (
+                  <p className="text-xs font-bold text-venuea-green">
+                    합포장 가능 {packGroups.get(`${selectedOrder.customer_phone}|${selectedOrder.shipping_address}`)}건
+                  </p>
+                )}
+                <button
+                  type="button"
+                  onClick={() => {
+                    const slip = window.open("", "_blank");
+                    if (!slip) return;
+                    const items = (selectedOrder.items || [])
+                      .map((item) => `<li>${item.name} × ${item.quantity}</li>`)
+                      .join("");
+                    slip.document.write(
+                      `<html><head><title>패킹 슬립</title></head><body style="font-family:sans-serif;padding:24px"><h1>BENUA</h1><p>${selectedOrder.order_number}</p><p>${selectedOrder.customer_name}</p><ul>${items}</ul><p>오늘도 수고한 당신의 집이, 가장 다정한 쉼이 되기를. soft living mood, Benua.</p><script>print()</script></body></html>`
+                    );
+                    slip.document.close();
+                  }}
+                  className="text-xs font-bold text-venuea-green"
+                >
+                  패킹 슬립 인쇄
+                </button>
                 {selectedOrder.refund_reason && (
                   <p className="text-red-600 bg-red-50 p-3 rounded-lg text-xs">
                     <b>환불 요청 사유:</b> {selectedOrder.refund_reason} (예상 환불액:{" "}
@@ -1661,6 +1760,37 @@ function AdminOrders() {
                   </button>
                 </div>
               </div>
+              <form
+                className="border-t pt-4 space-y-2"
+                onSubmit={async (e) => {
+                  e.preventDefault();
+                  const form = e.currentTarget;
+                  const res = await apiFetch(`/api/admin/orders/${selectedOrder.id}/return-tracking`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                      return_carrier: (form.elements.namedItem("carrier") as HTMLSelectElement).value,
+                      return_tracking_number: (form.elements.namedItem("invoice") as HTMLInputElement).value,
+                    }),
+                  });
+                  const data = await res.json().catch(() => ({}));
+                  if (!res.ok) toast.error(data.error || "회수 운송장을 저장하지 못했습니다.");
+                  else toast.success("회수 운송장을 저장했습니다.");
+                }}
+              >
+                <h4 className="text-xs font-bold uppercase text-gray-400">회수 운송장</h4>
+                <div className="flex gap-2">
+                  <select name="carrier" defaultValue={(selectedOrder as any).return_carrier || "CJ대한통운"} className="border rounded-lg px-2 py-2 text-sm">
+                    <option>CJ대한통운</option>
+                    <option>우체국택배</option>
+                    <option>한진택배</option>
+                    <option>로젠택배</option>
+                    <option>롯데택배</option>
+                  </select>
+                  <input name="invoice" defaultValue={(selectedOrder as any).return_tracking_number || ""} placeholder="회수 운송장" className="flex-1 border rounded-lg px-3 py-2 text-sm" />
+                  <button className="text-xs font-bold px-3">저장</button>
+                </div>
+              </form>
 
               {selectedOrder.status === "refund_requested" && (
                 <div className="border-t pt-4 flex gap-3">
@@ -1870,14 +2000,30 @@ function AdminSettlement() {
           className="border border-gray-200 p-2 rounded-lg text-sm"
         />
       </div>
+      <button
+        type="button"
+        onClick={() => {
+          const header = "결제수단,주문건수,총결제,공급가액,부가세,환불,수수료,실정산";
+          const lines = report.map((r) =>
+            [r.payment_method, r.order_count, r.total_amount, r.supply_amount, r.vat, r.refunded, r.commission, r.net_amount].join(",")
+          );
+          downloadCsv("benua_settlement.csv", [header, ...lines].join("\n"));
+        }}
+        className="mb-4 border border-gray-200 px-3 py-2 rounded-lg text-sm font-bold"
+      >
+        CSV
+      </button>
       <table className="w-full text-sm">
         <thead className="bg-gray-50 border-b">
           <tr>
             <th className="text-left p-3">결제수단</th>
             <th className="text-right p-3">주문건수</th>
             <th className="text-right p-3">총 결제금액</th>
+            <th className="text-right p-3">공급가액</th>
+            <th className="text-right p-3">부가세</th>
+            <th className="text-right p-3">환불</th>
             <th className="text-right p-3">PG 수수료</th>
-            <th className="text-right p-3">정산 예정금액</th>
+            <th className="text-right p-3">실정산</th>
           </tr>
         </thead>
         <tbody className="divide-y">
@@ -1886,6 +2032,9 @@ function AdminSettlement() {
               <td className="p-3 font-medium uppercase">{r.payment_method}</td>
               <td className="text-right p-3">{r.order_count}건</td>
               <td className="text-right p-3">{formatPrice(r.total_amount)}</td>
+              <td className="text-right p-3">{formatPrice(r.supply_amount || 0)}</td>
+              <td className="text-right p-3">{formatPrice(r.vat || 0)}</td>
+              <td className="text-right p-3">{formatPrice(r.refunded || 0)}</td>
               <td className="text-right p-3 text-red-500">-{formatPrice(r.commission)}</td>
               <td className="text-right p-3 font-bold">{formatPrice(r.net_amount)}</td>
             </tr>
@@ -2008,6 +2157,24 @@ function AdminReviews() {
               <td className="p-3 font-medium">{r.product_name || "-"}</td>
               <td className="p-3 text-gray-500">{r.user_name}</td>
               <td className="p-3">{r.content}</td>
+              <td className="p-3">
+                <form
+                  className="flex gap-1"
+                  onSubmit={async (e) => {
+                    e.preventDefault();
+                    const input = (e.currentTarget.elements.namedItem("reply") as HTMLInputElement).value;
+                    await apiFetch(`/api/admin/reviews/${r.id}/reply`, {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ admin_reply: input }),
+                    });
+                    toast.success("답글을 저장했습니다.");
+                  }}
+                >
+                  <input name="reply" defaultValue={r.admin_reply || ""} className="border rounded px-2 py-1 text-xs w-40" />
+                  <button className="text-xs font-bold">답글</button>
+                </form>
+              </td>
               <td className="text-right p-3">★ {r.rating}</td>
               <td className="text-right p-3">
                 <button
@@ -2852,6 +3019,7 @@ function AdminSettings() {
   }, []);
 
   return (
+    <>
     <form
       className="bg-white p-6 rounded-2xl border border-gray-100 max-w-lg space-y-3"
       onSubmit={async (e) => {
@@ -2886,6 +3054,8 @@ function AdminSettings() {
         저장
       </button>
     </form>
+    <SystemCard />
+    </>
   );
 }
 
@@ -2897,6 +3067,7 @@ function AdminNewsletter() {
   const [subject, setSubject] = useState("");
   const [content, setContent] = useState("");
   const [isSending, setIsSending] = useState(false);
+  const [audience, setAudience] = useState("all");
   const [testEmail, setTestEmail] = useState("");
   const [pendingEmail, setPendingEmail] = useState<string | null>(null);
 
@@ -2924,7 +3095,7 @@ function AdminNewsletter() {
       const res = await apiFetch("/api/admin/newsletter/send", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ subject, content, test_email: test ? testEmail.trim() : "" }),
+        body: JSON.stringify({ subject, content, audience, test_email: test ? testEmail.trim() : "" }),
       });
       if (res.ok) {
         toast.success(test ? "테스트 메일을 보냈습니다." : "뉴스레터가 발송되었습니다.");
@@ -2955,6 +3126,11 @@ function AdminNewsletter() {
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 animate-in fade-in">
       <div className="bg-white p-8 rounded-2xl border border-gray-100 space-y-4">
         <h3 className="text-xl font-bold font-serif">뉴스레터 발송</h3>
+        <select value={audience} onChange={(e) => setAudience(e.target.value)} className="w-full border rounded-xl px-4 py-3 text-sm">
+          <option value="all">전체 구독자</option>
+          <option value="vip">BLACK 이상</option>
+          <option value="dormant">최근 3개월 미구매</option>
+        </select>
         <input
           value={subject}
           onChange={(e) => setSubject(e.target.value)}
@@ -3166,6 +3342,123 @@ function AdminKeys({ adminRole }: { adminRole: string }) {
           </tbody>
         </table>
       </div>
+    </div>
+  );
+}
+
+function AdminQuestions() {
+  const [rows, setRows] = useState<any[]>([]);
+  const [templates, setTemplates] = useState<any[]>([]);
+  const load = () => {
+    apiFetch("/api/admin/questions").then((r) => r.json()).then((d) => setRows(Array.isArray(d) ? d : [])).catch(() => {});
+    apiFetch("/api/admin/reply-templates").then((r) => r.json()).then((d) => setTemplates(Array.isArray(d) ? d : [])).catch(() => {});
+  };
+  useEffect(() => { load(); }, []);
+  return (
+    <div className="space-y-4">
+      <h2 className="text-xl font-serif font-bold">상품 Q&A</h2>
+      <form
+        className="bg-white p-4 rounded-2xl flex gap-2"
+        onSubmit={async (e) => {
+          e.preventDefault();
+          const form = e.currentTarget;
+          await apiFetch("/api/admin/reply-templates", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              title: (form.elements.namedItem("title") as HTMLInputElement).value,
+              body: (form.elements.namedItem("body") as HTMLInputElement).value,
+            }),
+          });
+          form.reset();
+          load();
+        }}
+      >
+        <input name="title" placeholder="템플릿 이름" className="border rounded-lg px-3 py-2 text-sm" />
+        <input name="body" placeholder="자주 쓰는 문구" className="flex-1 border rounded-lg px-3 py-2 text-sm" />
+        <button className="text-sm font-bold">저장</button>
+      </form>
+      {rows.map((row) => (
+        <form
+          key={row.id}
+          className="bg-white p-4 rounded-2xl space-y-2"
+          onSubmit={async (e) => {
+            e.preventDefault();
+            const answer = (e.currentTarget.elements.namedItem("answer") as HTMLTextAreaElement).value;
+            await apiFetch(`/api/admin/questions/${row.id}/answer`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ answer }),
+            });
+            toast.success("답변을 저장했습니다.");
+            load();
+          }}
+        >
+          <p className="text-sm font-bold">{row.product_name} · {row.author}</p>
+          <p className="text-sm">{row.question}</p>
+          <textarea name="answer" defaultValue={row.answer || ""} className="w-full border rounded-xl p-3 text-sm" rows={3} />
+          {templates.length > 0 && (
+            <select
+              className="border rounded-lg px-2 py-1 text-xs"
+              onChange={(e) => {
+                const found = templates.find((item) => String(item.id) === e.target.value);
+                const area = e.currentTarget.form?.elements.namedItem("answer") as HTMLTextAreaElement | null;
+                if (found && area) area.value = found.body;
+              }}
+            >
+              <option value="">문구 불러오기</option>
+              {templates.map((item) => (
+                <option key={item.id} value={item.id}>{item.title}</option>
+              ))}
+            </select>
+          )}
+          <button className="text-sm font-bold text-venuea-green">답변</button>
+        </form>
+      ))}
+    </div>
+  );
+}
+
+function AdminFunnel() {
+  const [rows, setRows] = useState<any[]>([]);
+  useEffect(() => {
+    apiFetch("/api/admin/funnel").then((r) => r.json()).then((d) => setRows(Array.isArray(d) ? d : [])).catch(() => {});
+  }, []);
+  return (
+    <div className="bg-white p-6 rounded-2xl overflow-x-auto">
+      <h2 className="text-xl font-serif font-bold mb-4">상품 전환</h2>
+      <table className="w-full text-sm">
+        <thead><tr><th className="text-left p-2">상품</th><th>조회</th><th>찜</th><th>장바구니</th><th>결제</th></tr></thead>
+        <tbody>
+          {rows.map((row) => (
+            <tr key={row.id} className="border-t">
+              <td className="p-2">{row.name}</td>
+              <td className="text-center">{row.views}</td>
+              <td className="text-center">{row.wishes}</td>
+              <td className="text-center">{row.carts}</td>
+              <td className="text-center">{row.sold}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function SystemCard() {
+  const [info, setInfo] = useState<any>(null);
+  useEffect(() => {
+    apiFetch("/api/admin/system").then((r) => (r.ok ? r.json() : null)).then(setInfo).catch(() => {});
+  }, []);
+  if (!info) return null;
+  const mb = (n: number) => `${(Number(n || 0) / 1024 / 1024).toFixed(1)}MB`;
+  return (
+    <div className="mt-6 bg-white rounded-2xl border p-4 text-sm space-y-1">
+      <p className="font-bold">시스템</p>
+      <p>DB {mb(info.db_bytes)} · 업로드 {mb(info.upload_bytes)}</p>
+      <p>최근 백업 {info.last_backup || "없음"}</p>
+      <p>토스 {info.toss ? "연결" : "없음"} · 메일 {info.resend ? "연결" : "없음"} · 배송조회 {info.sweettracker ? "연결" : "없음"}</p>
+      <p>구글 {info.google ? "연결" : "없음"} · 네이버 {info.naver ? "연결" : "없음"} · 카카오 {info.kakao ? "연결" : "없음"}</p>
     </div>
   );
 }

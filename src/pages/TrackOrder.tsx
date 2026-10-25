@@ -112,6 +112,12 @@ export default function TrackOrder() {
               <span>결제금액</span>
               <span>{formatPrice(order.total_amount)}</span>
             </div>
+            {(order.receipt_url || order.cash_receipt_url) && (
+              <div className="flex gap-3 text-sm font-bold text-venuea-green">
+                {order.receipt_url && <a href={order.receipt_url} target="_blank" rel="noreferrer">영수증</a>}
+                {order.cash_receipt_url && <a href={order.cash_receipt_url} target="_blank" rel="noreferrer">현금영수증</a>}
+              </div>
+            )}
           </div>
 
           {order.tracking_number && (

@@ -287,6 +287,14 @@ if (!fs.existsSync(uploadsDir)) {
   fs.mkdirSync(uploadsDir, { recursive: true });
 }
 
+const removeUpload = (url?: string | null) => {
+  const rel = String(url || "");
+  if (!rel.startsWith("/uploads/")) return;
+  const file = path.resolve(process.cwd(), rel.replace(/^\//, ""));
+  if (!file.startsWith(uploadsDir)) return;
+  if (fs.existsSync(file)) fs.unlinkSync(file);
+};
+
 const storage = multer.diskStorage({
   destination: (_req, _file, cb) => cb(null, "uploads/"),
   filename: (_req, file, cb) => {
@@ -295,13 +303,29 @@ const storage = multer.diskStorage({
   },
 });
 
+const IMAGE_EXT = new Set([".jpg", ".jpeg", ".png", ".webp", ".gif"]);
 const upload = multer({
   storage,
   limits: { fileSize: 20 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    const ext = path.extname(file.originalname || "").toLowerCase();
+    if (ext === ".csv" || file.mimetype === "text/csv" || file.mimetype === "text/plain") {
+      cb(null, true);
+      return;
+    }
+    const mimeOk = ["image/jpeg", "image/png", "image/webp", "image/gif"].includes(file.mimetype);
+    if (!mimeOk || !IMAGE_EXT.has(ext)) {
+      cb(new Error("이미지 파일만 올릴 수 있습니다."));
+      return;
+    }
+    cb(null, true);
+  },
 });
 
 const toWebp = async (file?: { path?: string; filename?: string; mimetype?: string } | null) => {
-  if (!file?.path || !String(file.mimetype || "").startsWith("image/") || file.mimetype === "image/gif") return;
+  if (!file?.path) return;
+  await assertImageFile(file);
+  if (!String(file.mimetype || "").startsWith("image/") || file.mimetype === "image/gif") return;
   const dest = file.path.replace(/\.[^.]+$/, "") + ".webp";
   const tmp = `${dest}.part`;
   try {
@@ -624,6 +648,26 @@ const runMigrations = () => {
   ensureColumn("orders", "approve_no", "TEXT");
   ensureColumn("orders", "refunded_total", "INTEGER DEFAULT 0");
   ensureColumn("orders", "points_clawed", "INTEGER DEFAULT 0");
+  ensureColumn("orders", "receipt_url", "TEXT");
+  ensureColumn("orders", "cash_receipt_url", "TEXT");
+  ensureColumn("orders", "shipping_memo", "TEXT");
+  ensureColumn("orders", "refund_bank", "TEXT");
+  ensureColumn("orders", "refund_account", "TEXT");
+  ensureColumn("orders", "refund_holder", "TEXT");
+  ensureColumn("orders", "return_carrier", "TEXT");
+  ensureColumn("orders", "return_tracking_number", "TEXT");
+  ensureColumn("orders", "shipped_at", "DATETIME");
+  ensureColumn("orders", "is_gift", "INTEGER DEFAULT 0");
+  ensureColumn("orders", "gift_token", "TEXT");
+  ensureColumn("orders", "gift_message", "TEXT");
+  ensureColumn("orders", "review_reminded", "INTEGER DEFAULT 0");
+  ensureColumn("products", "sort_order", "INTEGER DEFAULT 0");
+  ensureColumn("products", "pinned", "INTEGER DEFAULT 0");
+  ensureColumn("products", "tags", "TEXT");
+  ensureColumn("products", "view_count", "INTEGER DEFAULT 0");
+  ensureColumn("products", "cart_count", "INTEGER DEFAULT 0");
+  ensureColumn("reviews", "admin_reply", "TEXT");
+  ensureColumn("reviews", "admin_replied_at", "DATETIME");
   ensureColumn("coupons", "valid_days", "INTEGER");
   ensureColumn("inbound_emails", "replied_at", "TEXT");
   ensureColumn("inbound_emails", "reply_body", "TEXT");
@@ -676,6 +720,30 @@ const runMigrations = () => {
     CREATE TABLE IF NOT EXISTS shop_settings (
       key TEXT PRIMARY KEY,
       value TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS stock_logs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      product_id INTEGER,
+      option_id INTEGER,
+      delta INTEGER,
+      before_qty INTEGER,
+      after_qty INTEGER,
+      reason TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE TABLE IF NOT EXISTS newsletter_logs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      subject TEXT,
+      body TEXT,
+      audience TEXT,
+      sent_count INTEGER DEFAULT 0,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE TABLE IF NOT EXISTS reply_templates (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      title TEXT NOT NULL,
+      body TEXT NOT NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
   `);
   const settingDefaults: Record<string, string> = {
@@ -732,6 +800,19 @@ const runMigrations = () => {
          SELECT MAX(id) FROM user_coupons WHERE coupon_id = ? AND is_used = 0 GROUP BY user_id
        )`
   ).run(welcomeId, welcomeId);
+
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_orders_user ON orders(user_id);
+    CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status, status_updated_at);
+    CREATE INDEX IF NOT EXISTS idx_order_items_order ON order_items(order_id);
+    CREATE INDEX IF NOT EXISTS idx_reviews_product ON reviews(product_id, is_hidden);
+    CREATE INDEX IF NOT EXISTS idx_point_history_user ON point_history(user_id);
+    CREATE INDEX IF NOT EXISTS idx_user_coupons_user ON user_coupons(user_id, is_used);
+    CREATE INDEX IF NOT EXISTS idx_admin_logs_created ON admin_logs(created_at);
+    CREATE INDEX IF NOT EXISTS idx_wishlists_product ON wishlists(product_id);
+    CREATE INDEX IF NOT EXISTS idx_products_sort ON products(pinned, sort_order);
+    CREATE INDEX IF NOT EXISTS idx_stock_logs_product ON stock_logs(product_id, id);
+  `);
 };
 
 runMigrations();
@@ -816,6 +897,56 @@ const codeMatches = (email: string, code: string) => {
 
 const clearVbankAccount = (orderId: number | string) => {
   db.prepare("UPDATE orders SET vbank_account = NULL WHERE id = ?").run(orderId);
+};
+
+const logStock = (productId: number | null, optionId: number | null, delta: number, reason: string) => {
+  const before = productId
+    ? Number((db.prepare("SELECT stock FROM products WHERE id = ?").get(productId) as any)?.stock) || 0
+    : optionId
+      ? Number((db.prepare("SELECT stock FROM product_options WHERE id = ?").get(optionId) as any)?.stock) || 0
+      : 0;
+  db.prepare(
+    "INSERT INTO stock_logs (product_id, option_id, delta, before_qty, after_qty, reason) VALUES (?, ?, ?, ?, ?, ?)"
+  ).run(productId, optionId, delta, before, before + delta, reason);
+};
+
+const invoiceError = (company: string, invoice: string) => {
+  const raw = String(invoice || "").trim();
+  if (!raw) return "운송장 번호를 입력해주세요.";
+  if (/e\+|E\+/.test(raw)) return "엑셀 숫자 형식입니다. 송장을 텍스트로 다시 입력해주세요.";
+  const digits = raw.replace(/\D/g, "");
+  const span: Record<string, [number, number]> = {
+    CJ대한통운: [10, 12],
+    우체국택배: [13, 13],
+    한진택배: [10, 12],
+    로젠택배: [10, 11],
+    롯데택배: [10, 12],
+  };
+  const rule = span[company];
+  if (rule && (digits.length < rule[0] || digits.length > rule[1])) {
+    return `${company} 운송장 자릿수가 맞지 않습니다.`;
+  }
+  return "";
+};
+
+const assertImageFile = async (file?: { path?: string; mimetype?: string } | null) => {
+  if (!file?.path) return;
+  const buf = fs.readFileSync(file.path);
+  const jpeg = buf[0] === 0xff && buf[1] === 0xd8;
+  const png = buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47;
+  const gif = buf.slice(0, 3).toString() === "GIF";
+  const webp = buf.slice(0, 4).toString() === "RIFF" && buf.slice(8, 12).toString() === "WEBP";
+  if (!jpeg && !png && !gif && !webp) {
+    fs.unlinkSync(file.path);
+    throw new Error("이미지 파일이 아닙니다.");
+  }
+  if (file.mimetype === "image/gif") return;
+  const sharpMod = await import("sharp");
+  const meta = await sharpMod.default(file.path).metadata();
+  if (!meta.width || !meta.height) {
+    fs.unlinkSync(file.path);
+    throw new Error("이미지 파일이 아닙니다.");
+  }
 };
 
 const presentOrder = (order: any) => {
@@ -942,6 +1073,24 @@ const clientIp = (req: express.Request) =>
   String(req.headers["x-forwarded-for"] || req.socket.remoteAddress || "unknown")
     .split(",")[0]
     .trim();
+
+const warnedAdminIps = new Set<string>();
+const warnAdminLogin = (ip: string) => {
+  if (warnedAdminIps.has(ip)) return;
+  warnedAdminIps.add(ip);
+  setTimeout(() => warnedAdminIps.delete(ip), 15 * 60 * 1000).unref?.();
+  const emails = db
+    .prepare("SELECT notify_email FROM admin_keys WHERE notify_email IS NOT NULL AND notify_email != ''")
+    .all() as Array<{ notify_email: string }>;
+  for (const row of emails) {
+    sendMail(
+      row.notify_email,
+      "관리자 로그인 시도가 있었습니다",
+      `<p>${escapeHtml(ip)} 에서 관리자 로그인이 반복해서 실패했습니다.</p><p>${new Date().toISOString()}</p>`,
+      "SYSTEM"
+    ).catch(() => {});
+  }
+};
 
 const OAUTH_ORIGINS = [
   "https://benua.shop",
@@ -1160,8 +1309,14 @@ const finalizeOrderPaymentTx = db.transaction(
     const deductStock = db.prepare("UPDATE products SET stock = MAX(0, stock - ?) WHERE id = ?");
     const deductOption = db.prepare("UPDATE product_options SET stock = MAX(0, stock - ?) WHERE id = ?");
     for (const item of items) {
-      if (item.product_id) deductStock.run(item.quantity, item.product_id);
-      if (item.option_id) deductOption.run(item.quantity, item.option_id);
+      if (item.product_id) {
+        logStock(item.product_id, null, -Number(item.quantity), `주문(${order.order_number}) 결제`);
+        deductStock.run(item.quantity, item.product_id);
+      }
+      if (item.option_id) {
+        logStock(null, item.option_id, -Number(item.quantity), `주문(${order.order_number}) 옵션`);
+        deductOption.run(item.quantity, item.option_id);
+      }
     }
 
     if (order.user_id && order.used_points > 0) {
@@ -1362,9 +1517,11 @@ const refundOrderTx = db.transaction(
     const restoreItem = (item: any, qty: number) => {
       if (!qty || item.item_status === "refunded") return;
       if (item.product_id) {
+        logStock(item.product_id, null, qty, `주문(${order.order_number}) 환불 복원`);
         db.prepare("UPDATE products SET stock = stock + ? WHERE id = ?").run(qty, item.product_id);
       }
       if (item.option_id) {
+        logStock(null, item.option_id, qty, `주문(${order.order_number}) 옵션 복원`);
         db.prepare("UPDATE product_options SET stock = stock + ? WHERE id = ?").run(qty, item.option_id);
       }
     };
@@ -1457,6 +1614,18 @@ const cancelTossPaymentIfNeeded = async (
   if (cancelAmount !== undefined && cancelAmount < order.total_amount) {
     bodyPayload.cancelAmount = cancelAmount;
   }
+  const depositedVbank = order.payment_method === "vbank" && order.status !== "pending";
+  if (depositedVbank) {
+    const accountNumber = decryptText(String(order.refund_account || ""));
+    if (!order.refund_bank || !accountNumber || !order.refund_holder) {
+      throw new Error("가상계좌 환불 계좌가 필요합니다.");
+    }
+    bodyPayload.refundReceiveAccount = {
+      bank: String(order.refund_bank),
+      accountNumber,
+      holderName: String(order.refund_holder),
+    };
+  }
 
   const res = await fetch(
     `https://api.tosspayments.com/v1/payments/${encodeURIComponent(order.payment_key)}/cancel`,
@@ -1486,11 +1655,12 @@ const normalizeTossMethod = (tossData: any, fallback: string = "card"): string =
   if (provider.includes("KAKAO")) return "kakao_pay";
   if (provider.includes("NAVER")) return "naver_pay";
   if (tossData?.method === "가상계좌" || tossData?.method === "VIRTUAL_ACCOUNT") return "vbank";
+  if (tossData?.method === "계좌이체" || tossData?.method === "TRANSFER") return "transfer";
   if (tossData?.method === "간편결제") return fallback !== "card" ? fallback : "card";
-  return "card";
+  return fallback === "transfer" ? "transfer" : "card";
 };
 
-const runAutoCompletion = () => {
+const runAutoCompletion = async () => {
   try {
     const sevenDaysAgo = new Date();
     sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
@@ -1503,18 +1673,56 @@ const runAutoCompletion = () => {
       completeOrderTx(order.id);
     }
 
-    db.prepare(
-      `DELETE FROM order_items WHERE order_id IN (
-         SELECT id FROM orders
-         WHERE status = 'pending' AND payment_key IS NULL
-           AND created_at < datetime('now', '-2 hours')
-       )`
-    ).run();
-    db.prepare(
-      `DELETE FROM orders
-       WHERE status = 'pending' AND payment_key IS NULL
-         AND created_at < datetime('now', '-2 hours')`
-    ).run();
+    const stalePending = db
+      .prepare(
+        `SELECT * FROM orders
+         WHERE status = 'pending' AND (payment_key IS NULL OR payment_key = '')
+           AND created_at < datetime('now', '-2 hours')`
+      )
+      .all() as any[];
+    for (const order of stalePending) {
+      let recovered = false;
+      try {
+        const basicAuth = Buffer.from(`${TOSS_SECRET_KEY}:`).toString("base64");
+        const look = await fetch(
+          `https://api.tosspayments.com/v1/payments/orders/${encodeURIComponent(order.order_number)}`,
+          { headers: { Authorization: `Basic ${basicAuth}` } }
+        );
+        if (look.ok) {
+          const tossData = await look.json();
+          if (tossData.status === "DONE" || tossData.status === "WAITING_FOR_DEPOSIT") {
+            const method = normalizeTossMethod(tossData, order.payment_method);
+            const waiting = tossData.status === "WAITING_FOR_DEPOSIT" || method === "vbank";
+            const receipt = tossData.receipt?.url || tossData.cashReceipt?.receiptUrl || null;
+            if (receipt) db.prepare("UPDATE orders SET receipt_url = ? WHERE id = ?").run(receipt, order.id);
+            if (tossData.cashReceipt?.receiptUrl) {
+              db.prepare("UPDATE orders SET cash_receipt_url = ? WHERE id = ?").run(tossData.cashReceipt.receiptUrl, order.id);
+            }
+            finalizeOrderPaymentTx.immediate(
+              order.id,
+              tossData.paymentKey || null,
+              method,
+              waiting ? "pending" : "paid",
+              tossData.virtualAccount
+                ? {
+                    bank: tossData.virtualAccount.bankCode,
+                    account: tossData.virtualAccount.accountNumber,
+                    holder: tossData.virtualAccount.customerName,
+                    dueDate: tossData.virtualAccount.dueDate,
+                  }
+                : undefined
+            );
+            recovered = true;
+          }
+        }
+      } catch (err) {
+        console.error("[AUTO] pending recover failed", order.id, err);
+      }
+      if (!recovered) {
+        db.prepare("DELETE FROM order_items WHERE order_id = ?").run(order.id);
+        db.prepare("DELETE FROM orders WHERE id = ? AND status = 'pending'").run(order.id);
+      }
+    }
 
     const expiredVbank = db
       .prepare(
@@ -1535,6 +1743,33 @@ const runAutoCompletion = () => {
     void expirePoints();
     void backupDatabase();
     void syncShippingDeliveries();
+    const remind = db
+      .prepare(
+        `SELECT o.* FROM orders o
+         WHERE o.status = 'completed' AND IFNULL(o.review_reminded, 0) = 0
+           AND o.confirmed_at IS NOT NULL AND o.confirmed_at < datetime('now', '-7 days')
+           AND o.customer_email IS NOT NULL AND o.customer_email != ''`
+      )
+      .all() as any[];
+    for (const order of remind) {
+      const wrote = db
+        .prepare(
+          `SELECT COUNT(*) as count FROM reviews r
+           JOIN order_items oi ON oi.product_id = r.product_id AND oi.order_id = ?
+           WHERE r.user_id = ?`
+        )
+        .get(order.id, order.user_id) as any;
+      db.prepare("UPDATE orders SET review_reminded = 1 WHERE id = ?").run(order.id);
+      if (Number(wrote?.count) > 0 || !order.user_id) continue;
+      sendMail(
+        order.customer_email,
+        "리뷰를 남기면 포인트가 적립됩니다",
+        `<p>${escapeHtml(order.customer_name || "")}님, 받아보신 오브제는 마음에 드셨나요.</p>
+         <p>리뷰를 남기면 최대 2,000P가 적립됩니다.</p>
+         <p><a href="https://benua.shop/profile">마이페이지에서 작성하기</a></p>`,
+        "NEWS"
+      ).catch(() => {});
+    }
   } catch (err) {
     console.error("[AUTO] Error during auto-completion:", err);
   }
@@ -2679,6 +2914,11 @@ async function startServer() {
   // 8. Admin Auth (2FA TOTP) & Key Management
   // ==========================================
   app.post("/api/admin/verify-key", async (req, res) => {
+    const ip = clientIp(req);
+    if (!allowRate(`adminkey:${ip}`, 5, 15 * 60 * 1000)) {
+      warnAdminLogin(ip);
+      return res.status(429).json({ error: "로그인 시도가 많아 잠시 막혀 있습니다." });
+    }
     const { adminKey } = req.body;
     const keyRecord = findAdminKey(adminKey);
 
@@ -2695,6 +2935,11 @@ async function startServer() {
   });
 
   app.post("/api/admin/verify-totp", (req, res) => {
+    const ip = clientIp(req);
+    if (!allowRate(`admintotp:${ip}`, 5, 15 * 60 * 1000)) {
+      warnAdminLogin(ip);
+      return res.status(429).json({ error: "로그인 시도가 많아 잠시 막혀 있습니다." });
+    }
     const { adminKey, token, secret } = req.body;
     const keyRecord = findAdminKey(adminKey);
 
@@ -2710,7 +2955,10 @@ async function startServer() {
       window: 1,
     });
 
-    if (!isValid) return res.status(401).json({ error: "OTP 인증번호가 일치하지 않습니다." });
+    if (!isValid) {
+      warnAdminLogin(ip);
+      return res.status(401).json({ error: "OTP 인증번호가 일치하지 않습니다." });
+    }
 
     if (!keyRecord.totp_secret) {
       db.prepare("UPDATE admin_keys SET totp_secret = ? WHERE id = ?").run(encryptText(totpSecret), keyRecord.id);
@@ -2880,11 +3128,12 @@ async function startServer() {
                   (SELECT COALESCE(SUM(oi.quantity), 0) FROM order_items oi
                     JOIN orders o ON o.id = oi.order_id
                     WHERE oi.product_id = p.id
-                      AND o.status IN ('paid', 'preparing', 'shipping', 'delivered', 'completed')) as sold_count
+                      AND o.status IN ('paid', 'preparing', 'shipping', 'delivered', 'completed')) as sold_count,
+                  (SELECT image_url FROM product_images WHERE product_id = p.id ORDER BY sort_order, id LIMIT 1 OFFSET 1) as hover_image
            FROM products p
            LEFT JOIN reviews r ON r.product_id = p.id
            GROUP BY p.id
-           ORDER BY p.created_at DESC`
+           ORDER BY p.pinned DESC, p.sort_order ASC, p.created_at DESC`
         )
         .all();
       res.json(products);
@@ -2897,6 +3146,7 @@ async function startServer() {
     try {
       const product = db.prepare("SELECT * FROM products WHERE id = ?").get(req.params.id) as any;
       if (!product) return res.status(404).json({ error: "상품을 찾을 수 없습니다." });
+      db.prepare("UPDATE products SET view_count = IFNULL(view_count, 0) + 1 WHERE id = ?").run(product.id);
       product.images = db
         .prepare("SELECT image_url FROM product_images WHERE product_id = ? ORDER BY sort_order, id")
         .all(product.id);
@@ -3068,6 +3318,9 @@ async function startServer() {
       stock,
       product.id
     );
+    if (stock !== Number(product.stock)) {
+      logStock(product.id, null, stock - Number(product.stock), "관리자 재고 수정");
+    }
     if (Number(product.stock) < 1 && stock > 0 && normalizeSaleMode(product.sale_mode) === "open") {
       notifyRestock({ ...product, stock }).catch(() => {});
     }
@@ -3201,6 +3454,15 @@ async function startServer() {
 
   app.delete("/api/products/:id", authenticateAdmin, (req: any, res) => {
     try {
+      const product = db.prepare("SELECT image_url, description_image_url FROM products WHERE id = ?").get(req.params.id) as any;
+      const extras = db.prepare("SELECT image_url FROM product_images WHERE product_id = ?").all(req.params.id) as any[];
+      for (const row of [product, ...extras]) {
+        const url = row?.image_url || row?.description_image_url;
+        if (row?.image_url) removeUpload(row.image_url);
+        if (row?.description_image_url) removeUpload(row.description_image_url);
+      }
+      db.prepare("DELETE FROM product_images WHERE product_id = ?").run(req.params.id);
+      db.prepare("DELETE FROM product_options WHERE product_id = ?").run(req.params.id);
       db.prepare("DELETE FROM products WHERE id = ?").run(req.params.id);
       logAdminAction(req, "DELETE_PRODUCT", "products", Number(req.params.id), "Deleted product");
       res.json({ success: true });
@@ -3601,6 +3863,9 @@ async function startServer() {
       used_points,
       used_coupon_id,
       payment_method,
+      shipping_memo,
+      is_gift,
+      gift_message,
     } = req.body;
 
     if (!allowRate(`prepare:${clientIp(req)}`, 30, 10 * 60 * 1000)) {
@@ -3609,8 +3874,9 @@ async function startServer() {
     if (!Array.isArray(items) || items.length === 0) {
       return res.status(400).json({ error: "주문할 상품이 없습니다." });
     }
-    if (!String(customer_name || "").trim() || !String(customer_phone || "").trim() || !String(shipping_address || "").trim()) {
-      return res.status(400).json({ error: "수령인, 연락처, 주소를 입력해주세요." });
+    const gift = Boolean(is_gift);
+    if (!String(customer_name || "").trim() || !String(customer_phone || "").trim() || (!gift && !String(shipping_address || "").trim())) {
+      return res.status(400).json({ error: gift ? "받는 사람 이름과 연락처를 입력해주세요." : "수령인, 연락처, 주소를 입력해주세요." });
     }
 
     const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
@@ -3632,13 +3898,15 @@ async function startServer() {
         String(customer_email || ""),
         String(zipcode || "")
       );
+      const giftToken = gift ? crypto.randomBytes(18).toString("hex") : null;
       const orderId = db.transaction(() => {
         const info = db
           .prepare(
             `INSERT INTO orders
             (order_number, user_id, customer_name, customer_email, customer_phone, shipping_address,
-             total_amount, shipping_fee, used_points, used_coupon_id, payment_method, status)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')`
+             total_amount, shipping_fee, used_points, used_coupon_id, payment_method, status,
+             shipping_memo, is_gift, gift_token, gift_message)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?)`
           )
           .run(
             order_number,
@@ -3646,12 +3914,16 @@ async function startServer() {
             customer_name,
             customer_email,
             customer_phone,
-            shipping_address,
+            gift ? String(shipping_address || "선물 수령 대기") : shipping_address,
             quote.total,
             quote.shippingFee,
             quote.points,
             quote.couponId,
-            payment_method || "card"
+            payment_method || "card",
+            String(shipping_memo || "").slice(0, 200),
+            gift ? 1 : 0,
+            giftToken,
+            String(gift_message || "").slice(0, 200)
           );
 
         const newOrderId = Number(info.lastInsertRowid);
@@ -3670,11 +3942,11 @@ async function startServer() {
           );
         }
         return newOrderId;
-      })();
+      }).immediate();
 
       if (quote.total === 0) {
         try {
-          finalizeOrderPaymentTx(orderId, `FREE_${order_number}`, payment_method || "card", "paid");
+          finalizeOrderPaymentTx.immediate(orderId, `FREE_${order_number}`, payment_method || "card", "paid");
           notifyAdminNewOrder(orderId);
         } catch (payErr) {
           db.prepare("DELETE FROM order_items WHERE order_id = ?").run(orderId);
@@ -3686,6 +3958,7 @@ async function startServer() {
           zeroAmountPaid: true,
           order_number,
           amount: 0,
+          gift_token: giftToken,
         });
       }
 
@@ -3695,6 +3968,7 @@ async function startServer() {
         order_id: orderId,
         order_number,
         amount: quote.total,
+        gift_token: giftToken,
         order_name:
           quote.items.length > 1
             ? `${quote.items[0].name} 외 ${quote.items.length - 1}건`
@@ -3774,8 +4048,17 @@ async function startServer() {
       if (approveNo) {
         db.prepare("UPDATE orders SET approve_no = ? WHERE id = ?").run(approveNo, order.id);
       }
+      const receiptUrl = tossData.receipt?.url || null;
+      const cashReceiptUrl = tossData.cashReceipt?.receiptUrl || null;
+      if (receiptUrl || cashReceiptUrl) {
+        db.prepare("UPDATE orders SET receipt_url = COALESCE(?, receipt_url), cash_receipt_url = COALESCE(?, cash_receipt_url) WHERE id = ?").run(
+          receiptUrl,
+          cashReceiptUrl,
+          order.id
+        );
+      }
 
-      const updatedOrder = finalizeOrderPaymentTx(
+      const updatedOrder = finalizeOrderPaymentTx.immediate(
         order.id,
         paymentKey,
         normalizedMethod,
@@ -4157,6 +4440,18 @@ async function startServer() {
       if (quote.amount <= 0 && Number(order.total_amount) > 0) {
         return res.status(400).json({ error: "환불할 금액이 없습니다." });
       }
+      if (order.payment_method === "vbank" && order.status !== "pending") {
+        const bank = String(req.body?.refund_bank || "").trim();
+        const account = String(req.body?.refund_account || "").replace(/\s/g, "");
+        const holder = String(req.body?.refund_holder || "").trim();
+        if (!bank || !account || !holder) return res.status(400).json({ error: "환불 계좌를 입력해주세요." });
+        db.prepare("UPDATE orders SET refund_bank = ?, refund_account = ?, refund_holder = ? WHERE id = ?").run(
+          bank,
+          encryptText(account),
+          holder,
+          order.id
+        );
+      }
       const mark = db.prepare(
         "UPDATE order_items SET item_status = 'refund_requested', refund_quantity = ? WHERE id = ?"
       );
@@ -4231,10 +4526,13 @@ async function startServer() {
     try {
       const order = db.prepare("SELECT * FROM orders WHERE id = ?").get(id) as any;
       if (!order) return res.status(404).json({ error: "주문을 찾을 수 없습니다." });
+      const company = shipping_company || "CJ대한통운";
+      const bad = invoiceError(company, tracking_number);
+      if (bad) return res.status(400).json({ error: bad });
 
       db.prepare(
-        "UPDATE orders SET tracking_number = ?, shipping_company = ?, status = 'shipping', vbank_account = NULL, status_updated_at = CURRENT_TIMESTAMP WHERE id = ?"
-      ).run(tracking_number, shipping_company || "CJ대한통운", id);
+        "UPDATE orders SET tracking_number = ?, shipping_company = ?, status = 'shipping', vbank_account = NULL, shipped_at = COALESCE(shipped_at, CURRENT_TIMESTAMP), status_updated_at = CURRENT_TIMESTAMP WHERE id = ?"
+      ).run(String(tracking_number).trim(), company, id);
       await syncShippingDeliveries(Number(id));
       const updated = db.prepare("SELECT status FROM orders WHERE id = ?").get(id) as { status?: string } | undefined;
 
@@ -4724,6 +5022,16 @@ async function startServer() {
         weeklySales: weeklySales?.amount || 0,
         pendingOrders: pendingCount?.count || 0,
         lowStockProducts: lowStockProducts?.count || 0,
+        delayedShipping:
+          (
+            db
+              .prepare(
+                `SELECT COUNT(*) as count FROM orders
+                 WHERE status = 'shipping'
+                   AND datetime(COALESCE(shipped_at, status_updated_at)) < datetime('now', '-5 days')`
+              )
+              .get() as any
+          )?.count || 0,
       });
     } catch {
       res.status(500).json({ error: "대시보드 통계 조회 실패" });
@@ -4778,11 +5086,14 @@ async function startServer() {
             ) {
               continue;
             }
+            const company = shipping_company || "CJ대한통운";
+            const bad = invoiceError(company, tracking_number);
+            if (bad) continue;
             const r = db
               .prepare(
-                "UPDATE orders SET tracking_number = ?, shipping_company = ?, status = 'shipping', vbank_account = NULL, status_updated_at = CURRENT_TIMESTAMP WHERE order_number = ?"
+                "UPDATE orders SET tracking_number = ?, shipping_company = ?, status = 'shipping', vbank_account = NULL, shipped_at = COALESCE(shipped_at, CURRENT_TIMESTAMP), status_updated_at = CURRENT_TIMESTAMP WHERE order_number = ?"
               )
-              .run(tracking_number, shipping_company || "CJ대한통운", order_number);
+              .run(tracking_number, company, order_number);
             updatedCount += r.changes;
           }
         })(lines.slice(1));
@@ -4813,16 +5124,33 @@ async function startServer() {
         naver_pay: 0.03,
         kakao_pay: 0.03,
         vbank: 0.01,
+        transfer: 0.01,
       };
+      const refunds = db
+        .prepare(
+          `SELECT payment_method, SUM(COALESCE(refunded_total, 0)) as refunded
+           FROM orders
+           WHERE date(created_at) >= date(?) AND date(created_at) <= date(?)
+           GROUP BY payment_method`
+        )
+        .all(startDate, endDate) as any[];
+      const refundMap = new Map(refunds.map((row) => [row.payment_method, Number(row.refunded) || 0]));
 
       const report = settlements.map((s) => {
         const rate = commissionRates[s.payment_method] || 0.02;
-        const commission = Math.floor(s.total_amount * rate);
+        const gross = Number(s.total_amount) || 0;
+        const refunded = refundMap.get(s.payment_method) || 0;
+        const supply = Math.round(gross / 1.1);
+        const vat = gross - supply;
+        const commission = Math.floor(gross * rate);
         return {
           payment_method: s.payment_method,
-          total_amount: s.total_amount,
+          total_amount: gross,
+          supply_amount: supply,
+          vat,
+          refunded,
           commission,
-          net_amount: s.total_amount - commission,
+          net_amount: gross - commission - refunded,
           order_count: s.order_count,
         };
       });
@@ -5117,23 +5445,28 @@ async function startServer() {
   });
 
   app.post("/api/admin/newsletter/send", authenticateAdmin, async (req, res) => {
-    const { subject, content, test_email } = req.body;
+    const { subject, content, test_email, audience } = req.body;
     if (!subject || !content) {
       return res.status(400).json({ error: "제목과 본문을 모두 입력해주세요." });
     }
     try {
       const testEmail = String(test_email || "").trim().toLowerCase();
+      const group = String(audience || "all");
       const guestEmails = (
         db.prepare("SELECT email FROM newsletter_subscribers").all() as Array<{ email: string }>
       ).map((s) => s.email);
-      const userEmails = (
-        db
-          .prepare("SELECT email FROM users WHERE newsletter_subscribed = 1")
-          .all() as Array<{ email: string }>
-      ).map((u) => u.email);
+      const userSql =
+        group === "vip"
+          ? "SELECT email FROM users WHERE newsletter_subscribed = 1 AND UPPER(tier) IN ('BLACK', 'THE_BLACK')"
+          : group === "dormant"
+            ? `SELECT email FROM users WHERE newsletter_subscribed = 1 AND id NOT IN (
+                 SELECT user_id FROM orders WHERE user_id IS NOT NULL AND created_at > datetime('now', '-90 days')
+               )`
+            : "SELECT email FROM users WHERE newsletter_subscribed = 1";
+      const userEmails = (db.prepare(userSql).all() as Array<{ email: string }>).map((u) => u.email);
       const allEmails = testEmail
         ? [testEmail]
-        : [...new Set([...guestEmails, ...userEmails])].filter(Boolean);
+        : [...new Set([...(group === "all" ? guestEmails : []), ...userEmails])].filter(Boolean);
 
       const host = req.get("host") || "benua.shop";
       const mainDomainHost = host.startsWith("dash.") ? host.replace("dash.", "") : host;
@@ -5158,6 +5491,14 @@ async function startServer() {
         })
       );
 
+      if (!testEmail) {
+        db.prepare("INSERT INTO newsletter_logs (subject, body, audience, sent_count) VALUES (?, ?, ?, ?)").run(
+          subject,
+          content,
+          group,
+          allEmails.length
+        );
+      }
       res.json({ success: true, count: allEmails.length });
     } catch {
       res.status(500).json({ error: "뉴스레터 발송 실패" });
@@ -5454,7 +5795,25 @@ async function startServer() {
   });
 
   app.post("/api/admin/questions/:id/answer", authenticateCS, (req: any, res) => {
-    db.prepare("UPDATE product_questions SET answer = ? WHERE id = ?").run(String(req.body?.answer || ""), req.params.id);
+    const answer = String(req.body?.answer || "");
+    const row = db
+      .prepare(
+        `SELECT q.*, u.email, p.name as product_name FROM product_questions q
+         LEFT JOIN users u ON u.id = q.user_id
+         LEFT JOIN products p ON p.id = q.product_id
+         WHERE q.id = ?`
+      )
+      .get(req.params.id) as any;
+    db.prepare("UPDATE product_questions SET answer = ? WHERE id = ?").run(answer, req.params.id);
+    if (row?.email && answer.trim()) {
+      sendMail(
+        row.email,
+        "상품 문의에 답변이 등록되었습니다",
+        `<p>질문: ${escapeHtml(row.question || "")}</p><p>답변: ${escapeHtml(answer)}</p><p><a href="https://benua.shop/product/${row.product_id}">${escapeHtml(row.product_name || "상품 보기")}</a></p>`,
+        "SUPPORT",
+        true
+      ).catch(() => {});
+    }
     res.json({ success: true });
   });
 
@@ -5541,7 +5900,201 @@ async function startServer() {
   });
 
   app.get("/api/health", (_req, res) => {
-    res.json({ status: "ok", time: new Date().toISOString() });
+    try {
+      db.prepare("SELECT 1").get();
+      res.json({ status: "ok", db: "ok", time: new Date().toISOString() });
+    } catch {
+      res.status(500).json({ status: "error", db: "down", time: new Date().toISOString() });
+    }
+  });
+
+  app.post("/api/products/:id/cart-hit", (req, res) => {
+    db.prepare("UPDATE products SET cart_count = IFNULL(cart_count, 0) + 1 WHERE id = ?").run(req.params.id);
+    res.json({ success: true });
+  });
+
+  app.patch("/api/admin/products/:id/display", authenticateAdmin, (req: any, res) => {
+    const sort = Math.floor(Number(req.body?.sort_order) || 0);
+    const pinned = req.body?.pinned ? 1 : 0;
+    const tags = String(req.body?.tags || "");
+    db.prepare("UPDATE products SET sort_order = ?, pinned = ?, tags = ? WHERE id = ?").run(sort, pinned, tags, req.params.id);
+    res.json({ success: true });
+  });
+
+  app.post("/api/admin/products/:id/duplicate", authenticateAdmin, (req: any, res) => {
+    const product = db.prepare("SELECT * FROM products WHERE id = ?").get(req.params.id) as any;
+    if (!product) return res.status(404).json({ error: "상품을 찾을 수 없습니다." });
+    const info = db
+      .prepare(
+        `INSERT INTO products (name, price, description, image_url, description_image_url, category, stock, material, dimensions, origin, manufacturer, discount_rate, show_on_main, sale_mode, tags, sort_order, pinned)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, 0)`
+      )
+      .run(
+        `${product.name} 복사`,
+        product.price,
+        product.description,
+        product.image_url,
+        product.description_image_url,
+        product.category,
+        product.stock,
+        product.material,
+        product.dimensions,
+        product.origin,
+        product.manufacturer,
+        product.discount_rate,
+        product.sale_mode || "open",
+        product.tags || "",
+        product.sort_order || 0
+      );
+    res.json({ id: info.lastInsertRowid });
+  });
+
+  app.get("/api/admin/funnel", authenticateAdmin, (_req, res) => {
+    const rows = db
+      .prepare(
+        `SELECT p.id, p.name, IFNULL(p.view_count, 0) as views, IFNULL(p.cart_count, 0) as carts,
+                (SELECT COUNT(*) FROM wishlists w WHERE w.product_id = p.id) as wishes,
+                (SELECT COALESCE(SUM(oi.quantity), 0) FROM order_items oi
+                  JOIN orders o ON o.id = oi.order_id
+                  WHERE oi.product_id = p.id AND o.status IN ('paid','preparing','shipping','delivered','completed')) as sold
+         FROM products p ORDER BY views DESC`
+      )
+      .all();
+    res.json(rows);
+  });
+
+  app.get("/api/admin/stock-logs", authenticateAdmin, (req, res) => {
+    const rows = db
+      .prepare(
+        `SELECT l.*, p.name as product_name FROM stock_logs l
+         LEFT JOIN products p ON p.id = l.product_id
+         ORDER BY l.id DESC LIMIT 200`
+      )
+      .all();
+    res.json(rows);
+  });
+
+  app.get("/api/admin/newsletter/logs", authenticateAdmin, (_req, res) => {
+    res.json(db.prepare("SELECT id, subject, audience, sent_count, created_at FROM newsletter_logs ORDER BY id DESC LIMIT 50").all());
+  });
+
+  app.get("/api/admin/reply-templates", authenticateCS, (_req, res) => {
+    res.json(db.prepare("SELECT * FROM reply_templates ORDER BY id DESC").all());
+  });
+
+  app.post("/api/admin/reply-templates", authenticateCS, (req: any, res) => {
+    const title = String(req.body?.title || "").trim();
+    const body = String(req.body?.body || "").trim();
+    if (!title || !body) return res.status(400).json({ error: "제목과 문구를 입력해주세요." });
+    const info = db.prepare("INSERT INTO reply_templates (title, body) VALUES (?, ?)").run(title, body);
+    res.json({ id: info.lastInsertRowid });
+  });
+
+  app.delete("/api/admin/reply-templates/:id", authenticateCS, (req: any, res) => {
+    db.prepare("DELETE FROM reply_templates WHERE id = ?").run(req.params.id);
+    res.json({ success: true });
+  });
+
+  app.post("/api/admin/reviews/:id/reply", authenticateCS, (req: any, res) => {
+    db.prepare("UPDATE reviews SET admin_reply = ?, admin_replied_at = CURRENT_TIMESTAMP WHERE id = ?").run(
+      String(req.body?.admin_reply || ""),
+      req.params.id
+    );
+    res.json({ success: true });
+  });
+
+  app.post("/api/admin/orders/combine-tracking", authenticateOperator, (req: any, res) => {
+    const ids = Array.isArray(req.body?.ids) ? req.body.ids.map((id: any) => Number(id)).filter(Boolean) : [];
+    const company = String(req.body?.shipping_company || "CJ대한통운");
+    const number = String(req.body?.tracking_number || "").trim();
+    const bad = invoiceError(company, number);
+    if (!ids.length) return res.status(400).json({ error: "묶을 주문을 선택해주세요." });
+    if (bad) return res.status(400).json({ error: bad });
+    const marks = ids.map(() => "?").join(",");
+    db.prepare(
+      `UPDATE orders SET tracking_number = ?, shipping_company = ?, status = 'shipping', shipped_at = COALESCE(shipped_at, CURRENT_TIMESTAMP), status_updated_at = CURRENT_TIMESTAMP
+       WHERE id IN (${marks}) AND status = 'paid'`
+    ).run(number, company, ...ids);
+    res.json({ success: true });
+  });
+
+  app.post("/api/admin/orders/:id/return-tracking", authenticateOperator, (req: any, res) => {
+    const company = String(req.body?.return_carrier || "CJ대한통운");
+    const number = String(req.body?.return_tracking_number || "").trim();
+    const bad = invoiceError(company, number);
+    if (bad) return res.status(400).json({ error: bad });
+    db.prepare("UPDATE orders SET return_carrier = ?, return_tracking_number = ? WHERE id = ?").run(company, number, req.params.id);
+    res.json({ success: true });
+  });
+
+  app.get("/api/orders/:id/return-tracking", authenticateUser, (req: any, res) => {
+    const order = db.prepare("SELECT * FROM orders WHERE id = ? AND user_id = ?").get(req.params.id, req.user.id) as any;
+    if (!order?.return_tracking_number) return res.status(404).json({ error: "회수 운송장이 없습니다." });
+    res.json({ company: order.return_carrier, invoice: order.return_tracking_number });
+  });
+
+  app.get("/api/gift/:token", (req, res) => {
+    const order = db.prepare("SELECT * FROM orders WHERE gift_token = ? AND is_gift = 1").get(req.params.token) as any;
+    if (!order) return res.status(404).json({ error: "선물 링크가 없습니다." });
+    const items = db.prepare("SELECT name, quantity, image_url FROM order_items WHERE order_id = ?").all(order.id);
+    res.json({
+      order_number: order.order_number,
+      gift_message: order.gift_message,
+      filled: order.shipping_address && order.shipping_address !== "선물 수령 대기",
+      items,
+    });
+  });
+
+  app.post("/api/gift/:token", (req, res) => {
+    const order = db.prepare("SELECT * FROM orders WHERE gift_token = ? AND is_gift = 1").get(req.params.token) as any;
+    if (!order) return res.status(404).json({ error: "선물 링크가 없습니다." });
+    if (!["pending", "paid", "preparing"].includes(order.status)) {
+      return res.status(400).json({ error: "주소를 바꿀 수 있는 상태가 아닙니다." });
+    }
+    const name = String(req.body?.name || "").trim();
+    const phone = String(req.body?.phone || "").trim();
+    const address = String(req.body?.address || "").trim();
+    if (!name || !phone || !address) return res.status(400).json({ error: "이름, 연락처, 주소를 입력해주세요." });
+    const full = `[${String(req.body?.zipcode || "").trim()}] ${address} ${String(req.body?.detail_address || "").trim()}`.trim();
+    db.prepare(
+      "UPDATE orders SET customer_name = ?, customer_phone = ?, shipping_address = ?, shipping_memo = ? WHERE id = ?"
+    ).run(name, phone, full, String(req.body?.shipping_memo || order.shipping_memo || "").slice(0, 200), order.id);
+    res.json({ success: true });
+  });
+
+  app.get("/api/admin/system", authenticateAdmin, (_req, res) => {
+    const dbPath = path.join(process.cwd(), "benua.db");
+    const dbSize = fs.existsSync(dbPath) ? fs.statSync(dbPath).size : 0;
+    let uploadBytes = 0;
+    if (fs.existsSync(uploadsDir)) {
+      for (const name of fs.readdirSync(uploadsDir)) {
+        try {
+          uploadBytes += fs.statSync(path.join(uploadsDir, name)).size;
+        } catch {
+          /* skip */
+        }
+      }
+    }
+    const backupDir = path.join(process.cwd(), "backups");
+    let lastBackup: string | null = null;
+    if (fs.existsSync(backupDir)) {
+      const files = fs
+        .readdirSync(backupDir)
+        .map((name) => ({ name, time: fs.statSync(path.join(backupDir, name)).mtimeMs }))
+        .sort((a, b) => b.time - a.time);
+      if (files[0]) lastBackup = new Date(files[0].time).toISOString();
+    }
+    res.json({
+      db_bytes: dbSize,
+      upload_bytes: uploadBytes,
+      last_backup: lastBackup,
+      toss: Boolean(process.env.TOSS_SECRET_KEY),
+      resend: Boolean(process.env.RESEND_API_KEY),
+      sweettracker: Boolean(process.env.SWEETTRACKER_API_KEY || process.env.SWEET_TRACKER_KEY),
+      google: Boolean(process.env.GOOGLE_CLIENT_ID),
+      naver: Boolean(process.env.NAVER_CLIENT_ID),
+      kakao: Boolean(process.env.KAKAO_CLIENT_ID),
+    });
   });
 
   if (!isProduction) {
@@ -5568,6 +6121,7 @@ async function startServer() {
       "/verify-email",
       "/unsubscribe",
       "/reset-password",
+      "/gift",
     ]);
     app.get("*", (req, res) => {
       const host = String(req.hostname || "");
@@ -5576,6 +6130,7 @@ async function startServer() {
       const known =
         spaExact.has(req.path) ||
         req.path.startsWith("/product/") ||
+        req.path.startsWith("/gift/") ||
         req.path.startsWith("/admin") ||
         (onAdminHost && !looksLikeFile);
       const file = path.join(distPath, "index.html");
@@ -5600,9 +6155,25 @@ async function startServer() {
     });
   }
 
-  app.listen(PORT, "0.0.0.0", () => {
+  const server = app.listen(PORT, "0.0.0.0", () => {
     console.log(`Server running on http://localhost:${PORT}`);
   });
+
+  const shutdown = (signal: string) => {
+    console.log(`[SHUTDOWN] ${signal}`);
+    server.close(() => {
+      try {
+        db.pragma("wal_checkpoint(TRUNCATE)");
+        db.close();
+      } catch (err) {
+        console.error("[SHUTDOWN]", err);
+      }
+      process.exit(0);
+    });
+    setTimeout(() => process.exit(1), 10000).unref();
+  };
+  process.once("SIGTERM", () => shutdown("SIGTERM"));
+  process.once("SIGINT", () => shutdown("SIGINT"));
 }
 
 startServer();

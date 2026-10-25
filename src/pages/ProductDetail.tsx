@@ -7,12 +7,72 @@ import { formatPrice, FREE_SHIPPING_MIN, SHIPPING_FEE } from "../lib/utils";
 import ProductCard, { type CardProduct } from "../components/ProductCard";
 import { beginDirectCheckout, cartKey, readLocalCart, rememberProduct, saveCart } from "../lib/cart";
 
+function SizeGuide({ dimensions }: { dimensions: string }) {
+  const nums = String(dimensions).match(/\d+(?:\.\d+)?/g)?.map(Number) || [];
+  const width = nums[0] || 0;
+  const height = nums[2] || nums[1] || 0;
+  if (!width || !height) return null;
+  const phone = 15;
+  const scale = 120 / Math.max(width, height, phone, 29.7);
+  return (
+    <div className="flex items-end gap-4 text-[11px] text-venuea-brown">
+      <div>
+        <div className="bg-white border border-black/10" style={{ width: width * scale, height: height * scale }} />
+        상품
+      </div>
+      <div>
+        <div className="bg-[#385c37]/20" style={{ width: 7 * scale, height: phone * scale }} />
+        휴대폰
+      </div>
+      <div>
+        <div className="bg-[#463221]/10" style={{ width: 21 * scale, height: 29.7 * scale }} />
+        A4
+      </div>
+    </div>
+  );
+}
+
+function DetailFold({ src }: { src: string }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="max-w-3xl mx-auto">
+      <div className={`relative overflow-hidden ${open ? "" : "max-h-[900px]"}`}>
+        <img src={src} alt="상세 이미지" loading="lazy" decoding="async" className="w-full rounded-2xl" />
+        {!open && <div className="absolute inset-x-0 bottom-0 h-24 bg-gradient-to-t from-[#faf2e7] to-transparent" />}
+      </div>
+      <button type="button" onClick={() => setOpen((value) => !value)} className="mt-3 text-sm font-bold text-venuea-green">
+        {open ? "상품 상세정보 접기" : "상품 상세정보 더보기"}
+      </button>
+    </div>
+  );
+}
+
+function PhotoStrip({ reviews, onOpen, only, onToggle }: { reviews: any[]; onOpen: (src: string) => void; only: boolean; onToggle: () => void }) {
+  const photos = reviews.filter((rev) => rev.image_url);
+  if (photos.length === 0) return null;
+  return (
+    <div className="space-y-2">
+      <div className="flex gap-2 overflow-x-auto">
+        {photos.map((rev) => (
+          <button key={rev.id} type="button" onClick={() => onOpen(rev.image_url)}>
+            <img src={rev.image_url} alt="" loading="lazy" decoding="async" className="w-16 h-16 rounded-lg object-cover" />
+          </button>
+        ))}
+      </div>
+      <button type="button" onClick={onToggle} className="text-xs font-bold text-venuea-green">
+        {only ? "전체 리뷰" : "포토 리뷰만 보기"}
+      </button>
+    </div>
+  );
+}
+
 export default function ProductDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
   const [product, setProduct] = useState<any>(null);
   const [missing, setMissing] = useState(false);
   const [reviews, setReviews] = useState<any[]>([]);
+  const [photoOnly, setPhotoOnly] = useState(false);
   const [others, setOthers] = useState<CardProduct[]>([]);
   const [quantity, setQuantity] = useState(1);
   const [isWished, setIsWished] = useState(false);
@@ -225,6 +285,7 @@ export default function ProductDetail() {
       });
     }
     saveCart(list);
+    apiFetch(`/api/products/${product.id}/cart-hit`, { method: "POST" }).catch(() => {});
     toast.success("쇼핑백에 담았습니다.");
   };
 
@@ -351,9 +412,12 @@ export default function ProductDetail() {
               </div>
             )}
             {product.dimensions && (
-              <div className="flex justify-between">
-                <span>규격</span>
-                <span className="font-medium text-gray-800">{product.dimensions}</span>
+              <div className="space-y-2">
+                <div className="flex justify-between">
+                  <span>규격</span>
+                  <span className="font-medium text-gray-800">{product.dimensions}</span>
+                </div>
+                <SizeGuide dimensions={product.dimensions} />
               </div>
             )}
             {product.origin && (
@@ -523,15 +587,7 @@ export default function ProductDetail() {
         </div>
       </div>
 
-      {product.description_image_url && (
-        <div className="max-w-3xl mx-auto">
-          <img
-            src={product.description_image_url}
-            alt="상세 이미지"
-            className="w-full rounded-2xl"
-          />
-        </div>
-      )}
+      {product.description_image_url && <DetailFold src={product.description_image_url} />}
 
       <section className="border-t border-black/10 pt-8">
         {reviews.length === 0 ? (
@@ -539,7 +595,8 @@ export default function ProductDetail() {
         ) : (
           <div className="space-y-4">
             <h2 className="text-xl font-serif font-bold">리뷰 {reviews.length}</h2>
-            {reviews.map((rev) => (
+            <PhotoStrip reviews={reviews} onOpen={setPhoto} only={photoOnly} onToggle={() => setPhotoOnly((value) => !value)} />
+            {reviews.filter((rev) => !photoOnly || rev.image_url).map((rev) => (
               <div key={rev.id} className="p-5 rounded-xl border border-gray-100 space-y-2">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
@@ -560,8 +617,11 @@ export default function ProductDetail() {
                 <p className="text-sm text-gray-700">{rev.content}</p>
                 {rev.image_url && (
                   <button type="button" onClick={() => setPhoto(rev.image_url)}>
-                    <img src={rev.image_url} alt="" className="w-24 h-24 object-cover rounded-xl" />
+                    <img src={rev.image_url} alt="" loading="lazy" decoding="async" className="w-24 h-24 object-cover rounded-xl" />
                   </button>
+                )}
+                {rev.admin_reply && (
+                  <p className="text-sm text-venuea-brown bg-[#faf2e7] rounded-xl px-3 py-2">{rev.admin_reply}</p>
                 )}
               </div>
             ))}

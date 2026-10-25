@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { apiFetch, authStorage } from "../lib/api";
 import TrackingTimeline from "../components/TrackingTimeline";
 import { readRecent } from "../lib/cart";
+import { useModalLock } from "../lib/useModalLock";
 import {
   formatPrice,
   formatOrderStatus,
@@ -155,6 +156,10 @@ export default function Profile() {
 
   // 자체 인앱 환불 요청 모달 상태
   const [refundModalOrder, setRefundModalOrder] = useState<Order | null>(null);
+  const [refundBank, setRefundBank] = useState("88");
+  const [refundAccount, setRefundAccount] = useState("");
+  const [refundHolder, setRefundHolder] = useState("");
+  useModalLock(Boolean(refundModalOrder), () => setRefundModalOrder(null));
   const [refundReasonType, setRefundReasonType] = useState(REFUND_REASONS[0]);
   const [refundDetailText, setRefundDetailText] = useState("");
   const [refundError, setRefundError] = useState("");
@@ -281,6 +286,9 @@ export default function Profile() {
         body: JSON.stringify({
           reason: finalReason,
           items: picked.map((item: any) => ({ id: item.id, quantity: item.quantity })),
+          refund_bank: refundBank,
+          refund_account: refundAccount,
+          refund_holder: refundHolder,
         }),
       });
       const data = await res.json();
@@ -982,6 +990,23 @@ export default function Profile() {
             </div>
 
             <div className="space-y-3">
+              {refundModalOrder.payment_method === "vbank" && refundModalOrder.status !== "pending" && (
+                <div className="space-y-2">
+                  <p className="text-xs font-bold text-gray-500">환불 계좌</p>
+                  <select value={refundBank} onChange={(e) => setRefundBank(e.target.value)} className="w-full border rounded-xl px-3 py-2 text-sm">
+                    <option value="88">신한</option>
+                    <option value="04">국민</option>
+                    <option value="20">우리</option>
+                    <option value="81">하나</option>
+                    <option value="11">농협</option>
+                    <option value="03">기업</option>
+                    <option value="90">카카오뱅크</option>
+                    <option value="92">토스뱅크</option>
+                  </select>
+                  <input value={refundAccount} onChange={(e) => setRefundAccount(e.target.value)} placeholder="계좌번호" className="w-full border rounded-xl px-3 py-2 text-sm" />
+                  <input value={refundHolder} onChange={(e) => setRefundHolder(e.target.value)} placeholder="예금주" className="w-full border rounded-xl px-3 py-2 text-sm" />
+                </div>
+              )}
               <label className="block text-xs font-bold uppercase tracking-wider text-gray-500">
                 환불 사유 선택
               </label>
@@ -1225,6 +1250,16 @@ export default function Profile() {
                 <span>결제금액</span>
                 <span>{formatPrice(detailOrder.total_amount)}</span>
               </div>
+              {(detailOrder.receipt_url || detailOrder.cash_receipt_url) && (
+                <div className="flex gap-3 text-sm font-bold text-venuea-green">
+                  {detailOrder.receipt_url && (
+                    <a href={detailOrder.receipt_url} target="_blank" rel="noreferrer">영수증</a>
+                  )}
+                  {detailOrder.cash_receipt_url && (
+                    <a href={detailOrder.cash_receipt_url} target="_blank" rel="noreferrer">현금영수증</a>
+                  )}
+                </div>
+              )}
               {(detailOrder.status === "refunded" ||
                 (detailOrder.items || []).some((item: any) => item.item_status === "refunded")) && (
                 <div className="pt-3 text-sm leading-relaxed text-venuea-brown space-y-1">

@@ -8,7 +8,7 @@ export default function Shop() {
   const [selectedCategory, setSelectedCategory] = useState("전체");
   const [keyword, setKeyword] = useState("");
   const [sort, setSort] = useState<"new" | "price-asc" | "price-desc" | "popular" | "reviews" | "discount">("new");
-  const [hideSoldOut, setHideSoldOut] = useState(false);
+  const [tag, setTag] = useState("전체");
 
   useEffect(() => {
     apiFetch("/api/products")
@@ -28,7 +28,12 @@ export default function Shop() {
       const inCategory = selectedCategory === "전체" || p.category === selectedCategory;
       const inName = !q || p.name.toLowerCase().includes(q);
       const soldOut = Number(p.stock) === 0 && p.sale_mode !== "preorder";
-      return inCategory && inName && !(hideSoldOut && soldOut);
+      const tags = String((p as any).tags || "")
+        .split(/[#,\s]+/)
+        .map((item) => item.trim())
+        .filter(Boolean);
+      const inTag = tag === "전체" || tags.includes(tag.replace("#", ""));
+      return inCategory && inName && inTag && !(hideSoldOut && soldOut);
     });
     if (sort === "price-asc") return [...list].sort((a, b) => salePrice(a) - salePrice(b));
     if (sort === "price-desc") return [...list].sort((a, b) => salePrice(b) - salePrice(a));
@@ -36,7 +41,9 @@ export default function Shop() {
     if (sort === "reviews") return [...list].sort((a, b) => Number(b.review_count || 0) - Number(a.review_count || 0));
     if (sort === "discount") return [...list].sort((a, b) => Number(b.discount_rate || 0) - Number(a.discount_rate || 0));
     return list;
-  }, [products, selectedCategory, keyword, sort, hideSoldOut]);
+  }, [products, selectedCategory, keyword, sort, hideSoldOut, tag]);
+
+  const tags = ["전체", ...Array.from(new Set(products.flatMap((p) => String((p as any).tags || "").split(/[#,\s]+/).map((item) => item.trim()).filter(Boolean))))];
 
   const wide = filtered.length >= 4;
 
@@ -63,6 +70,24 @@ export default function Shop() {
               )}
             >
               {cat}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {tags.length > 1 && (
+        <div className="flex flex-wrap gap-2 mb-4">
+          {tags.map((item) => (
+            <button
+              key={item}
+              type="button"
+              onClick={() => setTag(item)}
+              className={cn(
+                "px-3 py-1.5 rounded-full text-xs font-bold",
+                tag === item ? "bg-venuea-brown text-white" : "bg-white text-venuea-brown"
+              )}
+            >
+              {item === "전체" ? "공간 전체" : `#${item}`}
             </button>
           ))}
         </div>

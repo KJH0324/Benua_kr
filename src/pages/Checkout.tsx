@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { loadTossPayments } from "@tosspayments/tosspayments-sdk";
 import DaumPostcodeEmbed from "react-daum-postcode";
@@ -6,7 +6,7 @@ import { ShieldCheck, CreditCard, Loader2, CheckCircle2, MapPin, X } from "lucid
 import { toast } from "sonner";
 import { apiFetch } from "../lib/api";
 import { formatPrice, cn } from "../lib/utils";
-import { readDirectCheckout, clearDirectCheckout, readLocalCart, saveCart } from "../lib/cart";
+import { readDirectCheckout, clearDirectCheckout, readLocalCart, readSelectedCheckout, clearSelectedCheckout, saveCart } from "../lib/cart";
 import type { CartItem, UserProfile } from "../types";
 
 const TOSS_CLIENT_KEY =
@@ -43,8 +43,15 @@ export default function Checkout() {
   const [isPostcodeOpen, setIsPostcodeOpen] = useState(false);
 
   const [paymentMethod, setPaymentMethod] = useState<
-    "card" | "kakao_pay" | "naver_pay" | "vbank"
+    "card" | "kakao_pay" | "naver_pay" | "vbank" | "transfer"
   >("card");
+  const [shippingMemo, setShippingMemo] = useState("문 앞에 놓아주세요");
+  const [memoCustom, setMemoCustom] = useState("");
+  const [gateCode, setGateCode] = useState("");
+  const [isGift, setIsGift] = useState(false);
+  const [giftMessage, setGiftMessage] = useState("");
+  const [giftLink, setGiftLink] = useState("");
+  const couponTouched = useRef(false);
   const [formError, setFormError] = useState("");
   const [completedOrderNumber, setCompletedOrderNumber] = useState<string | null>(null);
   const [vbankResult, setVbankResult] = useState<any>(null);
@@ -92,7 +99,16 @@ export default function Checkout() {
           }
 
           if (readDirectCheckout()) clearDirectCheckout();
-          else saveCart([], "replace");
+          else {
+            const selected = readSelectedCheckout();
+            if (selected) {
+              const drop = new Set(selected.map((item) => `${item.id}:${item.option_id || 0}`));
+              saveCart(readLocalCart().filter((item) => !drop.has(`${item.id}:${item.option_id || 0}`)), "replace");
+              clearSelectedCheckout();
+            } else saveCart([], "replace");
+          }
+          const token = sessionStorage.getItem("benua_gift_token");
+          if (token) setGiftLink(`${window.location.origin}/gift/${token}`);
           setCompletedOrderNumber(data.order_number);
           if (data.vbank) setVbankResult(data.vbank);
           toast.success("주문이 성공적으로 완료되었습니다.");
@@ -113,7 +129,7 @@ export default function Checkout() {
     }
     let cancelled = false;
     const checkStock = async () => {
-      let saved: any[] = readDirectCheckout() || readLocalCart();
+      let saved: any[] = readDirectCheckout() || readSelectedCheckout() || readLocalCart();
       for (const item of saved) {
         const res = await apiFetch(`/api/products/${item.id}`);
         const product = res.ok ? await res.json().catch(() => null) : null;
@@ -153,7 +169,7 @@ export default function Checkout() {
   // 2. Load Cart, User Profile, and Coupons
   useEffect(() => {
     try {
-      const savedCart = readDirectCheckout() || readLocalCart();
+      const savedCart = readDirectCheckout() || readSelectedCheckout() || readLocalCart();
       setCart(savedCart);
     } catch {
       setCart([]);
@@ -260,14 +276,39 @@ export default function Checkout() {
   const maxUsablePoints = Math.min(pointBalance, payableBeforePoints);
   const totalAmount = Math.max(0, payableBeforePoints - usePoints);
 
+  useEffect(() => {
+    setUsePoints((value) => Math.min(value, maxUsablePoints));
+  }, [maxUsablePoints]);
+
+  useEffect(() => {
+    if (couponTouched.current || coupons.length === 0) return;
+    let bestId: number | null = null;
+    let best = 0;
+    for (const coupon of coupons) {
+      if (subtotal < (Number(coupon.min_order_amount) || 0)) continue;
+      let amount = 0;
+      if (coupon.type === "FIXED") amount = Number(coupon.value) || 0;
+      else if (coupon.type === "PERCENT") {
+        amount = Math.floor(subtotal * ((Number(coupon.value) || 0) / 100));
+        const cap = Number(coupon.max_discount_amount) || 0;
+        if (cap > 0) amount = Math.min(amount, cap);
+      } else if (coupon.type === "SHIPPING") amount = shippingFee;
+      if (amount > best) {
+        best = amount;
+        bestId = coupon.id;
+      }
+    }
+    if (bestId) setSelectedCouponId(bestId);
+  }, [coupons, subtotal, shippingFee]);
+
   const handlePaymentSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (cart.length === 0) {
       toast.error("쇼핑백이 비어 있습니다.");
       return;
     }
-    if (!customerName || !customerEmail || !customerPhone || !zipcode || !address) {
-      setFormError("수령인, 연락처, 이메일, 우편번호, 주소를 모두 입력해주세요.");
+    if (!customerName || !customerEmail || !customerPhone || (!isGift && (!zipcode || !address))) {
+      setFormError(isGift ? "받는 사람 이름, 연락처, 이메일을 입력해주세요." : "수령인, 연락처, 이메일, 우편번호, 주소를 모두 입력해주세요.");
       return;
     }
     setFormError("");
@@ -300,6 +341,11 @@ export default function Checkout() {
           used_points: usePoints,
           used_coupon_id: selectedCouponId,
           payment_method: paymentMethod,
+          shipping_memo: [shippingMemo === "직접 입력" ? memoCustom : shippingMemo, gateCode ? `공동현관 ${gateCode}` : ""]
+            .filter(Boolean)
+            .join(" / "),
+          is_gift: isGift,
+          gift_message: giftMessage,
         }),
       });
 
@@ -312,6 +358,7 @@ export default function Checkout() {
 
       // If 0 KRW order (paid fully by points/coupon)
       if (prepData.order_number) prepOrderNumber = prepData.order_number;
+      if (prepData.gift_token) sessionStorage.setItem("benua_gift_token", prepData.gift_token);
 
       if (prepData.zeroAmountPaid) {
         if (readDirectCheckout()) clearDirectCheckout();
@@ -345,6 +392,17 @@ export default function Checkout() {
             useEscrow: false,
             validHours: 24,
           },
+        });
+      } else if (paymentMethod === "transfer") {
+        await payment.requestPayment({
+          method: "TRANSFER",
+          amount: { currency: "KRW", value: prepData.amount },
+          orderId: prepData.order_number,
+          orderName: prepData.order_name,
+          customerName,
+          customerEmail,
+          successUrl,
+          failUrl,
         });
       } else {
         await payment.requestPayment({
@@ -391,6 +449,13 @@ export default function Checkout() {
         <p className="text-sm text-venuea-muted">
           주문번호: <b className="text-venuea-dark font-mono">{completedOrderNumber}</b>
         </p>
+        {giftLink && (
+          <p className="text-sm text-venuea-brown break-all">
+            선물 수령 링크
+            <br />
+            {giftLink}
+          </p>
+        )}
         <button
           type="button"
           onClick={() => {
@@ -555,6 +620,45 @@ export default function Checkout() {
             )}
           </section>
 
+          <section className="bg-white p-6 rounded-2xl border border-gray-200 space-y-3">
+            <label className="flex items-center gap-2 text-sm font-bold">
+              <input type="checkbox" checked={isGift} onChange={(e) => setIsGift(e.target.checked)} />
+              선물하기
+            </label>
+            {isGift && (
+              <input
+                value={giftMessage}
+                onChange={(e) => setGiftMessage(e.target.value)}
+                placeholder="선물 메시지"
+                className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm"
+              />
+            )}
+            <label className="block text-xs font-bold text-gray-500">배송 요청</label>
+            <select
+              value={shippingMemo}
+              onChange={(e) => setShippingMemo(e.target.value)}
+              className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm"
+            >
+              <option>문 앞에 놓아주세요</option>
+              <option>경비실에 맡겨주세요</option>
+              <option>택배함에 넣어주세요</option>
+              <option>직접 입력</option>
+            </select>
+            {shippingMemo === "직접 입력" && (
+              <input
+                value={memoCustom}
+                onChange={(e) => setMemoCustom(e.target.value)}
+                className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm"
+              />
+            )}
+            <input
+              value={gateCode}
+              onChange={(e) => setGateCode(e.target.value)}
+              placeholder="공동현관 비밀번호"
+              className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm"
+            />
+          </section>
+
           {user && (
             <section className="bg-white p-6 rounded-2xl border border-gray-200 space-y-4">
               <h2 className="text-base font-bold text-venuea-dark">쿠폰 및 포인트 적용</h2>
@@ -562,9 +666,10 @@ export default function Checkout() {
                 <label className="block text-xs font-bold text-gray-500 mb-1.5">보유 쿠폰 선택</label>
                 <select
                   value={selectedCouponId || ""}
-                  onChange={(e) =>
-                    setSelectedCouponId(e.target.value ? Number(e.target.value) : null)
-                  }
+                  onChange={(e) => {
+                    couponTouched.current = true;
+                    setSelectedCouponId(e.target.value ? Number(e.target.value) : null);
+                  }}
                   className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm"
                 >
                   <option value="">선택 안 함</option>
@@ -612,12 +717,13 @@ export default function Checkout() {
 
           <section className="bg-white p-6 rounded-2xl border border-gray-200 space-y-4">
             <h2 className="text-base font-bold text-venuea-dark">결제 수단 (Toss Payments)</h2>
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
               {[
                 { id: "card", label: "신용/체크카드" },
                 { id: "kakao_pay", label: "카카오페이" },
                 { id: "naver_pay", label: "네이버페이" },
                 { id: "vbank", label: "가상계좌" },
+                { id: "transfer", label: "실시간 계좌이체" },
               ].map((m) => (
                 <button
                   type="button"

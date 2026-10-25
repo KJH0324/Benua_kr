@@ -83,6 +83,38 @@ export function clearDirectCheckout() {
   sessionStorage.removeItem(DIRECT_KEY);
 }
 
+const SELECT_KEY = "benua_selected_items";
+
+export function beginSelectedCheckout(items: LocalCartItem[]) {
+  sessionStorage.setItem(SELECT_KEY, JSON.stringify(items));
+}
+
+export function clearSelectedCheckout() {
+  sessionStorage.removeItem(SELECT_KEY);
+}
+
+export function readSelectedCheckout(): LocalCartItem[] | null {
+  try {
+    const raw = sessionStorage.getItem(SELECT_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) && parsed.length > 0 ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+export function forgetRecent(id: number | string) {
+  const next = readRecent().filter((item) => String(item.id) !== String(id));
+  localStorage.setItem("benua_recent", JSON.stringify(next));
+  window.dispatchEvent(new Event("recent-updated"));
+}
+
+export function clearRecent() {
+  localStorage.removeItem("benua_recent");
+  window.dispatchEvent(new Event("recent-updated"));
+}
+
 export function readDirectCheckout(): LocalCartItem[] | null {
   try {
     const raw = sessionStorage.getItem(DIRECT_KEY);

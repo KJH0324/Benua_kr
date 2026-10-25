@@ -11,7 +11,8 @@ export type CardProduct = {
   stock?: number;
   sale_mode?: string;
   rating_avg?: number;
-  review_count?: number;
+  hover_image?: string;
+  tags?: string;
 };
 
 export function salePrice(product: { price: number; discount_rate?: number }) {
@@ -28,11 +29,24 @@ export default function ProductCard({ product }: { product: CardProduct }) {
     <Link to={`/product/${product.id}`} className="group block space-y-3">
       <div className="aspect-[4/5] bg-white rounded-2xl overflow-hidden relative">
         {product.image_url ? (
-          <img
-            src={product.image_url}
-            alt={product.name}
-            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
-          />
+          <>
+            <img
+              src={product.image_url}
+              alt={product.name}
+              loading="lazy"
+              decoding="async"
+              className={`w-full h-full object-cover transition-opacity duration-500 ${product.hover_image ? "group-hover:opacity-0" : "group-hover:scale-105"}`}
+            />
+            {product.hover_image ? (
+              <img
+                src={product.hover_image}
+                alt=""
+                loading="lazy"
+                decoding="async"
+                className="absolute inset-0 w-full h-full object-cover opacity-0 group-hover:opacity-100 transition-opacity duration-500"
+              />
+            ) : null}
+          </>
         ) : (
           <div className="w-full h-full bg-white" />
         )}

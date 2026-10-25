@@ -6,27 +6,39 @@ import Footer from "./components/Footer";
 import ScrollToTop from "./components/ScrollToTop";
 import Home from "./pages/Home";
 import Shop from "./pages/Shop";
-import ProductDetail from "./pages/ProductDetail";
-import Cart from "./pages/Cart";
-import TrackOrder from "./pages/TrackOrder";
-import Profile from "./pages/Profile";
-import Login from "./pages/Login";
-import About from "./pages/About";
-import Contact from "./pages/Contact";
-import Terms from "./pages/Terms";
-import Privacy from "./pages/Privacy";
-import Checkout from "./pages/Checkout";
-import VerifyEmail from "./pages/VerifyEmail";
-import Unsubscribe from "./pages/Unsubscribe";
-import ResetPassword from "./pages/ResetPassword";
 import { AnimatePresence } from "motion/react";
 import ErrorBoundary from "./components/ErrorBoundary";
 import CouponPopup from "./components/CouponPopup";
 import RecentFloat from "./components/RecentFloat";
 import { isAdminSubdomain } from "./lib/subdomain";
 
+const ProductDetail = lazy(() => import("./pages/ProductDetail"));
+const Cart = lazy(() => import("./pages/Cart"));
+const TrackOrder = lazy(() => import("./pages/TrackOrder"));
+const Profile = lazy(() => import("./pages/Profile"));
+const Login = lazy(() => import("./pages/Login"));
+const About = lazy(() => import("./pages/About"));
+const Contact = lazy(() => import("./pages/Contact"));
+const Terms = lazy(() => import("./pages/Terms"));
+const Privacy = lazy(() => import("./pages/Privacy"));
+const Checkout = lazy(() => import("./pages/Checkout"));
+const VerifyEmail = lazy(() => import("./pages/VerifyEmail"));
+const Unsubscribe = lazy(() => import("./pages/Unsubscribe"));
+const ResetPassword = lazy(() => import("./pages/ResetPassword"));
+const Gift = lazy(() => import("./pages/Gift"));
 const AdminDashboard = lazy(() => import("./pages/AdminDashboard"));
 const AdminLogin = lazy(() => import("./pages/AdminLogin"));
+
+const toastStyle = {
+  toastOptions: {
+    style: {
+      background: "#463221",
+      color: "#faf2e7",
+      border: "none",
+      borderRadius: "16px",
+    },
+  },
+};
 
 function PageTitleHandler() {
   const location = useLocation();
@@ -96,7 +108,7 @@ export default function App() {
                 </Suspense>
               </AnimatePresence>
             </main>
-          <Toaster position="bottom-center" />
+          <Toaster position="bottom-center" toastOptions={toastStyle.toastOptions} />
           </div>
         </Router>
       </ErrorBoundary>
@@ -112,6 +124,7 @@ export default function App() {
           <Navbar />
           <main className="flex-grow">
             <AnimatePresence mode="wait">
+              <Suspense fallback={null}>
               <Routes>
                 <Route path="/" element={<Home />} />
                 <Route path="/shop" element={<Shop />} />
@@ -125,18 +138,20 @@ export default function App() {
                 <Route path="/track" element={<TrackOrder />} />
                 <Route path="/profile" element={<Profile />} />
                 <Route path="/login" element={<Login />} />
+                <Route path="/gift/:token" element={<Gift />} />
                 <Route path="/verify-email" element={<VerifyEmail />} />
                 <Route path="/unsubscribe" element={<Unsubscribe />} />
                 <Route path="/reset-password" element={<ResetPassword />} />
                 <Route path="/admin/*" element={<Navigate to={`https://dash.benua.shop${window.location.pathname.replace('/admin', '')}`} replace />} />
                 <Route path="*" element={<NotFound />} />
               </Routes>
+              </Suspense>
             </AnimatePresence>
           </main>
           <Footer />
           <CouponPopup />
           <RecentFloat />
-          <Toaster position="bottom-center" />
+          <Toaster position="bottom-center" toastOptions={toastStyle.toastOptions} />
         </div>
       </Router>
     </ErrorBoundary>
