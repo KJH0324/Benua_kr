@@ -207,6 +207,8 @@ export default function Contact() {
           onChange={(e) => setForm({ ...form, message: e.target.value })}
           className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm"
         />
+        {user && (
+          <>
         <input
           id="contact-photo"
           type="file"
@@ -234,6 +236,8 @@ export default function Contact() {
           {imageUrl ? "사진 변경" : "사진 첨부"}
         </button>
         {imageUrl && <img src={imageUrl} alt="" className="w-24 h-24 object-cover rounded-xl" />}
+          </>
+        )}
         <button
           type="submit"
           disabled={submitting || (needsOrder && (!user || orders.length === 0))}

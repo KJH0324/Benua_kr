@@ -19,7 +19,7 @@ export default function RecentFloat() {
   const addOne = async (item: any) => {
     const res = await apiFetch(`/api/products/${item.id}`);
     const product = res.ok ? await res.json().catch(() => null) : null;
-    if (!product || (product.options || []).length > 0) {
+    if (!product || product.sale_mode === "preorder" || (product.options || []).length > 0) {
       window.location.href = `/product/${item.id}`;
       return;
     }

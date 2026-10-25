@@ -12,7 +12,7 @@ export default function Cart() {
   const [cart, setCart] = useState<CartItem[]>([]);
   const [pickedKeys, setPickedKeys] = useState<string[]>([]);
   const [freeShippingTier, setFreeShippingTier] = useState(false);
-  const [picks, setPicks] = useState<CardProduct[]>([]);
+  const [cartReady, setCartReady] = useState(false);
 
   useEffect(() => {
     const sync = async () => {
@@ -49,7 +49,7 @@ export default function Cart() {
       setPickedKeys(next.map((item) => cartKey(item as any)));
       await saveCart(next as any, "replace");
     };
-    sync();
+    sync().finally(() => setCartReady(true));
 
     apiFetch("/api/auth/me")
       .then((r) => r.json())
@@ -95,13 +95,17 @@ export default function Cart() {
 
       {cart.length === 0 ? (
         <div className="text-center py-20 space-y-4">
-          <p className="text-sm text-gray-400">쇼핑백에 담긴 오브제가 없습니다.</p>
-          <Link
-            to="/shop"
-            className="inline-block bg-venuea-green text-white px-6 py-3 rounded-full text-sm font-bold"
-          >
-            컬렉션 보러가기
-          </Link>
+          <p className="text-sm text-gray-400">
+            {cartReady ? "쇼핑백에 담긴 오브제가 없습니다." : "쇼핑백을 불러오는 중입니다."}
+          </p>
+          {cartReady && (
+            <Link
+              to="/shop"
+              className="inline-block bg-venuea-green text-white px-6 py-3 rounded-full text-sm font-bold"
+            >
+              컬렉션 보러가기
+            </Link>
+          )}
         </div>
       ) : (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-10">
@@ -227,6 +231,9 @@ export default function Cart() {
                       +
                     </button>
                   </div>
+                  {Number((item as any).stock) > 0 && (
+                    <p className="text-[11px] text-gray-400">재고 {Number((item as any).stock)}개</p>
+                  )}
                   <button
                     type="button"
                     aria-label="쇼핑백에서 삭제"

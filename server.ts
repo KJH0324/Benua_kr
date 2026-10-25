@@ -1070,20 +1070,61 @@ const labelAdminLogKeys = () => {
 };
 labelAdminLogKeys();
 
-const rateBuckets = new Map<string, number[]>();
+db.exec(`
+  CREATE TABLE IF NOT EXISTS rate_hits (
+    bucket TEXT NOT NULL,
+    at INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_rate_hits_bucket ON rate_hits(bucket, at);
+`);
+let ratePrunedAt = 0;
 const allowRate = (key: string, limit: number, windowMs: number) => {
   const now = Date.now();
-  const recent = (rateBuckets.get(key) || []).filter((at) => now - at < windowMs);
-  if (recent.length >= limit) return false;
-  recent.push(now);
-  rateBuckets.set(key, recent);
-  return true;
+  const cutoff = now - windowMs;
+  const tx = db.transaction(() => {
+    if (now - ratePrunedAt > 60 * 1000) {
+      ratePrunedAt = now;
+      db.prepare("DELETE FROM rate_hits WHERE at < ?").run(now - 24 * 60 * 60 * 1000);
+    }
+    db.prepare("DELETE FROM rate_hits WHERE bucket = ? AND at < ?").run(key, cutoff);
+    const row = db.prepare("SELECT COUNT(*) as n FROM rate_hits WHERE bucket = ?").get(key) as { n: number };
+    if (row.n >= limit) return false;
+    db.prepare("INSERT INTO rate_hits (bucket, at) VALUES (?, ?)").run(key, now);
+    return true;
+  });
+  return tx();
 };
 
 const clientIp = (req: express.Request) =>
-  String(req.headers["x-forwarded-for"] || req.socket.remoteAddress || "unknown")
-    .split(",")[0]
-    .trim();
+  String(req.ip || req.socket.remoteAddress || "unknown").replace(/^::ffff:/, "");
+
+const phoneDigits = (value: unknown) => {
+  let digits = String(value || "").replace(/\D/g, "");
+  if (digits.startsWith("82")) digits = `0${digits.slice(2)}`;
+  return digits;
+};
+
+const phoneOk = (value: unknown) => /^01[016789]\d{7,8}$/.test(phoneDigits(value));
+
+const signUnsubToken = (email: string) => {
+  const body = Buffer.from(String(email || "").trim().toLowerCase()).toString("base64url");
+  const sig = crypto.createHmac("sha256", JWT_SECRET).update(body).digest("base64url");
+  return `${body}.${sig}`;
+};
+
+const readUnsubToken = (token: unknown) => {
+  const [body, sig] = String(token || "").split(".");
+  if (!body || !sig) return "";
+  const expect = crypto.createHmac("sha256", JWT_SECRET).update(body).digest("base64url");
+  const a = Buffer.from(sig);
+  const b = Buffer.from(expect);
+  if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return "";
+  try {
+    return Buffer.from(body, "base64url").toString("utf8");
+  } catch {
+    return "";
+  }
+};
 
 const isSpamBotEmail = (rawEmail: unknown): boolean => {
   const email = String(rawEmail || "").trim().toLowerCase();
@@ -1427,6 +1468,9 @@ const completeOrderTx = db.transaction((orderId: number | string) => {
   const order = db.prepare("SELECT * FROM orders WHERE id = ?").get(orderId) as any;
   if (!order) throw new Error("주문을 찾을 수 없습니다.");
   if (order.status === "completed") return { alreadyCompleted: true, earned: order.earned_points || 0 };
+  if (!["paid", "preparing", "shipping", "delivered"].includes(order.status)) {
+    throw new Error("결제 완료된 주문만 구매확정할 수 있습니다.");
+  }
 
   db.prepare(
     "UPDATE orders SET status = 'completed', vbank_account = NULL, status_updated_at = CURRENT_TIMESTAMP, confirmed_at = CURRENT_TIMESTAMP WHERE id = ?"
@@ -2172,7 +2216,7 @@ async function startServer() {
       "http://localhost:5173",
     ];
 
-    if (origin && (allowedOrigins.includes(origin) || origin.endsWith(".benua.shop"))) {
+    if (origin && allowedOrigins.includes(origin)) {
       res.setHeader("Access-Control-Allow-Origin", origin);
       res.setHeader("Access-Control-Allow-Credentials", "true");
       res.setHeader("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS");
@@ -2197,7 +2241,20 @@ async function startServer() {
   );
   app.use(express.urlencoded({ limit: "50mb", extended: true }));
   app.use(cookieParser());
-  app.use("/uploads", express.static(uploadsDir));
+  app.use(
+    "/uploads",
+    express.static(uploadsDir, {
+      setHeaders(res, filePath) {
+        res.setHeader("X-Content-Type-Options", "nosniff");
+        res.setHeader("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; sandbox");
+        const ext = path.extname(filePath).toLowerCase();
+        if (![".jpg", ".jpeg", ".png", ".webp", ".gif"].includes(ext)) {
+          res.setHeader("Content-Type", "application/octet-stream");
+          res.setHeader("Content-Disposition", "attachment");
+        }
+      },
+    })
+  );
 
   runAutoCompletion();
   setInterval(runAutoCompletion, 60 * 60 * 1000);
@@ -2478,6 +2535,9 @@ async function startServer() {
   app.post("/api/auth/login", (req, res) => {
     const { email, password } = req.body;
     const cleanEmail = String(email || "").trim();
+    if (!allowRate(`login-email:${cleanEmail.toLowerCase()}`, 8, 15 * 60 * 1000)) {
+      return res.status(429).json({ error: "로그인 시도가 너무 많습니다. 잠시 후 다시 시도해주세요." });
+    }
     if (!allowRate(`login:${clientIp(req)}:${cleanEmail.toLowerCase()}`, 8, 15 * 60 * 1000)) {
       return res.status(429).json({ error: "로그인 시도가 너무 많습니다. 잠시 후 다시 시도해주세요." });
     }
@@ -3963,6 +4023,9 @@ async function startServer() {
     if (!String(customer_name || "").trim() || !String(customer_phone || "").trim() || (!gift && !String(shipping_address || "").trim())) {
       return res.status(400).json({ error: gift ? "받는 사람 이름과 연락처를 입력해주세요." : "수령인, 연락처, 주소를 입력해주세요." });
     }
+    if (!phoneOk(customer_phone)) {
+      return res.status(400).json({ error: "연락처는 010으로 시작하는 번호로 입력해주세요." });
+    }
 
     const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
     let order_number = "";
@@ -3998,7 +4061,7 @@ async function startServer() {
             account?.id || null,
             customer_name,
             customer_email,
-            customer_phone,
+            phoneDigits(customer_phone),
             gift ? String(shipping_address || "선물 수령 대기") : shipping_address,
             quote.total,
             quote.shippingFee,
@@ -4443,6 +4506,9 @@ async function startServer() {
     if (!name || !phone || zipcode.length < 5 || !address) {
       return res.status(400).json({ error: "수령인, 연락처, 주소를 입력해주세요." });
     }
+    if (!phoneOk(phone)) {
+      return res.status(400).json({ error: "연락처는 010으로 시작하는 번호로 입력해주세요." });
+    }
     try {
       const order = db
         .prepare("SELECT id, status, order_number FROM orders WHERE id = ? AND user_id = ?")
@@ -4454,7 +4520,7 @@ async function startServer() {
       const shippingAddress = `[${zipcode}] ${address}${detail ? ` ${detail}` : ""}`;
       db.prepare(
         "UPDATE orders SET customer_name = ?, customer_phone = ?, shipping_address = ? WHERE id = ?"
-      ).run(name, phone, shippingAddress, order.id);
+      ).run(name, phoneDigits(phone), shippingAddress, order.id);
       if (order.status === "paid") {
         const recipients = db
           .prepare("SELECT notify_email FROM admin_keys WHERE notify_email IS NOT NULL AND TRIM(notify_email) != ''")
@@ -4488,6 +4554,9 @@ async function startServer() {
       if (order.status === "completed") {
         return res.status(400).json({ error: "이미 구매확정된 주문입니다." });
       }
+      if (!["paid", "preparing", "shipping", "delivered"].includes(order.status)) {
+        return res.status(400).json({ error: "결제 완료된 주문만 구매확정할 수 있습니다." });
+      }
 
       const result = completeOrderTx(order.id);
       res.json({ success: true, earned: result.earned });
@@ -4507,6 +4576,9 @@ async function startServer() {
       if (!order) return res.status(404).json({ error: "주문을 찾을 수 없습니다." });
       if (["refunded", "cancelled"].includes(order.status)) {
         return res.status(400).json({ error: "이미 환불된 주문입니다." });
+      }
+      if (order.status === "pending") {
+        return res.status(400).json({ error: "결제 전에 환불할 수 없습니다." });
       }
       const items = db.prepare("SELECT * FROM order_items WHERE order_id = ?").all(order.id) as any[];
       const openItems = items.filter((item) => !["refunded", "refund_requested"].includes(item.item_status || "normal"));
@@ -5327,7 +5399,7 @@ async function startServer() {
     }
   });
 
-  app.post("/api/uploads/image", (req, res) => {
+  app.post("/api/uploads/image", authenticateUser, (req, res) => {
     if (!allowRate(`upload:${clientIp(req)}`, 20, 60 * 60 * 1000)) {
       return res.status(429).json({ error: "요청이 너무 많습니다. 잠시 후 다시 시도해주세요." });
     }
@@ -5337,7 +5409,12 @@ async function startServer() {
         fs.unlink(req.file.path, () => {});
         return res.status(400).json({ error: "이미지 파일만 올릴 수 있습니다." });
       }
-      await toWebp(req.file);
+      try {
+        await toWebp(req.file);
+      } catch {
+        if (req.file?.path) fs.unlink(req.file.path, () => {});
+        return res.status(400).json({ error: "이미지 파일만 올릴 수 있습니다." });
+      }
       res.json({ image_url: `/uploads/${req.file.filename}` });
     });
   });
@@ -5544,8 +5621,8 @@ async function startServer() {
   });
 
   app.post("/api/newsletter/unsubscribe", (req, res) => {
-    const { email } = req.body;
-    if (!email) return res.status(400).json({ error: "이메일 정보가 필요합니다." });
+    const email = readUnsubToken(req.body?.token);
+    if (!email) return res.status(400).json({ error: "수신거부 링크가 올바르지 않습니다." });
     try {
       const rawEmail = String(email || "").trim();
       const normalized = normalizeEmailAddress(rawEmail);
@@ -5593,8 +5670,7 @@ async function startServer() {
 
       await sendInBatches(
         allEmails.map((email) => () => {
-          const encodedEmail = Buffer.from(email).toString("base64");
-          const unsubLink = `https://${mainDomainHost}/unsubscribe?token=${encodedEmail}`;
+          const unsubLink = `https://${mainDomainHost}/unsubscribe?token=${signUnsubToken(email)}`;
           return sendMail(
             email,
             subject,
@@ -5719,15 +5795,6 @@ async function startServer() {
       });
     }
   });
-
-  setInterval(() => {
-    const now = Date.now();
-    for (const [key, times] of rateBuckets) {
-      const recent = times.filter((at) => now - at < 60 * 60 * 1000);
-      if (recent.length === 0) rateBuckets.delete(key);
-      else rateBuckets.set(key, recent);
-    }
-  }, 10 * 60 * 1000);
 
   app.get("/api/orders/:id/tracking", authenticateUser, async (req: any, res, next) => {
     if (!/^\d+$/.test(String(req.params.id))) return next();
@@ -5857,7 +5924,12 @@ async function startServer() {
       "INSERT INTO carts (user_id, product_id, quantity, option_id) VALUES (?, ?, ?, ?)"
     );
     for (const item of merged.values()) {
-      if (item.id) insert.run(req.user.id, item.id, item.quantity, item.option_id);
+      if (!item.id) continue;
+      const product = db.prepare("SELECT sale_mode FROM products WHERE id = ?").get(item.id) as
+        | { sale_mode?: string }
+        | undefined;
+      if (!product || product.sale_mode === "preorder") continue;
+      insert.run(req.user.id, item.id, item.quantity, item.option_id);
     }
     res.json({ success: true });
   });

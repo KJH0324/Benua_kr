@@ -802,8 +802,8 @@ export default function Profile() {
                     <p className="font-bold text-venuea-dark">{row.reason || (row.type === "USED" ? "사용" : "적립")}</p>
                     <p className="text-[11px] text-gray-400">{String(row.created_at || "").slice(0, 16)}</p>
                   </div>
-                  <span className={row.type === "USED" ? "text-red-600 font-bold" : "text-venuea-green font-bold"}>
-                    {row.type === "USED" ? "-" : "+"}
+                  <span className={Number(row.amount) < 0 ? "text-red-600 font-bold" : "text-venuea-green font-bold"}>
+                    {Number(row.amount) > 0 ? "+" : ""}
                     {Number(row.amount || 0).toLocaleString()}P
                   </span>
                 </div>
@@ -1143,8 +1143,8 @@ export default function Profile() {
                     <p className="font-bold text-venuea-dark">{row.reason || (row.type === "USED" ? "사용" : "적립")}</p>
                     <p className="text-[11px] text-gray-400">{String(row.created_at || "").slice(0, 16)}</p>
                   </div>
-                  <span className={row.type === "USED" ? "text-red-600 font-bold" : "text-venuea-green font-bold"}>
-                    {row.type === "USED" ? "-" : "+"}
+                  <span className={Number(row.amount) < 0 ? "text-red-600 font-bold" : "text-venuea-green font-bold"}>
+                    {Number(row.amount) > 0 ? "+" : ""}
                     {Number(row.amount || 0).toLocaleString()}P
                   </span>
                 </div>

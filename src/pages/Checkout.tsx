@@ -22,6 +22,12 @@ function readCheckoutDraft(): Record<string, string> {
   }
 }
 
+function phoneOk(value: string) {
+  let digits = value.replace(/\D/g, "");
+  if (digits.startsWith("82")) digits = `0${digits.slice(2)}`;
+  return /^01[016789]\d{7,8}$/.test(digits);
+}
+
 export default function Checkout() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -274,11 +280,16 @@ export default function Checkout() {
   const payableBeforePoints = Math.max(0, subtotal + shippingFee - couponDiscount);
   const pointBalance = Number(user?.points || 0);
   const maxUsablePoints = Math.min(pointBalance, payableBeforePoints);
+  const pointsNeedMinimum = payableBeforePoints >= 1000 && pointBalance < 1000;
   const totalAmount = Math.max(0, payableBeforePoints - usePoints);
 
   useEffect(() => {
+    if (pointsNeedMinimum) {
+      setUsePoints(0);
+      return;
+    }
     setUsePoints((value) => Math.min(value, maxUsablePoints));
-  }, [maxUsablePoints]);
+  }, [maxUsablePoints, pointsNeedMinimum]);
 
   useEffect(() => {
     if (couponTouched.current || coupons.length === 0) return;
@@ -317,7 +328,11 @@ export default function Checkout() {
       return;
     }
     if (usePoints > 0 && usePoints < 1000 && payableBeforePoints >= 1000) {
-      toast.error("포인트는 최소 1,000P 이상부터 사용 가능합니다.");
+      toast.error("포인트는 1,000P부터 사용할 수 있습니다.");
+      return;
+    }
+    if (!phoneOk(customerPhone)) {
+      toast.error("연락처는 010으로 시작하는 번호로 입력해주세요.");
       return;
     }
 
@@ -692,7 +707,7 @@ export default function Checkout() {
                   </label>
                   <button
                     type="button"
-                    disabled={maxUsablePoints <= 0}
+                    disabled={pointsNeedMinimum || maxUsablePoints < 1000}
                     onClick={() => setUsePoints(maxUsablePoints)}
                     className="text-[11px] font-bold text-venuea-gold whitespace-nowrap disabled:text-gray-300"
                   >
@@ -701,16 +716,21 @@ export default function Checkout() {
                 </div>
                 <input
                   inputMode="numeric"
-                  value={usePoints ? String(usePoints) : ""}
+                  disabled={pointsNeedMinimum}
+                  value={pointsNeedMinimum ? "" : usePoints ? String(usePoints) : ""}
                   onChange={(e) => {
                     const digits = e.target.value.replace(/\D/g, "");
                     const next = digits ? Number(digits) : 0;
                     setUsePoints(Math.min(maxUsablePoints, next));
                   }}
                   placeholder="0"
-                  className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm"
+                  className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm disabled:bg-gray-50"
                 />
-                <p className="mt-1.5 text-[11px] text-gray-400">최대 {maxUsablePoints.toLocaleString()}P</p>
+                <p className="mt-1.5 text-[11px] text-gray-400">
+                  {payableBeforePoints >= 1000
+                    ? "1,000P부터 사용할 수 있습니다."
+                    : `최대 ${maxUsablePoints.toLocaleString()}P`}
+                </p>
               </div>
             </section>
           )}
