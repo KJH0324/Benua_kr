@@ -813,6 +813,17 @@ const runMigrations = () => {
     CREATE INDEX IF NOT EXISTS idx_products_sort ON products(pinned, sort_order);
     CREATE INDEX IF NOT EXISTS idx_stock_logs_product ON stock_logs(product_id, id);
   `);
+
+  db.prepare(
+    `DELETE FROM inquiries
+     WHERE (LOWER(email) LIKE '%@gmail.com' OR LOWER(email) LIKE '%@googlemail.com')
+       AND (LENGTH(SUBSTR(email, 1, INSTR(email, '@') - 1)) - LENGTH(REPLACE(SUBSTR(email, 1, INSTR(email, '@') - 1), '.', ''))) >= 3`
+  ).run();
+  db.prepare(
+    `DELETE FROM newsletter_subscribers
+     WHERE (LOWER(email) LIKE '%@gmail.com' OR LOWER(email) LIKE '%@googlemail.com')
+       AND (LENGTH(SUBSTR(email, 1, INSTR(email, '@') - 1)) - LENGTH(REPLACE(SUBSTR(email, 1, INSTR(email, '@') - 1), '.', ''))) >= 3`
+  ).run();
 };
 
 runMigrations();
@@ -1073,6 +1084,58 @@ const clientIp = (req: express.Request) =>
   String(req.headers["x-forwarded-for"] || req.socket.remoteAddress || "unknown")
     .split(",")[0]
     .trim();
+
+const isSpamBotEmail = (rawEmail: unknown): boolean => {
+  const email = String(rawEmail || "").trim().toLowerCase();
+  if (!email || email.length > 160) return true;
+  const parts = email.split("@");
+  if (parts.length !== 2) return true;
+  const [local, domain] = parts;
+  if (!local || !domain || !domain.includes(".")) return true;
+  if (domain === "gmail.com" || domain === "googlemail.com") {
+    const dotCount = (local.match(/\./g) || []).length;
+    if (dotCount >= 3) return true;
+  }
+  if (local.startsWith(".") || local.endsWith(".") || local.includes("..")) return true;
+  return false;
+};
+
+const normalizeEmailAddress = (rawEmail: unknown): string => {
+  const email = String(rawEmail || "").trim().toLowerCase();
+  const parts = email.split("@");
+  if (parts.length !== 2) return email;
+  const [local, domain] = parts;
+  if (domain === "gmail.com" || domain === "googlemail.com") {
+    const cleanLocal = local.replace(/\./g, "").split("+")[0];
+    return `${cleanLocal}@gmail.com`;
+  }
+  return `${local}@${domain}`;
+};
+
+const isSpamInquiryContent = (subject: unknown, message: unknown): boolean => {
+  const sub = String(subject || "").trim();
+  const msg = String(message || "").trim();
+  const combined = `${sub} ${msg}`;
+  if (msg.length < 2) return true;
+  if (/^[a-zA-Z0-9]{25,}$/.test(sub) || /^[a-zA-Z0-9]{40,}$/.test(msg)) return true;
+  const hasKorean = /[가-힣ㄱ-ㅎㅏ-ㅣ]/.test(combined);
+  const hasUrl = /https?:\/\/|www\./i.test(combined);
+  if (!hasKorean && hasUrl) return true;
+  return false;
+};
+
+const gmailCanonicalTaken = (rawEmail: unknown): boolean => {
+  const canonical = normalizeEmailAddress(rawEmail);
+  if (!canonical.endsWith("@gmail.com")) return false;
+  const rows = db
+    .prepare(
+      "SELECT email FROM users WHERE LOWER(email) LIKE '%@gmail.com' OR LOWER(email) LIKE '%@googlemail.com'"
+    )
+    .all() as Array<{ email: string }>;
+  return rows.some((row) => normalizeEmailAddress(row.email) === canonical);
+};
+
+const honeypotFilled = (website: unknown) => String(website || "").trim() !== "";
 
 const warnedAdminIps = new Set<string>();
 const warnAdminLogin = (ip: string) => {
@@ -2251,19 +2314,26 @@ async function startServer() {
   // ==========================================
 // [신규] 회원가입용 6자리 이메일 인증번호 발송
   app.post("/api/auth/send-code", async (req, res) => {
-    const { email } = req.body;
-    if (!email || !email.includes("@")) {
+    const { email, website } = req.body;
+    if (!email || !String(email).includes("@")) {
       return res.status(400).json({ error: "유효한 이메일 주소를 입력해주세요." });
+    }
+    if (honeypotFilled(website) || isSpamBotEmail(email)) {
+      console.warn(`[SPAM][CODE_BLOCKED] IP: ${clientIp(req)}`);
+      return res.json({ success: true, message: "인증 메일을 보낼 수 있으면 발송했습니다." });
     }
 
     const cleanEmail = String(email || "").trim();
     const ip = clientIp(req);
+    if (!allowRate(`code-ip:${ip}`, 8, 60 * 60 * 1000)) {
+      return res.status(429).json({ error: "인증 메일 요청이 너무 많습니다. 잠시 후 다시 시도해주세요." });
+    }
     if (!allowRate(`code:${ip}:${cleanEmail.toLowerCase()}`, 3, 60 * 60 * 1000)) {
       return res.status(429).json({ error: "인증 메일 요청이 너무 많습니다. 잠시 후 다시 시도해주세요." });
     }
     try {
       const existingUser = db.prepare("SELECT id FROM users WHERE email = ?").get(cleanEmail);
-      if (existingUser) {
+      if (existingUser || gmailCanonicalTaken(cleanEmail)) {
         return res.json({ success: true, message: "인증 메일을 보낼 수 있으면 발송했습니다." });
       }
 
@@ -2335,6 +2405,10 @@ async function startServer() {
     if (!email || !password || !name) {
       return res.status(400).json({ error: "필수 입력 항목을 모두 입력해주세요." });
     }
+    if (honeypotFilled(req.body?.website) || isSpamBotEmail(email)) {
+      console.warn(`[SPAM][REGISTER_BLOCKED] IP: ${clientIp(req)}`);
+      return res.json({ success: true, message: "회원가입이 완료되었습니다." });
+    }
 
     const cleanEmail = String(email || "").trim();
     const inputCode = String(verification_code || VerificationCode || "").trim();
@@ -2351,6 +2425,9 @@ async function startServer() {
         if (!codeMatches(cleanEmail, inputCode)) {
           return res.status(400).json({ error: "이메일 인증을 먼저 완료해주세요." });
         }
+      }
+      if (gmailCanonicalTaken(cleanEmail)) {
+        return res.status(400).json({ error: "가입을 완료할 수 없습니다. 입력 정보를 확인해주세요." });
       }
 
       const hashedPassword = hashPassword(password);
@@ -2515,9 +2592,17 @@ async function startServer() {
   });
 
   app.post("/api/auth/forgot-password", async (req, res) => {
-    const { email } = req.body;
+    const { email, website } = req.body;
     const cleanEmail = String(email || "").trim();
-    if (!allowRate(`reset:${clientIp(req)}:${cleanEmail.toLowerCase()}`, 3, 60 * 60 * 1000)) {
+    if (honeypotFilled(website) || isSpamBotEmail(cleanEmail)) {
+      console.warn(`[SPAM][RESET_BLOCKED] IP: ${clientIp(req)}`);
+      return res.json({ success: true });
+    }
+    const ip = clientIp(req);
+    if (!allowRate(`reset-ip:${ip}`, 5, 60 * 60 * 1000)) {
+      return res.status(429).json({ error: "재설정 요청이 너무 많습니다. 잠시 후 다시 시도해주세요." });
+    }
+    if (!allowRate(`reset:${ip}:${cleanEmail.toLowerCase()}`, 3, 60 * 60 * 1000)) {
       return res.status(429).json({ error: "재설정 요청이 너무 많습니다. 잠시 후 다시 시도해주세요." });
     }
     try {
@@ -5258,7 +5343,18 @@ async function startServer() {
   });
 
   app.post("/api/inquiries", (req, res) => {
-    const { name, email, category, subject, message, order_number, image_url } = req.body;
+    const { name, email, category, subject, message, order_number, image_url, website } = req.body;
+    if (
+      honeypotFilled(website) ||
+      isSpamBotEmail(email) ||
+      isSpamInquiryContent(subject, message)
+    ) {
+      console.warn(`[SPAM][INQUIRY_BLOCKED] IP: ${clientIp(req)}`);
+      return res.json({ success: true });
+    }
+    if (!allowRate(`inquiry:${clientIp(req)}`, 5, 10 * 60 * 1000)) {
+      return res.status(429).json({ error: "문의 등록 요청이 너무 많습니다. 잠시 후 다시 시도해주세요." });
+    }
     if (!name || !email || !subject || !message) {
       return res.status(400).json({ error: "모든 항목을 입력해주세요." });
     }
@@ -5291,10 +5387,10 @@ async function startServer() {
          VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
       ).run(
         category || "상품 문의",
-        name,
-        email,
-        subject,
-        message,
+        String(name).trim().slice(0, 80),
+        normalizeEmailAddress(email),
+        String(subject).trim().slice(0, 200),
+        String(message).trim().slice(0, 5000),
         linkedOrderNumber,
         userId,
         String(image_url || "").startsWith("/uploads/") ? String(image_url) : null
@@ -5310,6 +5406,12 @@ async function startServer() {
     const { id } = req.params;
     if (!String(replyMessage || "").trim()) {
       return res.status(400).json({ error: "답변 내용을 입력해주세요." });
+    }
+    const target = db.prepare("SELECT email FROM inquiries WHERE id = ?").get(id) as
+      | { email: string }
+      | undefined;
+    if (target && isSpamBotEmail(target.email)) {
+      return res.status(400).json({ error: "이 주소로는 답장을 보내지 않습니다." });
     }
 
     try {
@@ -5395,11 +5497,20 @@ async function startServer() {
   });
 
   app.post("/api/newsletter/subscribe", (req, res) => {
-    const { email } = req.body;
-    if (!email) return res.status(400).json({ error: "이메일을 입력해주세요." });
+    const { email, website } = req.body;
+    if (!email || !String(email).includes("@")) {
+      return res.status(400).json({ error: "유효한 이메일 주소를 입력해주세요." });
+    }
+    if (honeypotFilled(website) || isSpamBotEmail(email)) {
+      console.warn(`[SPAM][NEWSLETTER_BLOCKED] IP: ${clientIp(req)}`);
+      return res.json({ success: true, message: "뉴스레터 구독이 완료되었습니다." });
+    }
+    if (!allowRate(`newsletter:${clientIp(req)}`, 5, 10 * 60 * 1000)) {
+      return res.status(429).json({ error: "요청이 너무 많습니다. 잠시 후 다시 시도해주세요." });
+    }
     try {
       db.prepare("INSERT OR IGNORE INTO newsletter_subscribers (email) VALUES (?)").run(
-        email.trim()
+        normalizeEmailAddress(email)
       );
       res.json({ success: true, message: "뉴스레터 구독이 완료되었습니다." });
     } catch {
@@ -5436,8 +5547,16 @@ async function startServer() {
     const { email } = req.body;
     if (!email) return res.status(400).json({ error: "이메일 정보가 필요합니다." });
     try {
-      db.prepare("DELETE FROM newsletter_subscribers WHERE email = ?").run(email);
-      db.prepare("UPDATE users SET newsletter_subscribed = 0 WHERE email = ?").run(email);
+      const rawEmail = String(email || "").trim();
+      const normalized = normalizeEmailAddress(rawEmail);
+      db.prepare("DELETE FROM newsletter_subscribers WHERE email = ? OR email = ?").run(
+        rawEmail,
+        normalized
+      );
+      db.prepare("UPDATE users SET newsletter_subscribed = 0 WHERE email = ? OR email = ?").run(
+        rawEmail,
+        normalized
+      );
       res.json({ success: true, message: "수신 거부가 처리되었습니다." });
     } catch {
       res.status(500).json({ error: "수신 거부 처리에 실패했습니다." });
@@ -5466,7 +5585,8 @@ async function startServer() {
       const userEmails = (db.prepare(userSql).all() as Array<{ email: string }>).map((u) => u.email);
       const allEmails = testEmail
         ? [testEmail]
-        : [...new Set([...(group === "all" ? guestEmails : []), ...userEmails])].filter(Boolean);
+        : [...new Set([...(group === "all" ? guestEmails : []), ...userEmails])]
+            .filter((email) => email && !isSpamBotEmail(email));
 
       const host = req.get("host") || "benua.shop";
       const mainDomainHost = host.startsWith("dash.") ? host.replace("dash.", "") : host;

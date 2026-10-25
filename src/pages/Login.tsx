@@ -22,6 +22,7 @@ export default function Login() {
   const [phone, setPhone] = useState("");
   const [newsletter, setNewsletter] = useState(false);
   const [remember, setRemember] = useState(false);
+  const [website, setWebsite] = useState("");
   const [formError, setFormError] = useState("");
 
   // 이메일 인증 상태
@@ -60,7 +61,7 @@ export default function Login() {
       const res = await apiFetch("/api/auth/send-code", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: email.trim() }),
+        body: JSON.stringify({ email: email.trim(), website }),
       });
       const data = await res.json();
       if (res.ok) {
@@ -148,6 +149,7 @@ export default function Login() {
         phone,
         verification_code: verificationCode,
         newsletter_subscribed: newsletter,
+        website,
       };
       if (providerNow === "google") payload.google_id = socialNow;
       if (providerNow === "naver") payload.naver_id = socialNow;
@@ -170,7 +172,7 @@ export default function Login() {
       const res = await apiFetch("/api/auth/forgot-password", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email }),
+        body: JSON.stringify({ email, website }),
       });
       if (res.ok) {
         toast.success("비밀번호 재설정 링크가 이메일로 전송되었습니다.");
@@ -193,6 +195,16 @@ export default function Login() {
       </h1>
 
       <form onSubmit={handleSubmit} noValidate className="space-y-4">
+        <input
+          type="text"
+          name="website"
+          value={website}
+          onChange={(e) => setWebsite(e.target.value)}
+          tabIndex={-1}
+          autoComplete="off"
+          aria-hidden="true"
+          className="sr-only"
+        />
         {formError && (
           <p className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-xs text-red-700">
             {formError}

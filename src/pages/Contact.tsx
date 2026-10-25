@@ -22,6 +22,7 @@ export default function Contact() {
     subject: "",
     message: "",
     order_number: "",
+    website: "",
   });
   const [user, setUser] = useState<{ name?: string; email?: string } | null>(null);
   const [authChecked, setAuthChecked] = useState(false);
@@ -83,6 +84,7 @@ export default function Contact() {
           subject: "",
           message: "",
           order_number: "",
+          website: "",
         });
         setImageUrl("");
       } else {
@@ -112,6 +114,16 @@ export default function Contact() {
         ))}
       </div>
       <form onSubmit={handleSubmit} className="space-y-4">
+        <input
+          type="text"
+          name="website"
+          value={form.website}
+          onChange={(e) => setForm({ ...form, website: e.target.value })}
+          tabIndex={-1}
+          autoComplete="off"
+          aria-hidden="true"
+          className="sr-only"
+        />
         <select
           value={form.category}
           onChange={(e) =>

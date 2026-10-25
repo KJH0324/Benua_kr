@@ -5,6 +5,7 @@ import { apiFetch } from "../lib/api";
 
 export default function Footer() {
   const [email, setEmail] = useState("");
+  const [website, setWebsite] = useState("");
 
   const handleSubscribe = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -13,7 +14,7 @@ export default function Footer() {
       const res = await apiFetch("/api/newsletter/subscribe", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: email.trim() }),
+        body: JSON.stringify({ email: email.trim(), website }),
       });
       const data = await res.json();
       if (res.ok) {
@@ -81,6 +82,16 @@ export default function Footer() {
         <div className="space-y-3 min-w-0">
           <h3 className="text-sm font-bold">소식 받기</h3>
           <form onSubmit={handleSubscribe} className="flex gap-2 min-w-0">
+            <input
+              type="text"
+              name="website"
+              value={website}
+              onChange={(e) => setWebsite(e.target.value)}
+              tabIndex={-1}
+              autoComplete="off"
+              aria-hidden="true"
+              className="sr-only"
+            />
             <input
               type="email"
               required
