@@ -146,7 +146,7 @@ export default function Privacy() {
                 <tr>
                   <td className="border border-venuea-brown/15 p-3 font-bold">토스페이먼츠(주)</td>
                   <td className="border border-venuea-brown/15 p-3">
-                    신용카드, 간편결제(카카오페이, 네이버페이), 가상계좌 등 전자결제 대행 및 결제 취소·정산 처리
+                    신용카드, 실시간 계좌이체, 가상계좌 등 전자결제 대행 및 결제 취소·정산 처리
                   </td>
                 </tr>
                 <tr>

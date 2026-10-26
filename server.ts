@@ -3331,9 +3331,9 @@ async function startServer() {
         .all(product.id);
       product.related = db
         .prepare(
-          "SELECT id, name, price, image_url, discount_rate, category, stock, sale_mode FROM products WHERE category = ? AND id != ? LIMIT 4"
+          "SELECT id, name, price, image_url, discount_rate, category, stock, sale_mode FROM products WHERE id != ? ORDER BY CASE WHEN category = ? THEN 0 ELSE 1 END, id DESC LIMIT 4"
         )
-        .all(product.category, product.id);
+        .all(product.id, product.category);
       res.json(product);
     } catch {
       res.status(500).json({ error: "상품 정보를 불러오지 못했습니다." });
@@ -6359,7 +6359,14 @@ async function startServer() {
       const file = path.join(distPath, "index.html");
       const productMatch = req.path.match(/^\/product\/(\d+)/);
       if (productMatch) {
-        const product = db.prepare("SELECT name, description, image_url FROM products WHERE id = ?").get(productMatch[1]) as any;
+        const product = db
+          .prepare(
+            `SELECT name, description, image_url, price, discount_rate, stock, sale_mode,
+                    (SELECT COUNT(*) FROM reviews r WHERE r.product_id = products.id AND IFNULL(r.is_hidden, 0) = 0) AS review_count,
+                    (SELECT ROUND(AVG(r.rating), 1) FROM reviews r WHERE r.product_id = products.id AND IFNULL(r.is_hidden, 0) = 0) AS rating_avg
+             FROM products WHERE id = ?`
+          )
+          .get(productMatch[1]) as any;
         if (product) {
           let html = fs.readFileSync(file, "utf8");
           const rawImage = String(product.image_url || "");
@@ -6369,13 +6376,47 @@ async function startServer() {
               ? `https://benua.shop${rawImage}`
               : "https://benua.shop/og.png";
           const description = String(product.description || "문을 닫으면, 나만의 쉼이 시작됩니다.").slice(0, 120);
+          const rate = Math.min(100, Math.max(0, Number(product.discount_rate) || 0));
+          const base = Number(product.price) || 0;
+          const price = rate > 0 ? Math.round(base * (1 - rate / 100)) : base;
+          const stock = Number(product.stock) || 0;
+          const mode = String(product.sale_mode || "open");
+          const availability =
+            mode === "preorder"
+              ? "https://schema.org/PreOrder"
+              : stock > 0
+                ? "https://schema.org/InStock"
+                : "https://schema.org/OutOfStock";
+          const schema: Record<string, unknown> = {
+            "@context": "https://schema.org",
+            "@type": "Product",
+            name: product.name,
+            description,
+            image,
+            offers: {
+              "@type": "Offer",
+              priceCurrency: "KRW",
+              price: String(price),
+              availability,
+              url: `https://benua.shop/product/${productMatch[1]}`,
+            },
+          };
+          if (Number(product.review_count) > 0 && Number(product.rating_avg) > 0) {
+            schema.aggregateRating = {
+              "@type": "AggregateRating",
+              ratingValue: String(product.rating_avg),
+              reviewCount: String(product.review_count),
+            };
+          }
+          const jsonLd = JSON.stringify(schema).replace(/</g, "\\u003c");
           html = html
             .replace(/<title>.*?<\/title>/, `<title>${escapeHtml(product.name)} | Benua</title>`)
             .replace(/name="description" content="[^"]*"/, `name="description" content="${escapeHtml(description)}"`)
             .replace(/property="og:title" content="[^"]*"/, `property="og:title" content="${escapeHtml(product.name)}"`)
             .replace(/property="og:description" content="[^"]*"/, `property="og:description" content="${escapeHtml(description)}"`)
             .replace(/property="og:url" content="[^"]*"/, `property="og:url" content="https://benua.shop/product/${productMatch[1]}"`)
-            .replace(/property="og:image" content="[^"]*"/, `property="og:image" content="${escapeHtml(image)}"`);
+            .replace(/property="og:image" content="[^"]*"/, `property="og:image" content="${escapeHtml(image)}"`)
+            .replace("</head>", `<script type="application/ld+json">${jsonLd}</script></head>`);
           res.status(200).type("html").send(html);
           return;
         }
