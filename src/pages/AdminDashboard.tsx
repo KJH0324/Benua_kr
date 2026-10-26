@@ -36,6 +36,14 @@ import { isAdminSubdomain } from "../lib/subdomain";
 import { apiFetch, authStorage } from "../lib/api";
 import type { Product, Order } from "../types";
 
+function roleName(role: string) {
+  if (role === "MASTER") return "최고 관리자";
+  if (role === "ADMIN") return "관리자";
+  if (role === "OPERATOR") return "운영";
+  if (role === "CS") return "고객응대";
+  return role || "관리자";
+}
+
 const PRODUCT_CATEGORIES = [
   "오브제",
   "세라믹 오브제",
@@ -127,12 +135,12 @@ export default function AdminDashboard() {
   const allSidebarLinks = [
     { name: "대시보드", path: `${adminPathBase}/`, icon: LayoutDashboard },
     { name: "오브제 관리", path: `${adminPathBase}/products`, icon: Package },
-    { name: "주문/클레임 관리", path: `${adminPathBase}/orders`, icon: ShoppingBag },
+    { name: "주문", path: `${adminPathBase}/orders`, icon: ShoppingBag },
     { name: "정산 관리", path: `${adminPathBase}/settlement`, icon: FileText },
     { name: "운송장 일괄등록", path: `${adminPathBase}/fulfillment`, icon: Truck },
     { name: "리뷰 관리", path: `${adminPathBase}/reviews`, icon: MessageSquare },
     { name: "상품 Q&A", path: `${adminPathBase}/questions`, icon: MessageSquare },
-    { name: "전환 리포트", path: `${adminPathBase}/funnel`, icon: Activity },
+    { name: "본 횟수", path: `${adminPathBase}/funnel`, icon: Activity },
     { name: "전시/배너 관리", path: `${adminPathBase}/display`, icon: LayoutDashboard },
     { name: "1:1 문의 관리", path: `${adminPathBase}/inquiries`, icon: MessageSquare },
     { name: "받은 메일", path: `${adminPathBase}/inbox`, icon: Mail },
@@ -140,8 +148,8 @@ export default function AdminDashboard() {
     { name: "쿠폰 관리", path: `${adminPathBase}/coupons`, icon: Ticket },
     { name: "뉴스레터 발송", path: `${adminPathBase}/newsletter`, icon: FileText },
     { name: "운영 설정", path: `${adminPathBase}/settings`, icon: Settings, requiresAdmin: true },
-    { name: "감사 로그", path: `${adminPathBase}/logs`, icon: Activity, requiresAdmin: true },
-    { name: "보안 키 관리", path: `${adminPathBase}/keys`, icon: Settings, requiresAdmin: true },
+    { name: "기록", path: `${adminPathBase}/logs`, icon: Activity, requiresAdmin: true },
+    { name: "관리자 키", path: `${adminPathBase}/keys`, icon: Settings, requiresAdmin: true },
   ];
 
   const sidebarLinks = allSidebarLinks.filter((link) => {
@@ -198,9 +206,7 @@ export default function AdminDashboard() {
               <div className="flex justify-between items-center mb-8">
                 <div>
                   <img src="/benua_primary_notag_color.svg" alt="Benua" width="1677" height="682" className="h-11 w-auto" />
-                  <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-venuea-gold block">
-                    {adminRole}
-                  </span>
+                  <span className="text-xs text-venuea-brown block mt-1">{roleName(adminRole)}</span>
                 </div>
                 <button
                   onClick={() => setIsMobileSidebarOpen(false)}
@@ -257,9 +263,7 @@ export default function AdminDashboard() {
         <div className="p-6 sticky top-0 max-h-screen overflow-y-auto">
           <div className="mb-8 pl-4">
             <img src="/benua_primary_notag_color.svg" alt="Benua" width="1677" height="682" className="h-12 w-auto" />
-            <span className="text-[10px] font-bold uppercase tracking-[0.3em] text-venuea-gold block mt-0.5">
-              {adminRole} CONSOLE
-            </span>
+            <span className="text-xs text-venuea-brown block mt-1">{roleName(adminRole)}</span>
           </div>
           <nav className="space-y-1">
             {sidebarLinks.map((link) => {
@@ -355,33 +359,33 @@ function AdminOverview() {
   return (
     <div className="space-y-8 animate-in fade-in">
       <header>
-        <h1 className="text-2xl font-serif font-bold text-gray-900">대시보드 요약</h1>
+        <h1 className="text-2xl font-serif font-bold text-gray-900">오늘</h1>
       </header>
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         <div className="bg-white p-6 rounded-xl border border-gray-100 shadow-sm">
-          <h3 className="text-xs font-bold text-gray-400 uppercase tracking-widest">오늘 매출</h3>
+          <h3 className="text-xs font-bold text-gray-500">오늘 매출</h3>
           <p className="text-2xl font-bold mt-2">{formatPrice(stats.dailySales)}</p>
         </div>
         <div className="bg-white p-6 rounded-xl border border-gray-100 shadow-sm">
-          <h3 className="text-xs font-bold text-gray-400 uppercase tracking-widest">최근 7일 매출</h3>
+          <h3 className="text-xs font-bold text-gray-500">최근 7일 매출</h3>
           <p className="text-2xl font-bold mt-2">{formatPrice(stats.weeklySales)}</p>
         </div>
         <div className="bg-white p-6 rounded-xl border border-gray-100 shadow-sm">
-          <h3 className="text-xs font-bold text-gray-400 uppercase tracking-widest">출고 대기 주문</h3>
+          <h3 className="text-xs font-bold text-gray-500">출고 대기 주문</h3>
           <p className="text-2xl font-bold mt-2">{stats.pendingOrders}건</p>
         </div>
         <div className="bg-white p-6 rounded-xl border border-gray-100 shadow-sm">
-          <h3 className="text-xs font-bold text-gray-400 uppercase tracking-widest">품절 임박 오브제</h3>
+          <h3 className="text-xs font-bold text-gray-500">품절 임박 오브제</h3>
           <p className="text-2xl font-bold mt-2">{stats.lowStockProducts}개</p>
         </div>
         <div className="bg-white p-6 rounded-xl border border-gray-100 shadow-sm">
-          <h3 className="text-xs font-bold text-gray-400 uppercase tracking-widest">배송 지연</h3>
+          <h3 className="text-xs font-bold text-gray-500">배송 지연</h3>
           <p className="text-2xl font-bold mt-2">{stats.delayedShipping || 0}건</p>
         </div>
       </div>
 
       <div className="bg-white p-6 rounded-xl border border-gray-100 shadow-sm">
-        <h3 className="text-sm font-bold text-gray-900 mb-6">최근 30일 매출 추이</h3>
+        <h3 className="text-sm font-bold text-gray-900 mb-6">최근 30일 매출</h3>
         <div className="h-[300px]">
           <ResponsiveContainer width="100%" height="100%">
             <LineChart data={chartData}>
@@ -712,16 +716,16 @@ function AdminProducts() {
         <table className="w-full text-left">
           <thead className="bg-gray-50 border-b border-gray-200">
             <tr>
-              <th className="px-6 py-4 text-xs font-bold uppercase tracking-widest text-gray-500">
+              <th className="px-6 py-4 text-xs font-bold text-gray-500">
                 오브제 정보
               </th>
-              <th className="px-6 py-4 text-xs font-bold uppercase tracking-widest text-gray-500">
+              <th className="px-6 py-4 text-xs font-bold text-gray-500">
                 카테고리
               </th>
-              <th className="px-6 py-4 text-xs font-bold uppercase tracking-widest text-gray-500">
+              <th className="px-6 py-4 text-xs font-bold text-gray-500">
                 재고 / 판매가
               </th>
-              <th className="px-6 py-4 text-xs font-bold uppercase tracking-widest text-gray-500 text-right">
+              <th className="px-6 py-4 text-xs font-bold text-gray-500 text-right">
                 관리
               </th>
             </tr>
@@ -1323,14 +1327,14 @@ function AdminOrders() {
       });
       const data = await res.json();
       if (res.ok) {
-        toast.success(action === "approve" ? "환불 승인이 완료되었습니다." : "클레임이 반려되었습니다.");
+        toast.success(action === "approve" ? "환불을 승인했습니다." : "환불 요청을 거절했습니다.");
         setSelectedOrder(null);
         fetchOrders();
       } else {
-        toast.error(data.error || "클레임 처리 실패");
+        toast.error(data.error || "처리하지 못했습니다.");
       }
     } catch {
-      toast.error("클레임 처리 중 오류가 발생했습니다.");
+      toast.error("처리 중 오류가 났습니다.");
     }
   };
 
@@ -1455,7 +1459,7 @@ function AdminOrders() {
     <div className="space-y-6">
       <header className="flex flex-wrap justify-between items-center gap-4">
         <div>
-          <h1 className="text-2xl font-serif font-bold text-gray-900">주문 및 클레임 관리</h1>
+          <h1 className="text-2xl font-serif font-bold text-gray-900">주문</h1>
         </div>
         <button
           onClick={handleExportCsv}
@@ -1634,13 +1638,13 @@ function AdminOrders() {
                       .map((item) => `<li>${item.name} × ${item.quantity}</li>`)
                       .join("");
                     slip.document.write(
-                      `<html><head><title>패킹 슬립</title></head><body style="font-family:sans-serif;padding:24px"><h1>BENUA</h1><p>${selectedOrder.order_number}</p><p>${selectedOrder.customer_name}</p><ul>${items}</ul><p>오늘도 수고한 당신의 집이, 가장 다정한 쉼이 되기를. soft living mood, Benua.</p><script>print()</script></body></html>`
+                      `<html><head><title>출고증</title></head><body style="font-family:sans-serif;padding:24px"><h1>BENUA</h1><p>${selectedOrder.order_number}</p><p>${selectedOrder.customer_name}</p><ul>${items}</ul><script>print()</script></body></html>`
                     );
                     slip.document.close();
                   }}
                   className="text-xs font-bold text-venuea-green"
                 >
-                  패킹 슬립 인쇄
+                  출고증 인쇄
                 </button>
                 {selectedOrder.refund_reason && (
                   <p className="text-red-600 bg-red-50 p-3 rounded-lg text-xs">
@@ -2003,7 +2007,7 @@ function AdminSettlement() {
 
   return (
     <div className="bg-white p-8 rounded-2xl shadow-sm border border-gray-100 animate-in fade-in">
-      <h2 className="text-xl font-bold font-serif mb-6">결제수단별 정산 리포트 (구매확정 기준)</h2>
+      <h2 className="text-xl font-bold font-serif mb-6">구매확정 기준 정산</h2>
       <div className="flex gap-4 mb-6">
         <input
           type="date"
@@ -2278,7 +2282,7 @@ function AdminUserPoints({ adminRole }: { adminRole: string }) {
   return (
     <div className="space-y-8 animate-in fade-in">
       <div className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm">
-        <h2 className="text-lg font-bold font-serif mb-4">회원 포인트 수동 지급 / 차감</h2>
+        <h2 className="text-lg font-bold font-serif mb-4">포인트 넣기·빼기</h2>
         <form onSubmit={handleAdjustPoints} className="grid grid-cols-1 md:grid-cols-4 gap-4">
           <input
             type="email"
@@ -3271,11 +3275,11 @@ function AdminKeys({ adminRole }: { adminRole: string }) {
   return (
     <div className="space-y-6 animate-in fade-in">
       <div className="bg-white p-6 rounded-2xl border border-gray-100">
-        <h2 className="text-lg font-bold font-serif mb-4">관리자 보안 키 발급</h2>
+        <h2 className="text-lg font-bold font-serif mb-4">관리자 키 추가</h2>
         <form onSubmit={handleCreate} className="flex gap-3">
           <input
             required
-            placeholder="새 보안 키 문자열 입력"
+            placeholder="직원이 입력할 키"
             value={newKey.keyValue}
             onChange={(e) => setNewKey({ ...newKey, keyValue: e.target.value })}
             className="flex-grow border rounded-lg px-4 py-2 text-sm"
@@ -3285,16 +3289,16 @@ function AdminKeys({ adminRole }: { adminRole: string }) {
             onChange={(e) => setNewKey({ ...newKey, role: e.target.value })}
             className="border rounded-lg px-3 py-2 text-sm"
           >
-            {adminRole === "MASTER" && <option value="MASTER">MASTER</option>}
-            <option value="ADMIN">ADMIN</option>
-            <option value="OPERATOR">OPERATOR</option>
-            <option value="CS">CS</option>
+            {adminRole === "MASTER" && <option value="MASTER">최고 관리자</option>}
+            <option value="ADMIN">관리자</option>
+            <option value="OPERATOR">운영</option>
+            <option value="CS">고객응대</option>
           </select>
           <button
             type="submit"
             className="bg-venuea-dark text-white px-6 py-2 rounded-lg text-sm font-bold"
           >
-            발급
+            추가
           </button>
         </form>
       </div>
@@ -3306,7 +3310,7 @@ function AdminKeys({ adminRole }: { adminRole: string }) {
               <th className="p-4">보안 키</th>
               <th className="p-4">권한</th>
               <th className="p-4">알림 이메일</th>
-              <th className="p-4">2FA(OTP) 연동</th>
+              <th className="p-4">인증 앱</th>
               <th className="p-4 text-right">관리</th>
             </tr>
           </thead>
@@ -3314,7 +3318,7 @@ function AdminKeys({ adminRole }: { adminRole: string }) {
             {keys.map((k) => (
               <tr key={k.id}>
                 <td className="p-4 font-mono text-sm text-gray-900">{k.key_label || "원문 없음"}</td>
-                <td className="p-4 font-bold">{k.role}</td>
+                <td className="p-4 font-bold">{roleName(k.role)}</td>
                 <td className="p-4">
                   <form
                     className="flex gap-2"
@@ -3442,7 +3446,7 @@ function AdminFunnel() {
   }, []);
   return (
     <div className="bg-white p-6 rounded-2xl overflow-x-auto">
-      <h2 className="text-xl font-serif font-bold mb-4">상품 전환</h2>
+      <h2 className="text-xl font-serif font-bold mb-4">본 횟수와 결제</h2>
       <table className="w-full text-sm">
         <thead><tr><th className="text-left p-2">상품</th><th>조회</th><th>찜</th><th>장바구니</th><th>결제</th></tr></thead>
         <tbody>

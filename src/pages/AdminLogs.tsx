@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { Activity, Search, Loader2, RefreshCw } from "lucide-react";
+import { Search, Loader2, RefreshCw } from "lucide-react";
 import { apiFetch } from "../lib/api";
 import { toast } from "sonner";
 
@@ -34,7 +34,7 @@ export default function AdminLogs() {
       setLogs(Array.isArray(rows) ? rows : []);
       setCapped(Boolean(data?.capped));
     } catch {
-      toast.error("감사 로그를 불러오지 못했습니다.");
+      toast.error("기록을 불러오지 못했습니다.");
     } finally {
       setIsLoading(false);
     }
@@ -48,12 +48,8 @@ export default function AdminLogs() {
   return (
     <div className="space-y-6 animate-in fade-in">
       <header className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div className="flex items-center gap-3">
-          <div className="p-2.5 bg-venuea-dark text-venuea-gold rounded-xl">
-            <Activity size={20} />
-          </div>
-          <div>
-            <h1 className="text-2xl font-serif font-bold text-gray-900">보안 감사 로그</h1>
+        <div>
+            <h1 className="text-2xl font-serif font-bold text-gray-900">관리자 기록</h1>
             <p className="text-xs text-gray-500 mt-0.5">
               {searchTerm.trim()
                 ? capped
@@ -61,7 +57,6 @@ export default function AdminLogs() {
                   : "전체 기록"
                 : "최근 500건"}
             </p>
-          </div>
         </div>
 
         <div className="flex items-center gap-3">
@@ -71,7 +66,7 @@ export default function AdminLogs() {
               type="text"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              placeholder="액션, 식별자, 상세내용 검색..."
+              placeholder="이름, 한 일, 내용"
               className="pl-10 pr-4 py-2 bg-white border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-venuea-gold"
             />
           </div>
@@ -90,24 +85,12 @@ export default function AdminLogs() {
           <table className="w-full text-left border-collapse">
             <thead className="bg-gray-50 border-b border-gray-200">
               <tr>
-                <th className="px-6 py-3.5 text-xs font-bold uppercase tracking-wider text-gray-500">
-                  일시
-                </th>
-                <th className="px-6 py-3.5 text-xs font-bold uppercase tracking-wider text-gray-500">
-                  관리자 식별자
-                </th>
-                <th className="px-6 py-3.5 text-xs font-bold uppercase tracking-wider text-gray-500">
-                  액션
-                </th>
-                <th className="px-6 py-3.5 text-xs font-bold uppercase tracking-wider text-gray-500">
-                  대상
-                </th>
-                <th className="px-6 py-3.5 text-xs font-bold uppercase tracking-wider text-gray-500">
-                  상세 내역
-                </th>
-                <th className="px-6 py-3.5 text-xs font-bold uppercase tracking-wider text-gray-500">
-                  IP 주소
-                </th>
+                <th className="px-6 py-3.5 text-xs font-bold text-gray-500">일시</th>
+                <th className="px-6 py-3.5 text-xs font-bold text-gray-500">누구</th>
+                <th className="px-6 py-3.5 text-xs font-bold text-gray-500">한 일</th>
+                <th className="px-6 py-3.5 text-xs font-bold text-gray-500">대상</th>
+                <th className="px-6 py-3.5 text-xs font-bold text-gray-500">내용</th>
+                <th className="px-6 py-3.5 text-xs font-bold text-gray-500">IP</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100 text-sm">
@@ -120,7 +103,7 @@ export default function AdminLogs() {
               ) : logs.length === 0 ? (
                 <tr>
                   <td colSpan={6} className="px-6 py-12 text-center text-gray-400">
-                    {searchTerm.trim() ? "일치하는 기록이 없습니다." : "기록된 감사 로그가 없습니다."}
+                    {searchTerm.trim() ? "일치하는 기록이 없습니다." : "기록이 없습니다."}
                   </td>
                 </tr>
               ) : (
