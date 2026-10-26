@@ -27,7 +27,7 @@ export default function ProductCard({ product }: { product: CardProduct }) {
 
   return (
     <Link to={`/product/${product.id}`} className="group block space-y-3">
-      <div className="aspect-[4/5] bg-white rounded-2xl overflow-hidden relative">
+      <div className="aspect-[4/5] bg-[#f3efe6] rounded-2xl overflow-hidden relative">
         {product.image_url ? (
           <>
             <img
@@ -48,7 +48,9 @@ export default function ProductCard({ product }: { product: CardProduct }) {
             ) : null}
           </>
         ) : (
-          <div className="w-full h-full bg-white" />
+          <div className="w-full h-full flex items-end p-4">
+            <p className="text-sm font-bold text-venuea-dark">{product.name}</p>
+          </div>
         )}
         {product.sale_mode === "preorder" ? (
           <div className="absolute inset-0 bg-[#faf2e7]/80 flex items-end p-3">

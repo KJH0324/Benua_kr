@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { LogOut, Award, Ticket, Package, Star, RotateCcw, X, Heart, MapPin } from "lucide-react";
 import DaumPostcodeEmbed from "react-daum-postcode";
@@ -165,6 +165,8 @@ export default function Profile() {
   const [refundError, setRefundError] = useState("");
   const [isSubmittingRefund, setIsSubmittingRefund] = useState(false);
   const [detailOrder, setDetailOrder] = useState<any | null>(null);
+  const detailRef = useRef<HTMLDivElement>(null);
+  const detailReturnRef = useRef<HTMLElement | null>(null);
   const [refundItemIds, setRefundItemIds] = useState<number[]>([]);
   const [inquiries, setInquiries] = useState<any[]>([]);
   const [couponCode, setCouponCode] = useState("");
@@ -219,6 +221,7 @@ export default function Profile() {
   }, []);
 
   const openOrderDetail = (order: any) => {
+    detailReturnRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const parsed = splitShippingAddress(order.shipping_address || "");
     setDetailOrder(order);
     setEditingAddress(false);
@@ -231,6 +234,50 @@ export default function Profile() {
       detail_address: parsed.detail_address,
     });
   };
+
+  useEffect(() => {
+    if (!detailOrder) return;
+    const root = detailRef.current;
+    if (!root) return;
+    const focusable = () =>
+      Array.from(
+        root.querySelectorAll<HTMLElement>(
+          'a[href], button:not([disabled]), textarea, input, select, [tabindex]:not([tabindex="-1"])'
+        )
+      );
+    const items = focusable();
+    (items[0] || root).focus();
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setDetailOrder(null);
+        return;
+      }
+      if (event.key !== "Tab") return;
+      const list = focusable();
+      if (list.length === 0) {
+        event.preventDefault();
+        root.focus();
+        return;
+      }
+      const first = list[0];
+      const last = list[list.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    root.addEventListener("keydown", onKey);
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      root.removeEventListener("keydown", onKey);
+      document.body.style.overflow = prevOverflow;
+      detailReturnRef.current?.focus();
+    };
+  }, [detailOrder?.id]);
 
   const saveOrderAddress = async () => {
     if (!detailOrder) return;
@@ -1155,11 +1202,19 @@ export default function Profile() {
       )}
 
       {detailOrder && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl max-w-lg w-full max-h-[85vh] overflow-y-auto p-6 space-y-5">
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onMouseDown={() => setDetailOrder(null)}>
+          <div
+            ref={detailRef}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="order-detail-title"
+            tabIndex={-1}
+            className="bg-white rounded-2xl max-w-lg w-full max-h-[85vh] overflow-y-auto p-6 space-y-5 outline-none"
+            onMouseDown={(event) => event.stopPropagation()}
+          >
             <div className="flex items-start justify-between gap-3">
               <div>
-                <h3 className="font-bold text-lg">주문 상세</h3>
+                <h3 id="order-detail-title" className="font-bold text-lg">주문 상세</h3>
                 <p className="text-xs text-gray-400 font-mono mt-1">{detailOrder.order_number}</p>
               </div>
               <button type="button" aria-label="주문 상세 닫기" onClick={() => setDetailOrder(null)}>

@@ -13,6 +13,7 @@ export default function Cart() {
   const [pickedKeys, setPickedKeys] = useState<string[]>([]);
   const [freeShippingTier, setFreeShippingTier] = useState(false);
   const [cartReady, setCartReady] = useState(false);
+  const [picks, setPicks] = useState<CardProduct[]>([]);
 
   useEffect(() => {
     const sync = async () => {

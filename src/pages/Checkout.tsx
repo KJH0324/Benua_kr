@@ -562,7 +562,7 @@ export default function Checkout() {
             )}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
-                <label htmlFor="customer-name" className="block text-xs font-bold text-gray-500 mb-1.5">
+                <label htmlFor="customer-name" className="block text-sm font-bold text-venuea-dark mb-1.5">
                   수령인
                 </label>
                 <input
@@ -573,11 +573,11 @@ export default function Checkout() {
                   placeholder="이름"
                   value={customerName}
                   onChange={(e) => setCustomerName(e.target.value)}
-                  className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm"
+                  className="w-full border border-gray-300 bg-white text-venuea-dark placeholder:text-[#4a4036] rounded-xl px-4 py-3 text-sm"
                 />
               </div>
               <div>
-                <label htmlFor="customer-phone" className="block text-xs font-bold text-gray-500 mb-1.5">
+                <label htmlFor="customer-phone" className="block text-sm font-bold text-venuea-dark mb-1.5">
                   연락처
                 </label>
                 <input
@@ -590,12 +590,12 @@ export default function Checkout() {
                   placeholder="010-0000-0000"
                   value={customerPhone}
                   onChange={(e) => setCustomerPhone(e.target.value)}
-                  className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm"
+                  className="w-full border border-gray-300 bg-white text-venuea-dark placeholder:text-[#4a4036] rounded-xl px-4 py-3 text-sm"
                 />
               </div>
             </div>
             <div>
-              <label htmlFor="customer-email" className="block text-xs font-bold text-gray-500 mb-1.5">
+              <label htmlFor="customer-email" className="block text-sm font-bold text-venuea-dark mb-1.5">
                 이메일
               </label>
               <input
@@ -608,13 +608,13 @@ export default function Checkout() {
                 placeholder="주문 안내를 받을 주소"
                 value={customerEmail}
                 onChange={(e) => setCustomerEmail(e.target.value)}
-                className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm"
+                className="w-full border border-gray-300 bg-white text-venuea-dark placeholder:text-[#4a4036] rounded-xl px-4 py-3 text-sm"
               />
             </div>
 
             <div className="flex gap-2 items-end">
               <div>
-                <label htmlFor="customer-zip" className="block text-xs font-bold text-gray-500 mb-1.5">
+                <label htmlFor="customer-zip" className="block text-sm font-bold text-venuea-dark mb-1.5">
                   우편번호
                 </label>
                 <input
@@ -625,7 +625,7 @@ export default function Checkout() {
                   placeholder="우편번호"
                   value={zipcode}
                   onChange={(e) => setZipcode(e.target.value.replace(/[^\d-]/g, "").slice(0, 7))}
-                  className="w-36 border border-gray-200 rounded-xl px-4 py-3 text-sm"
+                  className="w-36 border border-gray-300 bg-white text-venuea-dark placeholder:text-[#4a4036] rounded-xl px-4 py-3 text-sm"
                 />
               </div>
               <button
@@ -638,7 +638,7 @@ export default function Checkout() {
               </button>
             </div>
             <div>
-              <label htmlFor="customer-address" className="block text-xs font-bold text-gray-500 mb-1.5">
+              <label htmlFor="customer-address" className="block text-sm font-bold text-venuea-dark mb-1.5">
                 주소
               </label>
               <input
@@ -649,11 +649,11 @@ export default function Checkout() {
                 placeholder="기본 주소"
                 value={address}
                 onChange={(e) => setAddress(e.target.value)}
-                className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm"
+                className="w-full border border-gray-300 bg-white text-venuea-dark placeholder:text-[#4a4036] rounded-xl px-4 py-3 text-sm"
               />
             </div>
             <div>
-              <label htmlFor="customer-address-detail" className="block text-xs font-bold text-gray-500 mb-1.5">
+              <label htmlFor="customer-address-detail" className="block text-sm font-bold text-venuea-dark mb-1.5">
                 상세 주소
               </label>
               <input
@@ -663,7 +663,7 @@ export default function Checkout() {
                 placeholder="동, 호수"
                 value={detailAddress}
                 onChange={(e) => setDetailAddress(e.target.value)}
-                className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm"
+                className="w-full border border-gray-300 bg-white text-venuea-dark placeholder:text-[#4a4036] rounded-xl px-4 py-3 text-sm"
               />
             </div>
             {user && (
@@ -723,14 +723,14 @@ export default function Checkout() {
                 value={giftMessage}
                 onChange={(e) => setGiftMessage(e.target.value)}
                 placeholder="선물 메시지"
-                className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm"
+                className="w-full border border-gray-300 bg-white text-venuea-dark placeholder:text-[#4a4036] rounded-xl px-4 py-3 text-sm"
               />
             )}
-            <label className="block text-xs font-bold text-gray-500">배송 요청</label>
+            <label className="block text-sm font-bold text-venuea-dark">배송 요청</label>
             <select
               value={shippingMemo}
               onChange={(e) => setShippingMemo(e.target.value)}
-              className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm"
+              className="w-full border border-gray-300 bg-white text-venuea-dark placeholder:text-[#4a4036] rounded-xl px-4 py-3 text-sm"
             >
               <option>문 앞에 놓아주세요</option>
               <option>경비실에 맡겨주세요</option>
@@ -741,14 +741,14 @@ export default function Checkout() {
               <input
                 value={memoCustom}
                 onChange={(e) => setMemoCustom(e.target.value)}
-                className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm"
+                className="w-full border border-gray-300 bg-white text-venuea-dark placeholder:text-[#4a4036] rounded-xl px-4 py-3 text-sm"
               />
             )}
             <input
               value={gateCode}
               onChange={(e) => setGateCode(e.target.value)}
               placeholder="공동현관 비밀번호"
-              className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm"
+              className="w-full border border-gray-300 bg-white text-venuea-dark placeholder:text-[#4a4036] rounded-xl px-4 py-3 text-sm"
             />
           </section>
 
@@ -756,14 +756,14 @@ export default function Checkout() {
             <section className="bg-white p-6 rounded-2xl border border-gray-200 space-y-4">
               <h2 className="text-base font-bold text-venuea-dark">쿠폰 및 포인트 적용</h2>
               <div>
-                <label className="block text-xs font-bold text-gray-500 mb-1.5">보유 쿠폰 선택</label>
+                <label className="block text-sm font-bold text-venuea-dark mb-1.5">보유 쿠폰 선택</label>
                 <select
                   value={selectedCouponId || ""}
                   onChange={(e) => {
                     couponTouched.current = true;
                     setSelectedCouponId(e.target.value ? Number(e.target.value) : null);
                   }}
-                  className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm"
+                  className="w-full border border-gray-300 bg-white text-venuea-dark placeholder:text-[#4a4036] rounded-xl px-4 py-3 text-sm"
                 >
                   <option value="">선택 안 함</option>
                   {coupons.map((c) => (
@@ -780,7 +780,7 @@ export default function Checkout() {
 
               <div>
                 <div className="flex items-center justify-between gap-3 mb-1.5">
-                  <label className="text-xs font-bold text-gray-500 whitespace-nowrap">
+                  <label className="text-sm font-bold text-venuea-dark whitespace-nowrap">
                     포인트 사용 · 보유 {pointBalance.toLocaleString()}P
                   </label>
                   <button
@@ -802,7 +802,7 @@ export default function Checkout() {
                     setUsePoints(Math.min(maxUsablePoints, next));
                   }}
                   placeholder="0"
-                  className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm disabled:bg-gray-50"
+                  className="w-full border border-gray-300 bg-white text-venuea-dark placeholder:text-[#4a4036] rounded-xl px-4 py-3 text-sm disabled:bg-gray-50"
                 />
                 <p className="mt-1.5 text-[11px] text-gray-400">
                   {payableBeforePoints >= 1000

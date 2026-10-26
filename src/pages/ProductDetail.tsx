@@ -321,12 +321,18 @@ export default function ProductDetail() {
     <div className="pt-[110px] pb-36 md:pb-24 px-6 md:px-[60px] max-w-6xl mx-auto space-y-16">
       <div className="grid grid-cols-1 md:grid-cols-2 gap-12">
         <div className="space-y-3">
-          <div className="aspect-square bg-gray-100 rounded-2xl overflow-hidden">
-            <img
-              src={activeImage || product.image_url || "https://picsum.photos/seed/objet/800/800"}
-              alt={product.name}
-              className="w-full h-full object-cover"
-            />
+          <div className="aspect-square bg-[#f3efe6] rounded-2xl overflow-hidden">
+            {activeImage || product.image_url ? (
+              <img
+                src={activeImage || product.image_url}
+                alt={product.name}
+                className="w-full h-full object-cover"
+              />
+            ) : (
+              <div className="w-full h-full flex items-end p-6">
+                <p className="text-lg font-bold text-venuea-dark">{product.name}</p>
+              </div>
+            )}
           </div>
           {gallery.length > 1 && (
             <div className="flex gap-2 overflow-x-auto">

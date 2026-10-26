@@ -99,7 +99,7 @@ export default function Contact() {
     <div className="pt-[120px] pb-24 px-6 max-w-xl mx-auto">
       <h1 className="text-3xl font-serif font-bold text-venuea-dark mb-3">1:1 고객 문의</h1>
       <p className="text-sm text-venuea-brown mb-8">평일 10시–17시 문의는 1영업일 안에 이메일로 답변합니다.</p>
-      <div className="mb-8 space-y-2">
+      <div id="faq" className="mb-8 space-y-2">
         {[
           ["배송은 얼마나 걸리나요", "결제 후 영업일 기준 1~3일 안에 출고합니다. 사전예약 상품은 상품 페이지의 출고 일정을 따릅니다."],
           ["무료배송 기준이 어떻게 되나요", "5만 원 이상, 블랙·더 블랙 등급은 무료배송입니다."],
