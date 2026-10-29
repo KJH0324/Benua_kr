@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { Routes, Route, Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
+import { Routes, Route, Link, useLocation, useNavigate, useSearchParams, Navigate } from "react-router-dom";
 import Papa from "papaparse";
 import {
   LayoutDashboard,
@@ -42,6 +42,12 @@ function roleName(role: string) {
   if (role === "OPERATOR") return "운영";
   if (role === "CS") return "고객응대";
   return role || "관리자";
+}
+
+const ROLE_RANK: Record<string, number> = { CS: 1, OPERATOR: 2, ADMIN: 3, MASTER: 4 };
+
+function roleAtLeast(role: string, min: "CS" | "OPERATOR" | "ADMIN" | "MASTER") {
+  return (ROLE_RANK[role] || 0) >= ROLE_RANK[min];
 }
 
 const PRODUCT_CATEGORIES = [
@@ -132,32 +138,29 @@ export default function AdminDashboard() {
     );
   }
 
-  const allSidebarLinks = [
-    { name: "대시보드", path: `${adminPathBase}/`, icon: LayoutDashboard },
-    { name: "오브제 관리", path: `${adminPathBase}/products`, icon: Package },
-    { name: "주문", path: `${adminPathBase}/orders`, icon: ShoppingBag },
-    { name: "정산 관리", path: `${adminPathBase}/settlement`, icon: FileText },
-    { name: "운송장 일괄등록", path: `${adminPathBase}/fulfillment`, icon: Truck },
-    { name: "리뷰 관리", path: `${adminPathBase}/reviews`, icon: MessageSquare },
-    { name: "상품 Q&A", path: `${adminPathBase}/questions`, icon: MessageSquare },
-    { name: "본 횟수", path: `${adminPathBase}/funnel`, icon: Activity },
-    { name: "전시/배너 관리", path: `${adminPathBase}/display`, icon: LayoutDashboard },
-    { name: "1:1 문의 관리", path: `${adminPathBase}/inquiries`, icon: MessageSquare },
-    { name: "받은 메일", path: `${adminPathBase}/inbox`, icon: Mail },
-    { name: "고객/포인트 관리", path: `${adminPathBase}/customers`, icon: Users },
-    { name: "쿠폰 관리", path: `${adminPathBase}/coupons`, icon: Ticket },
-    { name: "뉴스레터 발송", path: `${adminPathBase}/newsletter`, icon: FileText },
-    { name: "운영 설정", path: `${adminPathBase}/settings`, icon: Settings, requiresAdmin: true },
-    { name: "기록", path: `${adminPathBase}/logs`, icon: Activity, requiresAdmin: true },
-    { name: "관리자 키", path: `${adminPathBase}/keys`, icon: Settings, requiresAdmin: true },
+  const allSidebarLinks: { name: string; path: string; icon: typeof LayoutDashboard; min: "CS" | "OPERATOR" | "ADMIN" }[] = [
+    { name: "대시보드", path: `${adminPathBase}/`, icon: LayoutDashboard, min: "CS" },
+    { name: "오브제 관리", path: `${adminPathBase}/products`, icon: Package, min: "ADMIN" },
+    { name: "주문", path: `${adminPathBase}/orders`, icon: ShoppingBag, min: "OPERATOR" },
+    { name: "정산 관리", path: `${adminPathBase}/settlement`, icon: FileText, min: "ADMIN" },
+    { name: "운송장 일괄등록", path: `${adminPathBase}/fulfillment`, icon: Truck, min: "OPERATOR" },
+    { name: "리뷰 관리", path: `${adminPathBase}/reviews`, icon: MessageSquare, min: "CS" },
+    { name: "상품 Q&A", path: `${adminPathBase}/questions`, icon: MessageSquare, min: "CS" },
+    { name: "본 횟수", path: `${adminPathBase}/funnel`, icon: Activity, min: "ADMIN" },
+    { name: "전시/배너 관리", path: `${adminPathBase}/display`, icon: LayoutDashboard, min: "ADMIN" },
+    { name: "1:1 문의 관리", path: `${adminPathBase}/inquiries`, icon: MessageSquare, min: "CS" },
+    { name: "받은 메일", path: `${adminPathBase}/inbox`, icon: Mail, min: "CS" },
+    { name: "고객/포인트 관리", path: `${adminPathBase}/customers`, icon: Users, min: "OPERATOR" },
+    { name: "쿠폰 관리", path: `${adminPathBase}/coupons`, icon: Ticket, min: "CS" },
+    { name: "뉴스레터 발송", path: `${adminPathBase}/newsletter`, icon: FileText, min: "ADMIN" },
+    { name: "운영 설정", path: `${adminPathBase}/settings`, icon: Settings, min: "ADMIN" },
+    { name: "기록", path: `${adminPathBase}/logs`, icon: Activity, min: "ADMIN" },
+    { name: "관리자 키", path: `${adminPathBase}/keys`, icon: Settings, min: "ADMIN" },
   ];
 
-  const sidebarLinks = allSidebarLinks.filter((link) => {
-    if (link.requiresAdmin && (adminRole === "OPERATOR" || adminRole === "CS")) {
-      return false;
-    }
-    return true;
-  });
+  const sidebarLinks = allSidebarLinks.filter((link) => roleAtLeast(adminRole, link.min));
+  const allow = (min: "CS" | "OPERATOR" | "ADMIN", element: React.ReactNode) =>
+    roleAtLeast(adminRole, min) ? element : <Navigate to={adminPathBase || "/"} replace />;
 
   const badgeFor = (path: string) => {
     if (path.endsWith("/orders")) return badges.orders;
@@ -307,26 +310,22 @@ export default function AdminDashboard() {
       <main className="flex-grow p-4 md:p-8 overflow-x-hidden pt-[72px] md:pt-8">
         <Routes>
           <Route path="/" element={<AdminOverview />} />
-          <Route path="/products" element={<AdminProducts />} />
-          <Route path="/orders" element={<AdminOrders />} />
-          <Route path="/settlement" element={<AdminSettlement />} />
-          <Route path="/fulfillment" element={<AdminFulfillment />} />
+          <Route path="/products" element={allow("ADMIN", <AdminProducts />)} />
+          <Route path="/orders" element={allow("OPERATOR", <AdminOrders />)} />
+          <Route path="/settlement" element={allow("ADMIN", <AdminSettlement />)} />
+          <Route path="/fulfillment" element={allow("OPERATOR", <AdminFulfillment />)} />
           <Route path="/reviews" element={<AdminReviews />} />
           <Route path="/questions" element={<AdminQuestions />} />
-          <Route path="/funnel" element={<AdminFunnel />} />
-          <Route path="/display" element={<AdminDisplay />} />
-          <Route path="/customers" element={<AdminUserPoints adminRole={adminRole} />} />
-          <Route path="/coupons" element={<AdminCoupons />} />
+          <Route path="/funnel" element={allow("ADMIN", <AdminFunnel />)} />
+          <Route path="/display" element={allow("ADMIN", <AdminDisplay />)} />
+          <Route path="/customers" element={allow("OPERATOR", <AdminUserPoints adminRole={adminRole} />)} />
+          <Route path="/coupons" element={<AdminCoupons adminRole={adminRole} />} />
           <Route path="/inquiries" element={<AdminInquiries adminRole={adminRole} />} />
           <Route path="/inbox" element={<AdminInbox />} />
-          <Route path="/newsletter" element={<AdminNewsletter />} />
-          <Route path="/settings" element={<AdminSettings />} />
-          {(adminRole === "MASTER" || adminRole === "ADMIN") && (
-            <>
-              <Route path="/logs" element={<AdminLogs />} />
-              <Route path="/keys" element={<AdminKeys adminRole={adminRole} />} />
-            </>
-          )}
+          <Route path="/newsletter" element={allow("ADMIN", <AdminNewsletter />)} />
+          <Route path="/settings" element={allow("ADMIN", <AdminSettings />)} />
+          <Route path="/logs" element={allow("ADMIN", <AdminLogs />)} />
+          <Route path="/keys" element={allow("ADMIN", <AdminKeys adminRole={adminRole} />)} />
         </Routes>
       </main>
     </div>
@@ -2281,6 +2280,7 @@ function AdminUserPoints({ adminRole }: { adminRole: string }) {
 
   return (
     <div className="space-y-8 animate-in fade-in">
+      {roleAtLeast(adminRole, "ADMIN") && (
       <div className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm">
         <h2 className="text-lg font-bold font-serif mb-4">포인트 넣기·빼기</h2>
         <form onSubmit={handleAdjustPoints} className="grid grid-cols-1 md:grid-cols-4 gap-4">
@@ -2315,6 +2315,7 @@ function AdminUserPoints({ adminRole }: { adminRole: string }) {
           </button>
         </form>
       </div>
+      )}
 
       <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden shadow-sm">
         <table className="w-full text-left text-sm">
@@ -2363,7 +2364,7 @@ function AdminUserPoints({ adminRole }: { adminRole: string }) {
 /* =========================================================
    7. Coupons, Inquiries, Newsletter, Security Keys
 ========================================================= */
-function AdminCoupons() {
+function AdminCoupons({ adminRole }: { adminRole: string }) {
   const [coupons, setCoupons] = useState<any[]>([]);
   const [newCoupon, setNewCoupon] = useState({
     name: "",
@@ -2441,6 +2442,7 @@ function AdminCoupons() {
 
   return (
     <div className="space-y-8 animate-in fade-in">
+      {roleAtLeast(adminRole, "ADMIN") && (
       <form
         onSubmit={handleAdd}
         className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm grid grid-cols-1 md:grid-cols-6 gap-3"
@@ -2508,6 +2510,7 @@ function AdminCoupons() {
           쿠폰 생성
         </button>
       </form>
+      )}
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {coupons.map((c) => (
@@ -2531,10 +2534,13 @@ function AdminCoupons() {
                   <p className="text-xs text-gray-600">최대 할인 {Number(c.max_discount_amount || 0).toLocaleString()}원</p>
                 )}
               </div>
+              {roleAtLeast(adminRole, "ADMIN") && (
               <button onClick={() => handleDelete(c.id)} className="text-gray-400 hover:text-red-500">
                 <Trash2 size={16} />
               </button>
+              )}
             </div>
+            {roleAtLeast(adminRole, "OPERATOR") && (
             <div className="flex items-center justify-between gap-2 pt-2 border-t">
               <button
                 onClick={() => handleGive(c.id, "all")}
@@ -2573,6 +2579,7 @@ function AdminCoupons() {
                 </button>
               </div>
             </div>
+            )}
           </div>
         ))}
       </div>
